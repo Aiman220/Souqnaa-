@@ -1,0 +1,19 @@
+{
+  "Precision@5": 0.2714,
+  "Recall@5": 0.6518,
+  "MAP@5": 0.3533,
+  "NDCG@5": 0.6069,
+  "HitRate@5": 0.9286,
+  "Precision@10": 0.2071,
+  "Recall@10": 0.9226,
+  "MAP@10": 0.4289,
+  "NDCG@10": 0.6229,
+  "HitRate@10": 1.0,
+  "Precision@20": 0.1161,
+  "Recall@20": 1.0,
+  "MAP@20": 0.4493,
+  "NDCG@20": 0.6201,
+  "HitRate@20": 1.0,
+  "Coverage": 100.0,
+  "Diversity": 1.0
+}

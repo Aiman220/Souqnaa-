@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+dist/
+*.tsbuildinfo
+
+# Uploads and temporary data
+uploads/*
+!uploads/.gitkeep
+!uploads/branding/
+!uploads/branding/*
+
+# Logs
+*.log
+npm-debug.log*
+
+# Coverage and testing artifacts
+coverage/
+.nyc_output/

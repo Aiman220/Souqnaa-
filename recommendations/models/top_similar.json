@@ -1,0 +1,4102 @@
+{
+  "prod_001": [
+    {
+      "productId": "prod_006",
+      "similarityScore": 1.0
+    },
+    {
+      "productId": "prod_016",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_011",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_036",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_026",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_021",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_031",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_007",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_008",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_003",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_002",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_010",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_018",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_015",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_012",
+      "similarityScore": 0.3167
+    }
+  ],
+  "prod_002": [
+    {
+      "productId": "prod_007",
+      "similarityScore": 1.0
+    },
+    {
+      "productId": "prod_017",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_012",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_037",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_027",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_022",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_032",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_003",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_006",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_008",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_001",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_018",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_011",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_015",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_016",
+      "similarityScore": 0.3167
+    }
+  ],
+  "prod_003": [
+    {
+      "productId": "prod_008",
+      "similarityScore": 1.0
+    },
+    {
+      "productId": "prod_018",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_013",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_023",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_028",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_038",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_002",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_007",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_001",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_006",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_010",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_014",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_016",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_015",
+      "similarityScore": 0.3167
+    }
+  ],
+  "prod_004": [
+    {
+      "productId": "prod_009",
+      "similarityScore": 1.0
+    },
+    {
+      "productId": "prod_014",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_039",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_019",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_024",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_029",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_002",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_003",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_007",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_008",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_001",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_006",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_010",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_017",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_016",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_015",
+      "similarityScore": 0.3167
+    }
+  ],
+  "prod_005": [
+    {
+      "productId": "prod_015",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_010",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_035",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_040",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_020",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_025",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_030",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_002",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_007",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_003",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_001",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_006",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_008",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_012",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_016",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_011",
+      "similarityScore": 0.3167
+    }
+  ],
+  "prod_006": [
+    {
+      "productId": "prod_001",
+      "similarityScore": 1.0
+    },
+    {
+      "productId": "prod_016",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_011",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_036",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_026",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_021",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_031",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_007",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_008",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_002",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_003",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_010",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_018",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_015",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_012",
+      "similarityScore": 0.3167
+    }
+  ],
+  "prod_007": [
+    {
+      "productId": "prod_002",
+      "similarityScore": 1.0
+    },
+    {
+      "productId": "prod_017",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_012",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_037",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_027",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_022",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_032",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_008",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_001",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_006",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_003",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_018",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_011",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_015",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_016",
+      "similarityScore": 0.3167
+    }
+  ],
+  "prod_008": [
+    {
+      "productId": "prod_003",
+      "similarityScore": 1.0
+    },
+    {
+      "productId": "prod_018",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_013",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_023",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_028",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_038",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_006",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_007",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_002",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_001",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_010",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_014",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_016",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_015",
+      "similarityScore": 0.3167
+    }
+  ],
+  "prod_009": [
+    {
+      "productId": "prod_004",
+      "similarityScore": 1.0
+    },
+    {
+      "productId": "prod_014",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_039",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_019",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_024",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_029",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_003",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_007",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_002",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_008",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_001",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_006",
+      "similarityScore": 0.5
+    },
+    {
+      "productId": "prod_011",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_017",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_016",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_015",
+      "similarityScore": 0.3167
+    }
+  ],
+  "prod_010": [
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_015",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_035",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_040",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_020",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_025",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_030",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_003",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_006",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_008",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_001",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_002",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_007",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_016",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_012",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_014",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_011": [
+    {
+      "productId": "prod_001",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_006",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_016",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_036",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_026",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_021",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_031",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_008",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_007",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_002",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_003",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_015",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_018",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_012",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_014",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_012": [
+    {
+      "productId": "prod_002",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_007",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_017",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_037",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_027",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_022",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_032",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_003",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_006",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_001",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_008",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_018",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_015",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_016",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_014",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_013": [
+    {
+      "productId": "prod_003",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_008",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_018",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_023",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_028",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_038",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_007",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_002",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_001",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_006",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_012",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_010",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_016",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_014",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_014": [
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_039",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_019",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_024",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_029",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_003",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_007",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_002",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_008",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_001",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_006",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_012",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_017",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_016",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_013",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_015": [
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_010",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_035",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_040",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_020",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_025",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_030",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_003",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_006",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_008",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_001",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_002",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_007",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_014",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_013",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_016",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_016": [
+    {
+      "productId": "prod_001",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_006",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_011",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_036",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_026",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_021",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_031",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_008",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_007",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_002",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_003",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_014",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_018",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_013",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_015",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_017": [
+    {
+      "productId": "prod_002",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_007",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_012",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_037",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_027",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_022",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_032",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_008",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_006",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_001",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_003",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_010",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_011",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_015",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_016",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_018": [
+    {
+      "productId": "prod_003",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_008",
+      "similarityScore": 0.8167
+    },
+    {
+      "productId": "prod_013",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_023",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_028",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_038",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_007",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_006",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_002",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_001",
+      "similarityScore": 0.3167
+    },
+    {
+      "productId": "prod_010",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_011",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_012",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_015",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_019": [
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_039",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_024",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_029",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_014",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_038",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_035",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_020": [
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_035",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_040",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_025",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_030",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_015",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_010",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_038",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_021": [
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_036",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_031",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_026",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_006",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_001",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_011",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_016",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_040",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_022": [
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_037",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_032",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_027",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_007",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_002",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_017",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_012",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_040",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_023": [
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_038",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_028",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_003",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_008",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_018",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_013",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_039",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_035",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_024": [
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_039",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_019",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_029",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_014",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_038",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_035",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_025": [
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_035",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_040",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_020",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_030",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_015",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_010",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_038",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_026": [
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_036",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_031",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_021",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_006",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_001",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_011",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_016",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_040",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_027": [
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_037",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_032",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_022",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_007",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_002",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_017",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_012",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_040",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_028": [
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_038",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_023",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_003",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_008",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_018",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_013",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_039",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_035",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_029": [
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_039",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_024",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_019",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_014",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_038",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_035",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_030": [
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_035",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_040",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_020",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_025",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_015",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_010",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_038",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_031": [
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_036",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_026",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_021",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_006",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_001",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_011",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_016",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_040",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_032": [
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_037",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_027",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_022",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_007",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_002",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_017",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_012",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_040",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_033": [
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_038",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_028",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_023",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_008",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_003",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_018",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_013",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_040",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_020",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_034": [
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_039",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_019",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_024",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_029",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_014",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_040",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_020",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_035": [
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_040",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_020",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_025",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_030",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_015",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_010",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_039",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_019",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_036": [
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_026",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_021",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_031",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_001",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_006",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_016",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_011",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_040",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_019",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_037": [
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_027",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_022",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_032",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_002",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_007",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_012",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_017",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_040",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_020",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_038": [
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_028",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_023",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_008",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_003",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_018",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_013",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_040",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_020",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_039": [
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_019",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_024",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_029",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_014",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_040",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_020",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_040": [
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_035",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_020",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_025",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_030",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_015",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_010",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_039",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_019",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_041": [
+    {
+      "productId": "prod_036",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_026",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_021",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_031",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_001",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_006",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_016",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_011",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_037",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_019",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_042": [
+    {
+      "productId": "prod_037",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_027",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_022",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_032",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_002",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_007",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_012",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_017",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_036",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_020",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_043": [
+    {
+      "productId": "prod_038",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_028",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_023",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_008",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_003",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_018",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_013",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_037",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_020",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_044": [
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_039",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_019",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_024",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_029",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_014",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_037",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_020",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_045": [
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_035",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_040",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_020",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_025",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_030",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_015",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_010",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_037",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_019",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_046": [
+    {
+      "productId": "prod_036",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_026",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_021",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_031",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_001",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_006",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_016",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_011",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_037",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_019",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_047": [
+    {
+      "productId": "prod_037",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_027",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_022",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_032",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_002",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_007",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_012",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_017",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_036",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_020",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_048": [
+    {
+      "productId": "prod_038",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_028",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_023",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_008",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_003",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_018",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_013",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_037",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_020",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_049": [
+    {
+      "productId": "prod_039",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_034",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_019",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_024",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_029",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_009",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_004",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_014",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_050",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_037",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_020",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    }
+  ],
+  "prod_050": [
+    {
+      "productId": "prod_040",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_045",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_035",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_020",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_025",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_030",
+      "similarityScore": 0.7678
+    },
+    {
+      "productId": "prod_005",
+      "similarityScore": 0.5667
+    },
+    {
+      "productId": "prod_015",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_010",
+      "similarityScore": 0.5178
+    },
+    {
+      "productId": "prod_049",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_037",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_042",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_041",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_048",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_044",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_043",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_047",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_046",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_019",
+      "similarityScore": 0.2678
+    },
+    {
+      "productId": "prod_033",
+      "similarityScore": 0.2678
+    }
+  ]
+}

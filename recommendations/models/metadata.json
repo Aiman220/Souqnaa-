@@ -1,0 +1,14 @@
+{
+  "modelVersion": "model_v1",
+  "algorithm": "LIGHTFM_WARP_HYBRID",
+  "trainedAt": "2026-09-26T23:02:22.552357",
+  "num_users": 30,
+  "num_items": 50,
+  "parameters": {
+    "no_components": 32,
+    "loss": "warp",
+    "learning_rate": 0.03,
+    "regularization": 0.01,
+    "epochs": 25
+  }
+}
