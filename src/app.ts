@@ -240,6 +240,21 @@ export const createApp = (): Application => {
     res.redirect(301, `${config.apiPrefix}/storage/file/${fileKey}`);
   });
 
+  // Root welcome & API status
+  app.get('/', (req: Request, res: Response) => {
+    res.json({
+      success: true,
+      service: 'سوقناا Backend API',
+      status: 'online',
+      version: '1.0.0',
+      endpoints: {
+        health: '/health',
+        readiness: '/ready',
+        api: config.apiPrefix,
+      },
+    });
+  });
+
   // Health check
   app.get('/health', (req: Request, res: Response) => {
     res.json({
