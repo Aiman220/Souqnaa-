@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../../database/prisma';
 import { ResponseUtil } from '../../utils/response.util';
 import { formatProductForClient, formatProductsForClient } from '../../utils/product-formatter.util';
+import { storageService } from '../../services/storage/storage.service';
 
 const router = Router();
 
@@ -123,13 +124,24 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     const featuredProducts = formatProductsForClient(rawFeaturedProducts);
     const bestSellers = formatProductsForClient(rawBestSellers);
 
+    const normalizedBanners = banners.map((b) => ({
+      ...b,
+      imageUrl: storageService.normalizeUrl(b.imageUrl),
+    }));
+
+    const normalizedStores = featuredStores.map((s) => ({
+      ...s,
+      logo: s.logo ? storageService.normalizeUrl(s.logo) : null,
+      cover: s.cover ? storageService.normalizeUrl(s.cover) : null,
+    }));
+
     ResponseUtil.success(res, {
-      banners,
+      banners: normalizedBanners,
       categories,
       flashSales: formattedFlashSales,
       featuredProducts,
       bestSellers,
-      featuredStores,
+      featuredStores: normalizedStores,
       promotions,
     });
   } catch (error) {

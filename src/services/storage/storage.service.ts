@@ -25,20 +25,9 @@ export interface IStorageService {
 class CloudflareR2StorageService implements IStorageService {
   private s3: S3Client;
   private bucket: string;
-  private publicUrl: string;
 
   constructor() {
     this.bucket = config.storage.s3.bucket || 'sogana';
-    
-    // If publicUrl is the private S3 API endpoint (*.r2.cloudflarestorage.com),
-    // we route through the backend streaming endpoint so browsers & apps can access files publicly
-    const rawPublicUrl = config.storage.s3.publicUrl || '';
-    if (rawPublicUrl && !rawPublicUrl.includes('r2.cloudflarestorage.com')) {
-      this.publicUrl = rawPublicUrl.replace(/\/+$/, '');
-    } else {
-      const port = config.port || 3000;
-      this.publicUrl = `http://localhost:${port}${config.apiPrefix}/storage/file`;
-    }
 
     this.s3 = new S3Client({
       region: config.storage.s3.region || 'auto',
@@ -51,21 +40,61 @@ class CloudflareR2StorageService implements IStorageService {
     });
   }
 
+  private resolveBaseUrl(): string {
+    const rawPublicUrl = config.storage.s3.publicUrl || '';
+    if (rawPublicUrl && !rawPublicUrl.includes('r2.cloudflarestorage.com')) {
+      return rawPublicUrl.replace(/\/+$/, '');
+    }
+
+    const serverBase =
+      process.env.RENDER_EXTERNAL_URL ||
+      process.env.BACKEND_PUBLIC_URL ||
+      process.env.API_BASE_URL ||
+      (config.domains?.backendPublicUrl && !config.domains.backendPublicUrl.includes('souqnaa.com') ? config.domains.backendPublicUrl : '') ||
+      `http://localhost:${config.port || 3000}`;
+
+    return `${serverBase.replace(/\/+$/, '')}${config.apiPrefix}/storage/file`;
+  }
+
   getPublicUrl(key: string): string {
     const cleanKey = key.replace(/^\/+/, '');
-    return `${this.publicUrl}/${cleanKey}`;
+    return `${this.resolveBaseUrl()}/${cleanKey}`;
   }
 
   normalizeUrl(rawUrl: string | null | undefined): string {
     if (!rawUrl) return '';
-    // If rawUrl is a private R2 endpoint, convert to public streaming URL
-    if (rawUrl.includes('r2.cloudflarestorage.com')) {
-      const match = rawUrl.match(/r2\.cloudflarestorage\.com\/[^/]+\/(.+)$/);
+    const trimmed = rawUrl.trim();
+
+    // 1. If rawUrl is a private R2 endpoint, convert to public streaming URL
+    if (trimmed.includes('r2.cloudflarestorage.com')) {
+      const match = trimmed.match(/r2\.cloudflarestorage\.com\/[^/]+\/(.+)$/);
       if (match && match[1]) {
         return this.getPublicUrl(match[1]);
       }
     }
-    return rawUrl;
+
+    // 2. If rawUrl contains localhost, 127.0.0.1, or 10.0.2.2 on deployed server (e.g. Render)
+    if (
+      (trimmed.includes('localhost') || trimmed.includes('127.0.0.1') || trimmed.includes('10.0.2.2')) &&
+      (process.env.RENDER_EXTERNAL_URL || process.env.BACKEND_PUBLIC_URL || process.env.NODE_ENV === 'production')
+    ) {
+      const filePart = trimmed.match(/\/(api\/v1\/)?storage\/file\/(.+)$/);
+      if (filePart && filePart[2]) {
+        return this.getPublicUrl(filePart[2]);
+      }
+    }
+
+    // 3. If it's a relative path starting with /api/v1/storage/file or /storage/file
+    if (trimmed.startsWith('/api/v1/storage/file/')) {
+      const cleanKey = trimmed.replace('/api/v1/storage/file/', '');
+      return this.getPublicUrl(cleanKey);
+    }
+    if (trimmed.startsWith('/storage/file/')) {
+      const cleanKey = trimmed.replace('/storage/file/', '');
+      return this.getPublicUrl(cleanKey);
+    }
+
+    return trimmed;
   }
 
   async uploadFile(file: Express.Multer.File, folder = 'general'): Promise<UploadResult> {

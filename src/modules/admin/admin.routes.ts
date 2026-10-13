@@ -4,6 +4,7 @@ import { authenticate } from '../../middleware/auth.middleware';
 import { requireAdmin, requirePermission } from '../../middleware/rbac.middleware';
 import { ResponseUtil } from '../../utils/response.util';
 import { AppError } from '../../middleware/error.middleware';
+import { storageService } from '../../services/storage/storage.service';
 import bcrypt from 'bcryptjs';
 import {
   SellerStatus,
@@ -4419,7 +4420,11 @@ router.delete('/promotions/flash-sales/:id/products/:productId', async (req: Req
 router.get('/promotions/banners', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const banners = await prisma.banner.findMany({ orderBy: { sortOrder: 'asc' } });
-    ResponseUtil.success(res, banners);
+    const normalized = banners.map((b) => ({
+      ...b,
+      imageUrl: storageService.normalizeUrl(b.imageUrl),
+    }));
+    ResponseUtil.success(res, normalized);
   } catch (error) {
     next(error);
   }
@@ -4430,11 +4435,12 @@ router.post('/promotions/banners', async (req: Request, res: Response, next: Nex
     const { titleAr, titleEn, imageUrl, targetType, targetId, sortOrder, isActive } = req.body;
     if (!imageUrl) throw new AppError('رابط صورة البانر مطلوب', 400);
 
+    const cleanImageUrl = storageService.normalizeUrl(imageUrl);
     const banner = await prisma.banner.create({
       data: {
         titleAr: titleAr || null,
         titleEn: titleEn || null,
-        imageUrl,
+        imageUrl: cleanImageUrl,
         targetType: targetType || 'url',
         targetId: targetId || null,
         sortOrder: sortOrder !== undefined ? parseInt(sortOrder) : 0,
@@ -4442,8 +4448,8 @@ router.post('/promotions/banners', async (req: Request, res: Response, next: Nex
       },
     });
 
-    await logAdminAction(req.user?.userId, 'BANNER_CREATED', 'promotions', { id: banner.id, imageUrl }, req);
-    ResponseUtil.created(res, banner, 'تم إنشاء البانر بنجاح');
+    await logAdminAction(req.user?.userId, 'BANNER_CREATED', 'promotions', { id: banner.id, imageUrl: cleanImageUrl }, req);
+    ResponseUtil.created(res, { ...banner, imageUrl: storageService.normalizeUrl(banner.imageUrl) }, 'تم إنشاء البانر بنجاح');
   } catch (error) {
     next(error);
   }
@@ -4453,13 +4459,14 @@ router.put('/promotions/banners/:id', async (req: Request, res: Response, next: 
   try {
     const id = String(req.params.id);
     const { titleAr, titleEn, imageUrl, targetType, targetId, sortOrder, isActive } = req.body;
+    const cleanImageUrl = imageUrl !== undefined ? storageService.normalizeUrl(imageUrl) : undefined;
 
     const banner = await prisma.banner.update({
       where: { id },
       data: {
         titleAr: titleAr !== undefined ? titleAr : undefined,
         titleEn: titleEn !== undefined ? titleEn : undefined,
-        imageUrl: imageUrl || undefined,
+        imageUrl: cleanImageUrl,
         targetType: targetType || undefined,
         targetId: targetId !== undefined ? targetId : undefined,
         sortOrder: sortOrder !== undefined ? parseInt(sortOrder) : undefined,
@@ -4468,7 +4475,7 @@ router.put('/promotions/banners/:id', async (req: Request, res: Response, next: 
     });
 
     await logAdminAction(req.user?.userId, 'BANNER_UPDATED', 'promotions', { id }, req);
-    ResponseUtil.success(res, banner, 'تم تحديث البانر بنجاح');
+    ResponseUtil.success(res, { ...banner, imageUrl: storageService.normalizeUrl(banner.imageUrl) }, 'تم تحديث البانر بنجاح');
   } catch (error) {
     next(error);
   }

@@ -3,6 +3,7 @@ import { prisma } from '../../database/prisma';
 import { ResponseUtil } from '../../utils/response.util';
 import { AppError } from '../../middleware/error.middleware';
 import { authenticate, authorize } from '../../middleware/auth.middleware';
+import { storageService } from '../../services/storage/storage.service';
 import firstOrderShippingRouter from './routes/first-order-shipping.routes';
 import universalShippingRouter from './routes/universal-shipping-promotion.routes';
 
@@ -96,7 +97,11 @@ router.get('/banners', async (req: Request, res: Response, next: NextFunction) =
       where: { isActive: true },
       orderBy: { sortOrder: 'asc' },
     });
-    ResponseUtil.success(res, banners);
+    const normalized = banners.map((b) => ({
+      ...b,
+      imageUrl: storageService.normalizeUrl(b.imageUrl),
+    }));
+    ResponseUtil.success(res, normalized);
   } catch (error) {
     next(error);
   }
@@ -136,7 +141,11 @@ adminPromotionRouter.get('/banners', async (req: Request, res: Response, next: N
     const banners = await prisma.banner.findMany({
       orderBy: { sortOrder: 'asc' },
     });
-    ResponseUtil.success(res, banners);
+    const normalized = banners.map((b) => ({
+      ...b,
+      imageUrl: storageService.normalizeUrl(b.imageUrl),
+    }));
+    ResponseUtil.success(res, normalized);
   } catch (error) {
     next(error);
   }
@@ -146,18 +155,19 @@ adminPromotionRouter.get('/banners', async (req: Request, res: Response, next: N
 adminPromotionRouter.post('/banners', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { titleAr, titleEn, imageUrl, targetType, targetId, sortOrder, isActive } = req.body;
+    const cleanImageUrl = storageService.normalizeUrl(imageUrl || '');
     const banner = await prisma.banner.create({
       data: {
         titleAr: titleAr || '',
         titleEn: titleEn || null,
-        imageUrl: imageUrl || '',
+        imageUrl: cleanImageUrl,
         targetType: targetType || 'url',
         targetId: targetId || null,
         sortOrder: sortOrder ?? 0,
         isActive: isActive !== false,
       },
     });
-    ResponseUtil.created(res, banner, 'تم إنشاء البانر بنجاح');
+    ResponseUtil.created(res, { ...banner, imageUrl: storageService.normalizeUrl(banner.imageUrl) }, 'تم إنشاء البانر بنجاح');
   } catch (error) {
     next(error);
   }
@@ -167,19 +177,20 @@ adminPromotionRouter.post('/banners', async (req: Request, res: Response, next: 
 adminPromotionRouter.put('/banners/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { titleAr, titleEn, imageUrl, targetType, targetId, sortOrder, isActive } = req.body;
+    const cleanImageUrl = imageUrl !== undefined ? storageService.normalizeUrl(imageUrl) : undefined;
     const banner = await prisma.banner.update({
       where: { id: String(req.params.id) },
       data: {
         ...(titleAr !== undefined && { titleAr }),
         ...(titleEn !== undefined && { titleEn }),
-        ...(imageUrl !== undefined && { imageUrl }),
+        ...(cleanImageUrl !== undefined && { imageUrl: cleanImageUrl }),
         ...(targetType !== undefined && { targetType }),
         ...(targetId !== undefined && { targetId }),
         ...(sortOrder !== undefined && { sortOrder }),
         ...(isActive !== undefined && { isActive }),
       },
     });
-    ResponseUtil.success(res, banner, 'تم تعديل البانر بنجاح');
+    ResponseUtil.success(res, { ...banner, imageUrl: storageService.normalizeUrl(banner.imageUrl) }, 'تم تعديل البانر بنجاح');
   } catch (error) {
     next(error);
   }
