@@ -76,7 +76,7 @@ export class FcmPushProvider implements NotificationProvider {
           channelId,
           sound: isUrgent ? 'urgent_alert.mp3' : 'default',
           clickAction: 'FLUTTER_NOTIFICATION_CLICK',
-          icon: 'ic_stat_souqna',
+          icon: '@mipmap/ic_launcher',
           color: '#10B981', // Brand color
         },
       },

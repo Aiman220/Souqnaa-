@@ -971,7 +971,7 @@ export class SellerOrderPrintService {
       <div class="brand-section">
         ${souqnaLogoHtml}
         <div class="brand-meta">
-          <div class="brand-title">سوقناا • SOUQNAA</div>
+          <div class="brand-title">سوقناا</div>
           <div class="brand-tagline">منصة التجارة والتسوق الإلكتروني الرائدة</div>
           <div class="official-badge">✓ وثيقة شراء ومبيعات رسمية</div>
         </div>
