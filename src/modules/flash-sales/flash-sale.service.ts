@@ -665,7 +665,7 @@ export class FlashSaleService {
       soldStock: number;
       remainingStock: number;
     }>>`
-      UPDATE "souqna"."FlashSaleItem"
+      UPDATE "FlashSaleItem"
       SET 
         "reservedStock" = "reservedStock" + ${quantity},
         "remainingStock" = "allocatedStock" - ("reservedStock" + ${quantity}) - "soldStock",
@@ -749,11 +749,11 @@ export class FlashSaleService {
 
       // 2. Atomic release of reserved stock back to available pool
       await tx.$executeRaw`
-        UPDATE "souqna"."FlashSaleItem"
+        UPDATE "FlashSaleItem"
         SET 
           "reservedStock" = GREATEST(0, "reservedStock" - ${reservation.quantity}),
           "remainingStock" = "allocatedStock" - GREATEST(0, "reservedStock" - ${reservation.quantity}) - "soldStock",
-          "status" = CASE WHEN "status" = 'SOLD_OUT' THEN 'ACTIVE'::"souqna"."FlashSaleItemStatus" ELSE "status" END,
+          "status" = CASE WHEN "status" = 'SOLD_OUT' THEN 'ACTIVE'::"FlashSaleItemStatus" ELSE "status" END,
           "updatedAt" = NOW()
         WHERE "id" = ${reservation.flashSaleItemId};
       `;
@@ -787,14 +787,14 @@ export class FlashSaleService {
 
       // 2. Atomic conversion: decrement reservedStock, increment soldStock
       await tx.$executeRaw`
-        UPDATE "souqna"."FlashSaleItem"
+        UPDATE "FlashSaleItem"
         SET 
           "reservedStock" = GREATEST(0, "reservedStock" - ${reservation.quantity}),
           "soldStock" = "soldStock" + ${reservation.quantity},
           "remainingStock" = "allocatedStock" - GREATEST(0, "reservedStock" - ${reservation.quantity}) - ("soldStock" + ${reservation.quantity}),
           "status" = CASE 
             WHEN ("allocatedStock" - GREATEST(0, "reservedStock" - ${reservation.quantity}) - ("soldStock" + ${reservation.quantity})) <= 0 
-            THEN 'SOLD_OUT'::"souqna"."FlashSaleItemStatus" 
+            THEN 'SOLD_OUT'::"FlashSaleItemStatus" 
             ELSE "status" 
           END,
           "updatedAt" = NOW()

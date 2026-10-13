@@ -219,7 +219,7 @@ export class FirstOrderPromotionReservationService {
         originalShippingAmount: params.calculation.originalShippingAmount,
         discountAmount: params.calculation.shippingPromotionDiscount,
         platformSubsidy: params.calculation.platformShippingSubsidy,
-        sellerShippingContribution: params.calculation.sellerShippingContribution,
+        sellerContribution: params.calculation.sellerShippingContribution,
         sellerDeliveryReimbursement: params.calculation.sellerDeliveryReimbursement,
         status: 'CONSUMED',
         consumedAt: new Date(),

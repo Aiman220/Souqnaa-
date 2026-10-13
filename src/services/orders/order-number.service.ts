@@ -21,9 +21,9 @@ export class OrderNumberService {
    */
   public static async initSequence(): Promise<void> {
     try {
-      // 1. Create native PostgreSQL sequence if it doesn't exist
+      // 1. Create native PostgreSQL sequence if it doesn't exist (schema-agnostic in search_path)
       await prisma.$executeRawUnsafe(`
-        CREATE SEQUENCE IF NOT EXISTS "souqna"."order_number_seq"
+        CREATE SEQUENCE IF NOT EXISTS "order_number_seq"
         START WITH 1
         INCREMENT BY 1
         MINVALUE 1
@@ -32,14 +32,14 @@ export class OrderNumberService {
 
       // 2. Query maximum orderSequence currently in the Order table
       const maxSeqResult: any = await prisma.$queryRawUnsafe(`
-        SELECT COALESCE(MAX("orderSequence"), 0) AS max_seq FROM "souqna"."Order";
+        SELECT COALESCE(MAX("orderSequence"), 0) AS max_seq FROM "Order";
       `);
       const maxSeq = Number(maxSeqResult?.[0]?.max_seq ?? 0);
 
       // 3. Set the sequence value to maxSeq if sequence is lower than maxSeq
       if (maxSeq > 0) {
         await prisma.$executeRawUnsafe(`
-          SELECT setval('"souqna"."order_number_seq"', ${maxSeq}, true);
+          SELECT setval('order_number_seq', ${maxSeq}, true);
         `);
       }
 
@@ -65,7 +65,7 @@ export class OrderNumberService {
     try {
       // Primary: Native PostgreSQL sequence (atomic, collision-free, non-blocking)
       const res: any = await prisma.$queryRawUnsafe(`
-        SELECT nextval('"souqna"."order_number_seq"') AS seq;
+        SELECT nextval('order_number_seq') AS seq;
       `);
       const seq = Number(res?.[0]?.seq);
       if (seq && !isNaN(seq) && seq > 0) {
@@ -77,7 +77,7 @@ export class OrderNumberService {
         await this.initSequence();
         try {
           const res: any = await prisma.$queryRawUnsafe(`
-            SELECT nextval('"souqna"."order_number_seq"') AS seq;
+            SELECT nextval('order_number_seq') AS seq;
           `);
           const seq = Number(res?.[0]?.seq);
           if (seq && !isNaN(seq) && seq > 0) {
@@ -87,16 +87,14 @@ export class OrderNumberService {
       }
     }
 
-    // Secondary atomic fallback: OrderCounter table with row-level atomic increment
+    // Secondary atomic fallback: OrderCounter table via Prisma native atomic increment
     try {
-      const updatedCounter: any = await prisma.$queryRawUnsafe(`
-        INSERT INTO "souqna"."OrderCounter" ("name", "value", "updatedAt")
-        VALUES ('order_number', 1, NOW())
-        ON CONFLICT ("name")
-        DO UPDATE SET "value" = "souqna"."OrderCounter"."value" + 1, "updatedAt" = NOW()
-        RETURNING "value";
-      `);
-      const val = Number(updatedCounter?.[0]?.value);
+      const updatedCounter = await prisma.orderCounter.upsert({
+        where: { name: 'order_number' },
+        update: { value: { increment: 1 } },
+        create: { name: 'order_number', value: BigInt(1) },
+      });
+      const val = Number(updatedCounter.value);
       if (val && !isNaN(val) && val > 0) {
         return val;
       }
