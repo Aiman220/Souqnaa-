@@ -21,6 +21,8 @@ export class FcmPushProvider implements NotificationProvider {
         return 'souqna_orders_channel';
       case 'PAYMENT':
         return 'souqna_payments_channel';
+      case 'REFUND':
+        return 'souqna_refunds_channel';
       case 'CHAT':
         return 'souqna_chat_channel';
       case 'PROMOTION':
@@ -74,9 +76,9 @@ export class FcmPushProvider implements NotificationProvider {
         priority: isHigh ? 'high' : 'normal',
         notification: {
           channelId,
-          sound: isUrgent ? 'urgent_alert.mp3' : 'default',
+          sound: 'default',
           clickAction: 'FLUTTER_NOTIFICATION_CLICK',
-          icon: '@mipmap/ic_launcher',
+          icon: 'ic_notification',
           color: '#10B981', // Brand color
         },
       },
@@ -91,7 +93,7 @@ export class FcmPushProvider implements NotificationProvider {
               body: params.content.bodyAr,
             },
             badge: 1,
-            sound: isUrgent ? 'urgent_alert.caf' : 'default',
+            sound: 'default',
             category: params.category,
           },
         },

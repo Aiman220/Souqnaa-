@@ -96,7 +96,7 @@ export const DEFAULT_MEMBERSHIP_TIERS = [
   },
   {
     code: 'PREMIUM',
-    nameAr: 'عضو فضي (Premium)',
+    nameAr: 'عضو فضي',
     nameEn: 'Premium Member',
     descriptionAr: 'عضوية متقدمة للمتسوقين المنتظمين بـ 7 طلبات أو 60,000 ريال سنوي',
     descriptionEn: 'Advanced tier for regular shoppers with 7 orders or 60,000 YER spend',

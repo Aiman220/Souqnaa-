@@ -1137,9 +1137,22 @@ export class RefundService {
    * Adjusts seller settlement, platform commission reversal, and liabilities.
    */
   private static async adjustSellerSettlement(refund: any, approvedAmount: number, tx: any) {
-    const sellerBalance = await tx.sellerBalance.findUnique({
+    let sellerBalance = await tx.sellerBalance.findUnique({
       where: { sellerId: refund.sellerId },
     });
+
+    if (!sellerBalance) {
+      sellerBalance = await tx.sellerBalance.create({
+        data: {
+          sellerId: refund.sellerId,
+          availableBalance: 0,
+          pendingBalance: 0,
+          withdrawnBalance: 0,
+          outstandingCommission: 0,
+          currency: refund.currency || 'YER',
+        },
+      });
+    }
 
     const commissionRate = 0.10; // 10%
     const commissionReversal = parseFloat((approvedAmount * commissionRate).toFixed(2));
@@ -1159,13 +1172,15 @@ export class RefundService {
     const orderRef = orderRecord?.orderNumber || refund.orderId;
     const sellerOrderRef = sellerOrderRecord?.sellerOrderNumber || (refund.sellerOrderId || '');
 
-    if (sellerBalance) {
-      const newAvailable = sellerBalance.availableBalance - sellerNetDebit;
+    const currentAvailable = Number(sellerBalance.availableBalance || 0);
 
+    if (currentAvailable >= sellerNetDebit) {
+      // 1. Seller has sufficient balance -> Deduct in full
+      const newAvailable = parseFloat((currentAvailable - sellerNetDebit).toFixed(2));
       await tx.sellerBalance.update({
         where: { sellerId: refund.sellerId },
         data: {
-          availableBalance: Math.max(0, newAvailable),
+          availableBalance: newAvailable,
         },
       });
 
@@ -1175,7 +1190,67 @@ export class RefundService {
           amount: -sellerNetDebit,
           type: TransactionType.REFUND,
           referenceId: refund.id,
-          description: `خصم استرجاع - الطلب: ${orderRef}${sellerOrderRef ? ` | طلب المتجر: ${sellerOrderRef}` : ''} (مرجع: ${refund.refundNumber})`,
+          description: `خصم استرجاع من رصيد المحفظة - الطلب: ${orderRef}${sellerOrderRef ? ` | طلب المتجر: ${sellerOrderRef}` : ''} (مرجع: ${refund.refundNumber})`,
+        },
+      });
+    } else {
+      // 2. Seller has insufficient or zero balance -> Deduct available portion down to 0 & Record Outstanding Payment
+      const availableDeduction = Math.max(0, currentAvailable);
+      const outstandingDebt = parseFloat((sellerNetDebit - availableDeduction).toFixed(2));
+
+      await tx.sellerBalance.update({
+        where: { sellerId: refund.sellerId },
+        data: {
+          availableBalance: 0,
+          outstandingCommission: { increment: outstandingDebt },
+        },
+      });
+
+      if (availableDeduction > 0) {
+        await tx.sellerTransaction.create({
+          data: {
+            sellerBalanceId: sellerBalance.id,
+            amount: -availableDeduction,
+            type: TransactionType.REFUND,
+            referenceId: refund.id,
+            description: `خصم استرجاع جزئي من الرصيد المتاح - الطلب: ${orderRef} (مرجع: ${refund.refundNumber})`,
+          },
+        });
+      }
+
+      // Record official Outstanding Payment (Liability) for the seller
+      await tx.sellerOutstanding.create({
+        data: {
+          sellerId: refund.sellerId,
+          sourceType: 'REFUND_LIABILITY',
+          sourceReference: orderRef,
+          amount: outstandingDebt,
+          paidAmount: 0,
+          remainingAmount: outstandingDebt,
+          currency: refund.currency || 'YER',
+          status: 'OPEN',
+          warningLevel: 'NORMAL',
+          metadata: JSON.stringify({
+            refundId: refund.id,
+            refundNumber: refund.refundNumber,
+            orderNumber: orderRef,
+            sellerOrderNumber: sellerOrderRef,
+            approvedAmount,
+            sellerNetDebit,
+            coveredFromBalance: availableDeduction,
+            outstandingDebt,
+            createdAt: new Date().toISOString(),
+          }),
+        },
+      });
+
+      await tx.sellerTransaction.create({
+        data: {
+          sellerBalanceId: sellerBalance.id,
+          amount: -outstandingDebt,
+          type: TransactionType.OUTSTANDING_PAYMENT,
+          referenceId: refund.id,
+          description: `مديونية مستحقة معلقة (استرجاع طلب) - الطلب: ${orderRef}${sellerOrderRef ? ` | طلب المتجر: ${sellerOrderRef}` : ''} (مرجع: ${refund.refundNumber})`,
         },
       });
     }

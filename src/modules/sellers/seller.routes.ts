@@ -25,6 +25,7 @@ import { SellerOrderPrintService, PrintDocumentType, PrintFormat } from '../../s
 import { remoteConfigService } from '../remote-config/remote-config.service';
 import { AnalyticsCacheService } from '../analytics/services/analytics-cache.service';
 import { SellerFinancialRiskService } from '../commission/seller-financial-risk.service';
+import { RefundService } from '../refunds/services/refund.service';
 
 const router = Router();
 router.use(authenticate, requireSeller);
@@ -2223,6 +2224,29 @@ router.post(['/me/returns/:id/approve', '/me/orders/:id/approve-return'], async 
       reason: returnReq?.reason || 'موافقة المتجر على طلب الإرجاع',
       note: 'تمت الموافقة على طلب الإرجاع من قبل المتجر',
     });
+
+    // Check if there is an associated RefundRequest to accept and settle financially
+    try {
+      const activeRefund = await prisma.refundRequest.findFirst({
+        where: {
+          OR: [
+            { sellerOrderId },
+            { orderId: result.sellerOrder.orderId },
+          ],
+          status: { in: [RefundStatus.UNDER_SELLER_REVIEW, RefundStatus.REQUESTED, RefundStatus.SELLER_REVIEW, RefundStatus.SUBMITTED] },
+        },
+      });
+
+      if (activeRefund) {
+        await RefundService.sellerAccept(
+          activeRefund.id,
+          req.user!.userId,
+          returnReq?.reason || 'موافقة المتجر على طلب الإرجاع'
+        );
+      }
+    } catch (refErr) {
+      console.error('[SellerReturnAccept] Error auto-processing refund request:', refErr);
+    }
 
     try {
       SocketService.get()?.emitGlobal('order:return_approved', {

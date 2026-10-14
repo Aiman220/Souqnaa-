@@ -1774,7 +1774,7 @@ router.get('/summary', async (req: Request, res: Response, next: NextFunction) =
       // TO_REVIEW
       if (isToReview) {
         totals['TO_REVIEW']++;
-        if (isOrderUnread) unreads['TO_REVIEW']++;
+        unreads['TO_REVIEW']++;
         actionables['TO_REVIEW']++;
       }
     }
@@ -2569,7 +2569,7 @@ router.post(['/:id/return-request', '/:id/return'], async (req: Request, res: Re
       const targetSellerId = targetSellerOrder?.sellerId || order.sellerOrders[0]?.sellerId;
       const requestedAmt = targetSellerOrder ? targetSellerOrder.subtotal : order.subtotal;
 
-      // Automatically approve return request without admin intervention
+      // Create ReturnRequest with PENDING status for seller review
       const retRecord = await tx.returnRequest.create({
         data: {
           orderId: order.id,
@@ -2577,10 +2577,8 @@ router.post(['/:id/return-request', '/:id/return'], async (req: Request, res: Re
           customerId: req.user!.userId,
           reason,
           description: description || null,
-          status: ReturnRequestStatus.APPROVED,
+          status: ReturnRequestStatus.PENDING,
           refundAmount: requestedAmt,
-          resolvedBy: 'SYSTEM',
-          resolvedAt: new Date(),
         },
       });
 
@@ -2596,7 +2594,7 @@ router.post(['/:id/return-request', '/:id/return'], async (req: Request, res: Re
           .map((ev) => (typeof ev === 'string' ? { fileUrl: ev } : ev));
       }
 
-      // Also create authoritative RefundRequest so seller refunds dashboard tracks it
+      // Also create authoritative RefundRequest with UNDER_SELLER_REVIEW status for seller dashboard
       if (targetSellerId) {
         const refundNumber = `RF-${Date.now().toString(36).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
 
@@ -2607,13 +2605,12 @@ router.post(['/:id/return-request', '/:id/return'], async (req: Request, res: Re
             sellerOrderId: targetSellerOrderId,
             customerId: req.user!.userId,
             sellerId: targetSellerId,
-            status: RefundStatus.APPROVED,
+            status: RefundStatus.UNDER_SELLER_REVIEW,
             reasonText: reason,
             description: description || null,
             customerNote: description || null,
             requestedAmount: requestedAmt,
-            approvedAmount: requestedAmt,
-            currency: order.currency || 'SAR',
+            currency: order.currency || 'YER',
             items: targetSellerOrder?.items && targetSellerOrder.items.length > 0
               ? {
                   create: targetSellerOrder.items.map((it) => ({
@@ -2640,10 +2637,10 @@ router.post(['/:id/return-request', '/:id/return'], async (req: Request, res: Re
               create: [
                 {
                   fromStatus: null,
-                  toStatus: RefundStatus.APPROVED,
+                  toStatus: RefundStatus.UNDER_SELLER_REVIEW,
                   changedBy: req.user!.userId,
-                  actorType: 'SYSTEM' as any,
-                  reason: 'اعتماد طلب الإرجاع والاسترداد المالي تلقائياً',
+                  actorType: 'CUSTOMER' as any,
+                  reason: 'تقديم طلب الإرجاع من قبل العميل للمراجعة من قبل المتجر',
                 },
               ],
             },
@@ -2653,35 +2650,19 @@ router.post(['/:id/return-request', '/:id/return'], async (req: Request, res: Re
 
       await tx.order.update({
         where: { id: order.id },
-        data: { status: OrderStatus.RETURN_APPROVED },
+        data: { status: OrderStatus.RETURN_REQUESTED },
       });
 
       if (targetSellerOrderId) {
         await tx.sellerOrder.update({
           where: { id: targetSellerOrderId },
-          data: { status: SellerOrderStatus.RETURN_APPROVED },
+          data: { status: SellerOrderStatus.RETURN_REQUESTED },
         });
       } else {
         await tx.sellerOrder.updateMany({
           where: { orderId: order.id },
-          data: { status: SellerOrderStatus.RETURN_APPROVED },
+          data: { status: SellerOrderStatus.RETURN_REQUESTED },
         });
-      }
-
-      // Automatically credit customer wallet if order was paid
-      if (order.payment && (order.payment.status === PaymentStatus.PAID || (order.payment.status as string) === 'COMPLETED')) {
-        await CustomerWalletService.creditForOrderRefund(
-          {
-            customerId: req.user!.userId,
-            orderId: order.id,
-            orderNumber: order.orderNumber,
-            amount: requestedAmt,
-            currency: order.currency || 'YER',
-            reason: `استرداد مالي تلقائي معتمد لطلب الإرجاع #${order.orderNumber} - ${reason}`,
-            referenceType: `RETURN_AUTO_${order.id}`,
-          },
-          tx
-        );
       }
 
       await tx.orderStatusHistory.create({
@@ -2689,12 +2670,12 @@ router.post(['/:id/return-request', '/:id/return'], async (req: Request, res: Re
           orderId: order.id,
           sellerOrderId: targetSellerOrderId,
           fromStatus: order.status,
-          toStatus: 'RETURN_APPROVED',
-          status: OrderStatus.RETURN_APPROVED,
+          toStatus: 'RETURN_REQUESTED',
+          status: OrderStatus.RETURN_REQUESTED,
           changedBy: req.user!.userId,
-          changedByRole: 'SYSTEM',
+          changedByRole: 'CUSTOMER',
           reason,
-          note: `تم اعتماد طلب الإرجاع والاسترداد المالي تلقائياً: ${reason}${description ? ` - ${description}` : ''}`,
+          note: `تم تقديم طلب الإرجاع وهو قيد مراجعة المتجر: ${reason}${description ? ` - ${description}` : ''}`,
         },
       });
 
@@ -2702,7 +2683,7 @@ router.post(['/:id/return-request', '/:id/return'], async (req: Request, res: Re
     });
 
     try {
-      SocketService.get()?.emitGlobal('order:return_approved', {
+      SocketService.get()?.emitGlobal('order:return_requested', {
         orderId: order.id,
         orderNumber: order.orderNumber,
         reason,
@@ -2710,36 +2691,20 @@ router.post(['/:id/return-request', '/:id/return'], async (req: Request, res: Re
       });
       SocketService.get()?.emitGlobal('order:status', {
         orderId: order.id,
-        status: 'RETURN_APPROVED',
+        status: 'RETURN_REQUESTED',
       });
-      SocketService.get()?.emitGlobal('REFUND_APPROVED', {
+      SocketService.get()?.emitGlobal('REFUND_CREATED', {
         orderId: order.id,
         orderNumber: order.orderNumber,
         reason,
       });
-      SocketService.get()?.emitGlobal('REFUND_COMPLETED', {
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-      });
       SocketService.get()?.emitGlobal('order:refund_updated', {
         orderId: order.id,
-        status: 'RETURN_APPROVED',
-      });
-      SocketService.get()?.emitToUser(req.user!.userId, 'customer:wallet_updated', {
-        userId: req.user!.userId,
-        action: 'REFUND_CREDIT',
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-      });
-      SocketService.get()?.emitToUser(req.user!.userId, 'wallet:updated', {
-        userId: req.user!.userId,
-        action: 'REFUND_CREDIT',
-        orderId: order.id,
-        orderNumber: order.orderNumber,
+        status: 'RETURN_REQUESTED',
       });
     } catch (_) {}
 
-    ResponseUtil.created(res, returnRequest, 'تم اعتماد طلب الإرجاع والاسترداد المالي تلقائياً بنجاح');
+    ResponseUtil.created(res, returnRequest, 'تم تقديم طلب الإرجاع بنجاح وجارٍ مراجعته من قبل المتجر');
   } catch (error) {
     next(error);
   }

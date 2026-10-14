@@ -282,7 +282,9 @@ export class MembershipEligibilityService {
 
     const membership = await this.getOrCreateMembership(userId);
     const activeTiers = await this.getActiveTiersDescending();
-    const currentTier = membership.tier;
+    const activeOverride = membership.overrides?.[0];
+    const hasActiveOverride = activeOverride && (!activeOverride.endAt || new Date() < activeOverride.endAt);
+    const currentTier = (hasActiveOverride && activeOverride.overrideTier) ? activeOverride.overrideTier : membership.tier;
 
     // Find next tier if one exists
     // activeTiers is sorted DESC (4, 3, 2, 1, 0)
@@ -305,8 +307,6 @@ export class MembershipEligibilityService {
     const progressResult = nextTier
       ? MembershipRulesEngine.calculateProgress(nextRulesConfig, metricsSnapshot)
       : null;
-
-    const activeOverride = membership.overrides?.[0];
 
     const summary: CustomerMembershipSummary = {
       tierId: currentTier.id,

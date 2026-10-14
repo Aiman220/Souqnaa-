@@ -182,9 +182,9 @@ router.get('/reverse-geocode', async (req: Request, res: Response, next: NextFun
       }
     }
 
-    // Fallback: structured response with coordinate label
+    // Fallback: structured response with user-friendly label (no raw coordinates)
     return ResponseUtil.success(res, {
-      formattedAddress: `موقع محدد (${latNum.toFixed(4)}, ${lngNum.toFixed(4)})`,
+      formattedAddress: 'الموقع المحدد على الخريطة',
       lat: latNum,
       lng: lngNum,
       latitude: latNum,
@@ -218,9 +218,9 @@ router.post('/reverse-geocode', async (req: Request, res: Response, next: NextFu
       }
     }
 
-    // Fallback: structured response with coordinate label
+    // Fallback: structured response with user-friendly label (no raw coordinates)
     return ResponseUtil.success(res, {
-      formattedAddress: `موقع محدد (${latNum.toFixed(4)}, ${lngNum.toFixed(4)})`,
+      formattedAddress: 'الموقع المحدد على الخريطة',
       lat: latNum,
       lng: lngNum,
       latitude: latNum,

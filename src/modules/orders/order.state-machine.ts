@@ -316,6 +316,85 @@ export class OrderStateMachine {
           commissionAmount: sellerOrder.commissionAmount,
           isCod: isCodOrder,
         });
+      } else if (targetStatusStr === 'RETURN_APPROVED' || targetStatusStr === 'REFUNDED') {
+        // If order had previously been delivered, adjust seller balance and liabilities
+        const wasDelivered = currentStatus === 'DELIVERED';
+        const sellerBalance = await tx.sellerBalance.findUnique({
+          where: { sellerId: sellerOrder.sellerId },
+        });
+
+        if (sellerBalance && wasDelivered) {
+          const deduction = sellerOrder.sellerPayout || 0;
+          if (deduction > 0) {
+            const currentAvailable = sellerBalance.availableBalance || 0;
+            if (currentAvailable >= deduction) {
+              await tx.sellerBalance.update({
+                where: { sellerId: sellerOrder.sellerId },
+                data: { availableBalance: parseFloat((currentAvailable - deduction).toFixed(2)) },
+              });
+              await tx.sellerTransaction.create({
+                data: {
+                  sellerBalanceId: sellerBalance.id,
+                  amount: -deduction,
+                  type: TransactionType.REFUND,
+                  referenceId: sellerOrder.id,
+                  description: `خصم استرجاع الطلب #${sellerOrder.order.orderNumber}`,
+                },
+              });
+            } else {
+              const availableDeduction = Math.max(0, currentAvailable);
+              const outstandingDebt = parseFloat((deduction - availableDeduction).toFixed(2));
+              await tx.sellerBalance.update({
+                where: { sellerId: sellerOrder.sellerId },
+                data: {
+                  availableBalance: 0,
+                  outstandingCommission: { increment: outstandingDebt },
+                },
+              });
+              if (availableDeduction > 0) {
+                await tx.sellerTransaction.create({
+                  data: {
+                    sellerBalanceId: sellerBalance.id,
+                    amount: -availableDeduction,
+                    type: TransactionType.REFUND,
+                    referenceId: sellerOrder.id,
+                    description: `خصم استرجاع جزئي للطلب #${sellerOrder.order.orderNumber}`,
+                  },
+                });
+              }
+              await tx.sellerOutstanding.create({
+                data: {
+                  sellerId: sellerOrder.sellerId,
+                  sourceType: 'REFUND_LIABILITY',
+                  sourceReference: sellerOrder.order.orderNumber,
+                  amount: outstandingDebt,
+                  paidAmount: 0,
+                  remainingAmount: outstandingDebt,
+                  currency: 'YER',
+                  status: 'OPEN',
+                  warningLevel: 'NORMAL',
+                  metadata: JSON.stringify({
+                    sellerOrderId: sellerOrder.id,
+                    orderNumber: sellerOrder.order.orderNumber,
+                    totalPayout: deduction,
+                    coveredFromBalance: availableDeduction,
+                    outstandingDebt,
+                    createdAt: new Date().toISOString(),
+                  }),
+                },
+              });
+              await tx.sellerTransaction.create({
+                data: {
+                  sellerBalanceId: sellerBalance.id,
+                  amount: -outstandingDebt,
+                  type: TransactionType.OUTSTANDING_PAYMENT,
+                  referenceId: sellerOrder.id,
+                  description: `مديونية معلقة لاسترجاع الطلب #${sellerOrder.order.orderNumber}`,
+                },
+              });
+            }
+          }
+        }
       }
 
       // 3. Record Order Status History

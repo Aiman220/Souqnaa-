@@ -160,6 +160,8 @@ async function enrichConversation(conv: any, requestingUserId: string) {
     id: conv.id,
     title: conv.title || sellerStoreName,
     status: conv.status || 'ACTIVE',
+    type: conv.type || (Boolean(conv.supportConversation) ? 'SUPPORT_CUSTOMER' : 'DIRECT_CUSTOMER_SELLER'),
+    isSupport: Boolean(conv.supportConversation || conv.type?.startsWith('SUPPORT_')),
     createdAt: conv.createdAt,
     updatedAt: conv.updatedAt,
     // Computed fields Flutter ConversationModel expects
@@ -177,6 +179,7 @@ async function enrichConversation(conv: any, requestingUserId: string) {
     isBlockedByOther: Boolean(otherMember?.blocked),
     isMuted: Boolean(requesterMember?.muted),
     members: conv.members,
+    supportConversation: conv.supportConversation || null,
   };
 }
 
@@ -185,14 +188,28 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.userId;
     const search = req.query.search as string | undefined;
+    const type = req.query.type as string | undefined;
 
     const whereClause: any = {
       members: { some: { userId } },
     };
 
+    if (type) {
+      const upperType = type.toUpperCase();
+      if (upperType === 'STORE' || upperType === 'DIRECT_CUSTOMER_SELLER') {
+        whereClause.type = { notIn: ['SUPPORT_CUSTOMER', 'SUPPORT_SELLER'] };
+        whereClause.supportConversation = null;
+      } else if (upperType === 'SUPPORT' || upperType === 'SUPPORT_CUSTOMER') {
+        whereClause.OR = [
+          { type: { in: ['SUPPORT_CUSTOMER', 'SUPPORT_SELLER'] } },
+          { supportConversation: { isNot: null } },
+        ];
+      }
+    }
+
     if (search && search.trim()) {
       const q = search.trim();
-      whereClause.OR = [
+      const searchFilter = [
         { title: { contains: q, mode: 'insensitive' } },
         {
           members: {
@@ -207,6 +224,13 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
           },
         },
       ];
+
+      if (whereClause.OR) {
+        whereClause.AND = [{ OR: whereClause.OR }, { OR: searchFilter }];
+        delete whereClause.OR;
+      } else {
+        whereClause.OR = searchFilter;
+      }
     }
 
     const conversations = await prisma.conversation.findMany({
@@ -215,6 +239,19 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
         members: {
           include: {
             user: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+          },
+        },
+        supportConversation: {
+          select: {
+            id: true,
+            subject: true,
+            status: true,
+            priority: true,
+            ticket: {
+              select: {
+                ticketNumber: true,
+              },
+            },
           },
         },
         messages: {
