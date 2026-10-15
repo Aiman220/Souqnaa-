@@ -53,9 +53,34 @@ async function runPushTests() {
   assert(emptyRes.success === true, 'Empty tokens gracefully succeeds without error');
   assert(emptyRes.messageId === 'no_tokens_noop', 'Returns no_tokens_noop status');
 
-  // 3. Payload Construction & Sending
-  console.log('\n3. FCM Payload Compliance & Transmission:');
-  const sendRes = await fcmPushProvider.send({
+  // 3. Local pseudo-tokens filtering
+  console.log('\n3. Local Pseudo-Tokens Filtering:');
+  const localRes = await fcmPushProvider.send({
+    recipientId: 'user_test_local',
+    deviceTokens: ['local_device_android_user_123', 'local_device_web_user_123'],
+    content: {
+      titleAr: 'اختبار محلي',
+      titleEn: 'Local Test',
+      bodyAr: 'نص تجريبي',
+      bodyEn: 'Test body',
+    },
+    category: 'SYSTEM',
+    priority: NotificationPriority.NORMAL,
+  });
+  assert(localRes.success === true, 'Local pseudo-tokens handled safely without external transmission');
+  assert(localRes.messageId === 'local_tokens_noop', 'Returns local_tokens_noop status');
+
+  // 4. Token Sanitization & Privacy
+  console.log('\n4. Device Token Sanitization & Privacy:');
+  const rawToken = 'fcm_token_sample_abc123456789_xyz987654321';
+  const sanitized = fcmPushProvider.sanitizeToken(rawToken);
+  assert(!sanitized.includes('sample_abc'), 'Full token content is never exposed');
+  assert(sanitized.startsWith('fcm_to') && sanitized.endsWith('4321'), 'Sanitized token retains identifiable boundary prefix/suffix');
+  assert(fcmPushProvider.sanitizeToken('') === '***', 'Short/empty token safely returns placeholder');
+
+  // 5. FCM HTTP v1 Payload Compliance
+  console.log('\n5. FCM HTTP v1 Payload Structure Compliance:');
+  const testParams = {
     recipientId: 'user_test_2',
     deviceTokens: ['fcm_sample_token_valid_456'],
     notificationId: 'notif_abc_999',
@@ -69,12 +94,45 @@ async function runPushTests() {
       bodyAr: 'تم إيداع المبلغ في محفظتك الإلكترونية',
       bodyEn: 'Amount has been credited to your wallet',
       deepLink: 'souqnaa://refunds/REF-789',
+      imageUrl: 'https://cdn.souqnaa.com/refund.png',
     },
-  });
-  assert(sendRes.success === true, 'FCM send operation completes successfully');
-  assert(sendRes.provider === 'FCM', 'Provider is identified as FCM');
-  assert(sendRes.channel === NotificationChannel.PUSH, 'Channel is NotificationChannel.PUSH');
-  assert(!!sendRes.messageId && sendRes.messageId.startsWith('fcm_'), 'Generates valid FCM message ID');
+    data: {
+      numericAmount: 15000,
+      extraFlag: true,
+    },
+  };
+
+  const builtMsg = fcmPushProvider.buildFcmMessage('fcm_test_token_123', testParams);
+  assert(builtMsg.message.token === 'fcm_test_token_123', 'FCM message target token assigned');
+  assert(builtMsg.message.notification.title === testParams.content.titleAr, 'Notification Arabic title matches');
+  assert(builtMsg.message.notification.image === testParams.content.imageUrl, 'Notification image matches v1 specification');
+  assert(builtMsg.message.android.priority === 'HIGH', 'Urgent/High priority mapped to Android HIGH');
+  assert(builtMsg.message.android.notification.channel_id === 'souqna_refunds_channel', 'Android channel_id is snake_case and mapped');
+  assert(builtMsg.message.apns.headers['apns-priority'] === '10', 'APNs priority is set to 10 for high priority');
+  assert(typeof builtMsg.message.data.numericAmount === 'string', 'All data entries are stringified for FCM HTTP v1 compliance');
+  assert(typeof builtMsg.message.data.extraFlag === 'string', 'Boolean data entries are stringified for FCM HTTP v1 compliance');
+
+  // 6. Missing Credentials Safety (No Mock / Fake Success)
+  console.log('\n6. Missing Credentials Safety (No Fake Success):');
+  // When credentials are not configured in environment, verify provider returns clean failure instead of fake success
+  const savedCreds = process.env.FIREBASE_SERVICE_ACCOUNT;
+  const savedProj = process.env.FIREBASE_PROJECT_ID;
+  const savedKey = process.env.FCM_SERVER_KEY;
+  delete process.env.FIREBASE_SERVICE_ACCOUNT;
+  delete process.env.FIREBASE_PROJECT_ID;
+  delete process.env.FCM_SERVER_KEY;
+
+  const noCredsRes = await fcmPushProvider.send(testParams);
+  assert(noCredsRes.success === false, 'Returns false when push credentials are not configured (no mock delivery)');
+  assert(
+    !!noCredsRes.error && noCredsRes.error.includes('credentials not configured'),
+    'Reports explicit missing credentials error message'
+  );
+
+  // Restore env
+  if (savedCreds) process.env.FIREBASE_SERVICE_ACCOUNT = savedCreds;
+  if (savedProj) process.env.FIREBASE_PROJECT_ID = savedProj;
+  if (savedKey) process.env.FCM_SERVER_KEY = savedKey;
 
   console.log('\n==================================================');
   console.log(`🏁 TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);
@@ -89,3 +147,4 @@ runPushTests().catch((e) => {
   console.error('Fatal test error:', e);
   process.exit(1);
 });
+

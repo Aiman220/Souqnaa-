@@ -6,6 +6,11 @@ node_modules/
 .env.*
 !.env.example
 
+# Service Account Credentials (Firebase / GCP)
+*service-account*.json
+*firebase*.json
+config/*.json
+
 # Build artifacts
 dist/
 *.tsbuildinfo
