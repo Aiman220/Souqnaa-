@@ -213,8 +213,12 @@ export class SearchService {
     const normalizedQuery = normalizeArabic(rawQuery);
 
     // Dynamic catalog vocabulary for typo correction
-    const catalogVocab = await this.getCatalogVocabulary();
-    const typoInfo = findTypoCorrections(rawQuery, catalogVocab);
+    let catalogVocab: string[] = [];
+    let typoInfo = { hasCorrection: false, correctedQuery: normalizedQuery };
+    if (rawQuery.length > 0) {
+      catalogVocab = await this.getCatalogVocabulary();
+      typoInfo = findTypoCorrections(rawQuery, catalogVocab);
+    }
 
     const where: any = {
       isActive: true,
@@ -262,7 +266,6 @@ export class SearchService {
     }
 
     if (params.inStock) {
-      where.OR = where.OR || [];
       where.AND = [
         ...(where.AND || []),
         {
