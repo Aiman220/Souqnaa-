@@ -55,13 +55,34 @@ router.get('/', searchLimiter, optionalAuth, async (req: Request, res: Response,
       cursor,
     } = req.query;
 
+    let parsedMinPrice: number | undefined;
+    let parsedMaxPrice: number | undefined;
+
+    if (minPrice !== undefined && String(minPrice).trim() !== '') {
+      parsedMinPrice = parseFloat(String(minPrice));
+      if (isNaN(parsedMinPrice) || parsedMinPrice < 0) {
+        throw new AppError('Minimum price must be a valid non-negative number', 400);
+      }
+    }
+
+    if (maxPrice !== undefined && String(maxPrice).trim() !== '') {
+      parsedMaxPrice = parseFloat(String(maxPrice));
+      if (isNaN(parsedMaxPrice) || parsedMaxPrice < 0) {
+        throw new AppError('Maximum price must be a valid non-negative number', 400);
+      }
+    }
+
+    if (parsedMinPrice !== undefined && parsedMaxPrice !== undefined && parsedMinPrice > parsedMaxPrice) {
+      throw new AppError('Minimum price cannot exceed maximum price', 400);
+    }
+
     const locale = req.headers['accept-language']?.includes('en') ? 'en' : 'ar';
     const result = await searchService.search({
       q: q ? String(q) : undefined,
-      categoryId: categoryId ? String(categoryId) : undefined,
-      brandId: brandId ? String(brandId) : undefined,
-      minPrice: minPrice ? parseFloat(String(minPrice)) : undefined,
-      maxPrice: maxPrice ? parseFloat(String(maxPrice)) : undefined,
+      categoryId: categoryId ? String(categoryId).trim() : undefined,
+      brandId: brandId ? String(brandId).trim() : undefined,
+      minPrice: parsedMinPrice,
+      maxPrice: parsedMaxPrice,
       inStock: inStock === 'true',
       sortBy: String(sortBy),
       sortOrder: (sortOrder as any) || 'desc',
@@ -200,11 +221,32 @@ router.post(
         }
       }
 
+      let parsedMinPrice: number | undefined;
+      let parsedMaxPrice: number | undefined;
+
+      if (minPrice !== undefined && String(minPrice).trim() !== '') {
+        parsedMinPrice = parseFloat(String(minPrice));
+        if (isNaN(parsedMinPrice) || parsedMinPrice < 0) {
+          throw new AppError('Minimum price must be a valid non-negative number', 400);
+        }
+      }
+
+      if (maxPrice !== undefined && String(maxPrice).trim() !== '') {
+        parsedMaxPrice = parseFloat(String(maxPrice));
+        if (isNaN(parsedMaxPrice) || parsedMaxPrice < 0) {
+          throw new AppError('Maximum price must be a valid non-negative number', 400);
+        }
+      }
+
+      if (parsedMinPrice !== undefined && parsedMaxPrice !== undefined && parsedMinPrice > parsedMaxPrice) {
+        throw new AppError('Minimum price cannot exceed maximum price', 400);
+      }
+
       const visualResult = await visualSearchService.executeVisualSearch(file, {
         textQuery: textQuery ? String(textQuery).trim() : undefined,
-        categoryId: categoryId ? String(categoryId) : undefined,
-        minPrice: minPrice ? parseFloat(String(minPrice)) : undefined,
-        maxPrice: maxPrice ? parseFloat(String(maxPrice)) : undefined,
+        categoryId: categoryId ? String(categoryId).trim() : undefined,
+        minPrice: parsedMinPrice,
+        maxPrice: parsedMaxPrice,
         inStock: inStock === 'true' || inStock === true,
         userId: req.user?.userId,
         limit: limit ? parseInt(String(limit), 10) : 24,

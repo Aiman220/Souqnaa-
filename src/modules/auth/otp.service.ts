@@ -116,7 +116,7 @@ export class OtpService {
     await redis.del(`otp_cooldown:${type}:${cleanTarget}`);
 
     // Automatically mark user verified if this was a verification OTP
-    if (type === 'verification') {
+    if (type === 'verification' || type === 'phone' || type === 'email') {
       await prisma.user.updateMany({
         where: { OR: [{ email: cleanTarget.toLowerCase() }, { phone: cleanTarget }] },
         data: { isVerified: true },

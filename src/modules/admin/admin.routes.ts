@@ -3751,6 +3751,19 @@ router.post('/deposits/:id/approve', async (req: Request, res: Response, next: N
     if (deposit.status !== 'PENDING') throw new AppError('تم البت في هذا الطلب مسبقاً', 400);
 
     const updated = await prisma.$transaction(async (tx) => {
+      // 1. Seller deposit approval & financial risk debt settlement
+      if (deposit.userType === 'SELLER' && deposit.sellerId) {
+        const approvedAmount = req.body.approvedAmount !== undefined ? parseFloat(String(req.body.approvedAmount)) : undefined;
+        const approvalRes = await SellerFinancialRiskService.approveSellerDeposit(tx, {
+          depositId: deposit.id,
+          adminUserId: req.user!.userId,
+          approvedAmount,
+          adminNote: adminNote || 'تم التحقق من الحوالة وتأكيد الإيداع وسداد المديونية بنجاح',
+        });
+        return approvalRes.deposit;
+      }
+
+      // 2. Customer deposit approval
       const lockResult = await tx.walletDeposit.updateMany({
         where: { id: deposit.id, status: 'PENDING' },
         data: {
@@ -3774,70 +3787,63 @@ router.post('/deposits/:id/approve', async (req: Request, res: Response, next: N
         },
       });
 
-      if (deposit.userType === 'CUSTOMER') {
-        let account = await tx.walletAccount.findUnique({ where: { userId: deposit.userId } });
-        if (!account) {
-          account = await tx.walletAccount.create({
-            data: { userId: deposit.userId, currency: 'YER', availableBalance: 0, pendingBalance: 0 },
-          });
-        }
-
-        const before = account.availableBalance;
-        const after = before + deposit.amount;
-
-        await tx.walletAccount.update({
-          where: { id: account.id },
-          data: { availableBalance: { increment: deposit.amount } },
+      let account = await tx.walletAccount.findUnique({ where: { userId: deposit.userId } });
+      if (!account) {
+        account = await tx.walletAccount.create({
+          data: { userId: deposit.userId, currency: 'YER', availableBalance: 0, pendingBalance: 0 },
         });
-
-        await tx.walletLedgerEntry.create({
-          data: {
-            walletAccountId: account.id,
-            type: 'ADJUSTMENT_CREDIT',
-            direction: 'CREDIT',
-            amount: deposit.amount,
-            currency: deposit.currency,
-            balanceBefore: before,
-            balanceAfter: after,
-            referenceType: 'DEPOSIT',
-            referenceId: deposit.id,
-            status: 'COMPLETED',
-            description: `شحن رصيد المحفظة عبر ${deposit.walletProvider} - مرجع: ${deposit.transferReference}`,
-            createdBy: req.user!.userId,
-          },
-        });
-
-        await tx.walletTransaction.create({
-          data: {
-            walletAccountId: account.id,
-            type: 'ADJUSTMENT_CREDIT',
-            status: 'COMPLETED',
-            amount: deposit.amount,
-            currency: deposit.currency,
-            referenceNumber: `DEP-${deposit.id.slice(0, 8).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`,
-            externalReference: deposit.transferReference,
-            description: `شحن رصيد المحفظة عبر ${deposit.walletProvider} - مرجع: ${deposit.transferReference}`,
-            completedAt: new Date(),
-          },
-        });
-      } else if (deposit.userType === 'SELLER' && deposit.sellerId) {
-        const approvedAmount = req.body.approvedAmount !== undefined ? parseFloat(String(req.body.approvedAmount)) : undefined;
-        const approvalRes = await SellerFinancialRiskService.approveSellerDeposit(tx, {
-          depositId: deposit.id,
-          adminUserId: req.user!.userId,
-          approvedAmount,
-          adminNote: adminNote || 'تم التحقق من الحوالة وتأكيد الإيداع وسداد المديونية بنجاح',
-        });
-        return approvalRes.deposit;
       }
 
-      // Notify user via centralized notification platform
+      const effectiveApprovedAmount = req.body.approvedAmount !== undefined && !isNaN(parseFloat(String(req.body.approvedAmount)))
+        ? parseFloat(String(req.body.approvedAmount))
+        : deposit.amount;
+
+      const before = account.availableBalance;
+      const after = before + effectiveApprovedAmount;
+
+      await tx.walletAccount.update({
+        where: { id: account.id },
+        data: { availableBalance: { increment: effectiveApprovedAmount } },
+      });
+
+      await tx.walletLedgerEntry.create({
+        data: {
+          walletAccountId: account.id,
+          type: 'ADJUSTMENT_CREDIT',
+          direction: 'CREDIT',
+          amount: effectiveApprovedAmount,
+          currency: deposit.currency,
+          balanceBefore: before,
+          balanceAfter: after,
+          referenceType: 'DEPOSIT',
+          referenceId: deposit.id,
+          status: 'COMPLETED',
+          description: `شحن رصيد المحفظة عبر ${deposit.walletProvider} - مرجع: ${deposit.transferReference}`,
+          createdBy: req.user!.userId,
+        },
+      });
+
+      await tx.walletTransaction.create({
+        data: {
+          walletAccountId: account.id,
+          type: 'ADJUSTMENT_CREDIT',
+          status: 'COMPLETED',
+          amount: effectiveApprovedAmount,
+          currency: deposit.currency,
+          referenceNumber: `DEP-${deposit.id.slice(0, 8).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`,
+          externalReference: deposit.transferReference,
+          description: `شحن رصيد المحفظة عبر ${deposit.walletProvider} - مرجع: ${deposit.transferReference}`,
+          completedAt: new Date(),
+        },
+      });
+
+      // Notify customer via centralized notification platform
       try {
         notificationEventBus.publish(
           NotificationEventFactory.walletEvent({
             eventType: 'WALLET_TOPUP_APPROVED',
             recipientId: deposit.userId,
-            amount: deposit.amount,
+            amount: effectiveApprovedAmount,
             currency: 'YER',
             referenceId: deposit.id,
           })

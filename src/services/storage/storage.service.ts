@@ -98,7 +98,7 @@ class CloudflareR2StorageService implements IStorageService {
   }
 
   async uploadFile(file: Express.Multer.File, folder = 'general'): Promise<UploadResult> {
-    const ext = path.extname(file.originalname);
+    const ext = file.originalname ? path.extname(file.originalname) : '.jpg';
     const fileName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
     const key = `${folder}/${fileName}`;
 

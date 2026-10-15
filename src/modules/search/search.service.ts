@@ -2,6 +2,7 @@ import { prisma } from '../../database/prisma';
 import { redis } from '../../database/redis';
 import { formatProductsWithCampaigns } from '../../utils/product-formatter.util';
 import { remoteConfigService } from '../remote-config/remote-config.service';
+import { AppError } from '../../middleware/error.middleware';
 import {
   normalizeArabic,
   getSearchTokensWithAliases,
@@ -220,10 +221,41 @@ export class SearchService {
       isSuspended: false,
     };
 
-    if (params.categoryId) where.categoryId = params.categoryId;
+    if (params.categoryId) {
+      const cleanCategoryId = String(params.categoryId).trim();
+      const category = await prisma.category.findFirst({
+        where: {
+          OR: [{ id: cleanCategoryId }, { slug: cleanCategoryId }],
+          isActive: true,
+        },
+        include: {
+          children: {
+            where: { isActive: true },
+            select: { id: true },
+          },
+        },
+      });
+
+      if (!category) {
+        throw new AppError('Invalid category identifier', 400);
+      }
+
+      const categoryIds = [category.id, ...category.children.map(c => c.id)];
+      where.categoryId = { in: categoryIds };
+    }
+
     if (params.brandId) where.brandId = params.brandId;
 
     if (params.minPrice != null || params.maxPrice != null) {
+      if (params.minPrice != null && (isNaN(params.minPrice) || params.minPrice < 0)) {
+        throw new AppError('Minimum price must be a valid non-negative number', 400);
+      }
+      if (params.maxPrice != null && (isNaN(params.maxPrice) || params.maxPrice < 0)) {
+        throw new AppError('Maximum price must be a valid non-negative number', 400);
+      }
+      if (params.minPrice != null && params.maxPrice != null && params.minPrice > params.maxPrice) {
+        throw new AppError('Minimum price cannot exceed maximum price', 400);
+      }
       where.price = {};
       if (params.minPrice != null) where.price.gte = params.minPrice;
       if (params.maxPrice != null) where.price.lte = params.maxPrice;

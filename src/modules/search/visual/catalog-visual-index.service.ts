@@ -153,8 +153,10 @@ export class CatalogVisualIndexService {
         await Promise.all(
           batch.map(async img => {
             try {
-              // Check Redis cache first for extracted feature vector
-              const redisKey = `search:feat:${Buffer.from(img.url).toString('base64').substring(0, 40)}`;
+              // Check Redis cache first for extracted feature vector using full URL SHA-256 hash
+              const crypto = await import('crypto');
+              const urlHash = crypto.createHash('sha256').update(img.url).digest('hex');
+              const redisKey = `search:feat:${urlHash}`;
               let features = await redis.getJson<VisualFeatureVector>(redisKey);
 
               if (!features) {
@@ -215,7 +217,9 @@ export class CatalogVisualIndexService {
             imageUrl: img.url,
             features,
           });
-          const redisKey = `search:feat:${Buffer.from(img.url).toString('base64').substring(0, 40)}`;
+          const crypto = await import('crypto');
+          const urlHash = crypto.createHash('sha256').update(img.url).digest('hex');
+          const redisKey = `search:feat:${urlHash}`;
           await redis.setJson(redisKey, features, 7 * 24 * 3600);
         }
       }

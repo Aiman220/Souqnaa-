@@ -47,9 +47,9 @@ export class CustomerActionCenterService {
     );
 
     // 2. Concurrently fetch candidate actions and active dismissals
+    // 2. Concurrently fetch candidate actions and active dismissals (excluding orders feature per requirement)
     const [
       userAndAuthActions,
-      orderAndPaymentActions,
       refundActions,
       membershipActions,
       rewardActions,
@@ -59,7 +59,6 @@ export class CustomerActionCenterService {
       dismissals,
     ] = await Promise.all([
       this.resolveUserAndAuthActions(userId),
-      this.resolveOrderAndPaymentActions(userId),
       this.resolveRefundActions(userId),
       this.resolveMembershipActions(userId),
       this.resolveRewardActions(userId),
@@ -69,10 +68,9 @@ export class CustomerActionCenterService {
       this.fetchActiveDismissals(userId, now),
     ]);
 
-    // 3. Aggregate all candidate actions
+    // 3. Aggregate candidate actions (Orders feature excluded)
     const allCandidates: CustomerAction[] = [
       ...userAndAuthActions,
-      ...orderAndPaymentActions,
       ...refundActions,
       ...membershipActions,
       ...rewardActions,
@@ -139,9 +137,9 @@ export class CustomerActionCenterService {
           descriptionAr: 'وثّق رقم هاتفك لحماية حسابك واستعادة الوصول إليه بسهولة.',
           descriptionEn: 'Verify your phone number to secure your account and recover access easily.',
           icon: 'phone_iphone',
-          ctaLabelAr: 'توثيق الآن',
-          ctaLabelEn: 'Verify Now',
-          deepLink: `/verify-otp?target=${encodeURIComponent(user.phone)}&type=phone`,
+          ctaLabelAr: 'إعداد وتوثيق',
+          ctaLabelEn: 'Configure & Verify',
+          deepLink: `/profile/phone?phone=${encodeURIComponent(user.phone)}`,
           dismissible: true,
           snoozable: true,
           requiresAction: true,
@@ -164,9 +162,9 @@ export class CustomerActionCenterService {
           descriptionAr: 'وثّق بريدك الإلكتروني لتأمين حسابك وتلقي إشعارات الطلبات والفواتير.',
           descriptionEn: 'Verify your email to secure your account and receive order receipts.',
           icon: 'mail',
-          ctaLabelAr: 'توثيق الآن',
-          ctaLabelEn: 'Verify Now',
-          deepLink: `/verify-otp?target=${encodeURIComponent(user.email)}&type=email`,
+          ctaLabelAr: 'إعداد وتوثيق',
+          ctaLabelEn: 'Configure & Verify',
+          deepLink: `/profile/email?email=${encodeURIComponent(user.email)}`,
           dismissible: true,
           snoozable: true,
           requiresAction: true,

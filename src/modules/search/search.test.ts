@@ -176,8 +176,126 @@ async function runSearchTests() {
     const selfDist = calculateHammingDistance(features1.dHash, features2.dHash);
     assert(selfDist === 0, 'Exact same image yields Hamming distance = 0');
 
-    // ── 4. Full Catalog Search with Weighted Relevance ────────────────────────
-    console.log('\n--- 4. Catalog Search with Relevance & Typo Handling ---');
+    // ── 4. Category Filtering & Hierarchy Suite ───────────────────────────────
+    console.log('\n--- 4. Category Filtering & Hierarchy Suite ---');
+    // Valid category by slug
+    const electronicsBySlug = await searchService.search({
+      categoryId: 'electronics',
+      page: 1,
+      limit: 20,
+    });
+    assert(electronicsBySlug.products.length > 0, 'Category search by slug "electronics" returns products');
+    assert(
+      electronicsBySlug.products.every(p => p.category?.slug === 'electronics' || p.categoryId === '09f1451e-a291-459c-a848-067544aa04b2'),
+      'All returned products belong to electronics category'
+    );
+
+    // Valid category by ID
+    const electronicsById = await searchService.search({
+      categoryId: '09f1451e-a291-459c-a848-067544aa04b2',
+      page: 1,
+      limit: 20,
+    });
+    assert(electronicsById.products.length === electronicsBySlug.products.length, 'Category query by ID yields identical result count to slug');
+
+    // Invalid category identifier is rejected safely with 400
+    let invalidCatRejected = false;
+    try {
+      await searchService.search({
+        categoryId: 'non-existent-category-id-999',
+      });
+    } catch (e: any) {
+      if (e.statusCode === 400 && e.message === 'Invalid category identifier') {
+        invalidCatRejected = true;
+      }
+    }
+    assert(invalidCatRejected, 'Safely rejects invalid category identifier with HTTP 400 AppError');
+
+    // ── 5. Price Filtering Suite ──────────────────────────────────────────────
+    console.log('\n--- 5. Price Filtering Suite ---');
+    // Minimum price only
+    const minPriceSearch = await searchService.search({
+      minPrice: 50000,
+      limit: 20,
+    });
+    assert(
+      minPriceSearch.products.every(p => p.price >= 50000),
+      'minPrice: 50000 returns only products with price >= 50,000'
+    );
+
+    // Maximum price only
+    const maxPriceSearch = await searchService.search({
+      maxPrice: 30000,
+      limit: 20,
+    });
+    assert(
+      maxPriceSearch.products.every(p => p.price <= 30000),
+      'maxPrice: 30000 returns only products with price <= 30,000'
+    );
+
+    // Inclusive range
+    const rangeSearch = await searchService.search({
+      minPrice: 20000,
+      maxPrice: 60000,
+      limit: 20,
+    });
+    assert(
+      rangeSearch.products.every(p => p.price >= 20000 && p.price <= 60000),
+      'Price range [20000, 60000] enforces inclusive price boundaries'
+    );
+
+    // Zero minimum price
+    const zeroMinSearch = await searchService.search({
+      minPrice: 0,
+      maxPrice: 10000,
+      limit: 10,
+    });
+    assert(
+      zeroMinSearch.products.every(p => p.price >= 0 && p.price <= 10000),
+      'minPrice: 0 is handled safely and inclusively'
+    );
+
+    // Inverted range minPrice > maxPrice rejected
+    let invertedRejected = false;
+    try {
+      await searchService.search({
+        minPrice: 50000,
+        maxPrice: 10000,
+      });
+    } catch (e: any) {
+      if (e.statusCode === 400) {
+        invertedRejected = true;
+      }
+    }
+    assert(invertedRejected, 'Rejects inverted price range (minPrice > maxPrice) with HTTP 400');
+
+    // Negative price rejected
+    let negativeRejected = false;
+    try {
+      await searchService.search({
+        minPrice: -50,
+      });
+    } catch (e: any) {
+      if (e.statusCode === 400) {
+        negativeRejected = true;
+      }
+    }
+    assert(negativeRejected, 'Rejects negative price with HTTP 400');
+
+    // Combined Category and Price filter
+    const catAndPriceSearch = await searchService.search({
+      categoryId: 'electronics',
+      minPrice: 30000,
+      maxPrice: 150000,
+      limit: 20,
+    });
+    assert(
+      catAndPriceSearch.products.every(p => p.price >= 30000 && p.price <= 150000),
+      'Composes category and price filters concurrently'
+    );
+
+    // ── 6. Full Catalog Search with Weighted Relevance ────────────────────────
+    console.log('\n--- 6. Catalog Search with Relevance & Typo Handling ---');
     const catalogSearch = await searchService.search({
       q: 'iphnoe',
       page: 1,
@@ -186,27 +304,62 @@ async function runSearchTests() {
     assert(Array.isArray(catalogSearch.products), 'Executes typo-tolerant catalog query');
     assert(typeof catalogSearch.total === 'number', 'Returns authoritative total count');
 
-    // ── 5. Search Suggestions & Autocomplete ──────────────────────────────────
-    console.log('\n--- 5. Autocomplete Suggestions ---');
+    // ── 7. Search Suggestions & Autocomplete ──────────────────────────────────
+    console.log('\n--- 7. Autocomplete Suggestions ---');
     const suggestions = await searchService.getSuggestions('سام');
     assert(Array.isArray(suggestions) && suggestions.length > 0, 'Returns brand/category/product suggestions');
 
-    // ── 6. Visual Search Provider Execution ───────────────────────────────────
-    console.log('\n--- 6. Visual Search Provider Execution ---');
-    const visualResult = await visualSearchService.executeVisualSearch(undefined, {
-      textQuery: 'هاتف ذكي',
-      limit: 6,
-    });
-    assert(visualResult.queryId.startsWith('vs_'), 'Assigns unique audit queryId');
-    assert(Array.isArray(visualResult.products), 'Returns formatted products list');
-    assert(Array.isArray(visualResult.similarProducts), 'Separates similar products');
-    assert(typeof visualResult.metadata === 'object', 'Includes visual search match metadata');
+    // ── 8. Visual Search on Real Catalog Images ───────────────────────────────
+    console.log('\n--- 8. Visual Search on Real Storage & Catalog Images ---');
+    await catalogVisualIndexService.ensureIndex(true);
+    const indexStatus = catalogVisualIndexService.getStatus();
+    assert(indexStatus.indexedImagesCount > 0, `Visual index contains ${indexStatus.indexedImagesCount} indexed real images`);
+    assert(indexStatus.indexedProductsCount > 0, `Visual index covers ${indexStatus.indexedProductsCount} unique catalog products`);
 
-    // ── 7. Visual Index Status & Diagnostics ──────────────────────────────────
-    console.log('\n--- 7. Indexing Status & Diagnostics ---');
-    const indexStatus = visualSearchService.getIndexingStatus();
-    assert(typeof indexStatus.indexedImagesCount === 'number', 'Reports indexed images count');
-    assert(typeof indexStatus.isIndexing === 'boolean', 'Reports current indexing activity state');
+    // Fetch a real product image from DB to execute visual search
+    const sampleProductImage = await prisma.productImage.findFirst({
+      where: {
+        product: { isActive: true, isSuspended: false },
+      },
+      include: { product: true },
+    });
+
+    if (sampleProductImage) {
+      const imgBuffer = await (catalogVisualIndexService as any).fetchImageBuffer(sampleProductImage.url);
+      if (imgBuffer) {
+        const visualMatch = await visualSearchService.executeVisualSearch(imgBuffer, {
+          limit: 5,
+        });
+        assert(visualMatch.queryId.startsWith('vs_'), 'Visual search returns audit queryId');
+        assert(visualMatch.products.length > 0, 'Real image query returns genuine visual matches');
+        assert(
+          visualMatch.products.some(p => p.id === sampleProductImage.productId),
+          'Visual search correctly identifies target product as top match'
+        );
+        assert(
+          visualMatch.products.every(p => p.status === 'ACTIVE' || (p as any).isActive !== false),
+          'All visual search results are active and eligible products'
+        );
+      }
+    }
+
+    // Zero mock padding check: unrelated image does not fill with fake products
+    const unrelatedImage = await sharp({
+      create: {
+        width: 120,
+        height: 120,
+        channels: 3,
+        background: { r: 1, g: 254, b: 128 },
+      },
+    }).png().toBuffer();
+
+    const emptyMatch = await visualSearchService.executeVisualSearch(unrelatedImage, {
+      limit: 5,
+    });
+    assert(
+      emptyMatch.products.length < 5,
+      'Does not artificially pad results with fake products when threshold not met'
+    );
 
     console.log(`\n======================================================`);
     console.log(`Smart Search Suite Complete: ${passed} passed, ${failed} failed`);
@@ -216,6 +369,9 @@ async function runSearchTests() {
   } catch (err) {
     console.error('Test execution error:', err);
     process.exit(1);
+  } finally {
+    await prisma.$disconnect();
+    process.exit(0);
   }
 }
 

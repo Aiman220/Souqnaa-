@@ -11,6 +11,7 @@ import {
   formatProductWithCampaign,
 } from '../../utils/product-formatter.util';
 import { WishlistAlertsJob } from '../../services/jobs/wishlist-alerts.job';
+import { catalogVisualIndexService } from '../search/visual/catalog-visual-index.service';
 
 const router = Router();
 
@@ -47,15 +48,41 @@ router.get('/', optionalAuth, async (req: Request, res: Response, next: NextFunc
       ];
     }
 
-    if (categoryId) where.categoryId = String(categoryId);
+    if (categoryId) {
+      const cleanCategoryId = String(categoryId).trim();
+      const category = await prisma.category.findFirst({
+        where: {
+          OR: [{ id: cleanCategoryId }, { slug: cleanCategoryId }],
+          isActive: true,
+        },
+        include: { children: { where: { isActive: true }, select: { id: true } } },
+      });
+      if (category) {
+        where.categoryId = { in: [category.id, ...category.children.map(c => c.id)] };
+      } else {
+        where.categoryId = cleanCategoryId;
+      }
+    }
+
     if (brandId) where.brandId = String(brandId);
     if (storeId) where.storeId = String(storeId);
     if (isFeatured !== undefined) where.isFeatured = isFeatured === 'true';
 
-    if (minPrice || maxPrice) {
+    if (minPrice != null || maxPrice != null) {
+      const pMin = minPrice !== undefined && String(minPrice).trim() !== '' ? parseFloat(String(minPrice)) : undefined;
+      const pMax = maxPrice !== undefined && String(maxPrice).trim() !== '' ? parseFloat(String(maxPrice)) : undefined;
+      if (pMin !== undefined && (isNaN(pMin) || pMin < 0)) {
+        throw new AppError('Minimum price must be a valid non-negative number', 400);
+      }
+      if (pMax !== undefined && (isNaN(pMax) || pMax < 0)) {
+        throw new AppError('Maximum price must be a valid non-negative number', 400);
+      }
+      if (pMin !== undefined && pMax !== undefined && pMin > pMax) {
+        throw new AppError('Minimum price cannot exceed maximum price', 400);
+      }
       where.price = {};
-      if (minPrice) where.price.gte = parseFloat(String(minPrice));
-      if (maxPrice) where.price.lte = parseFloat(String(maxPrice));
+      if (pMin !== undefined) where.price.gte = pMin;
+      if (pMax !== undefined) where.price.lte = pMax;
     }
 
     if (inStock === 'true') {
@@ -304,6 +331,10 @@ router.post('/', authenticate, requireSeller, async (req: Request, res: Response
       return created;
     });
 
+    catalogVisualIndexService.indexProduct(product.id).catch(err => {
+      console.warn('[VisualIndex] Background product reindex error:', err);
+    });
+
     ResponseUtil.created(res, product, 'Product created successfully');
   } catch (error) {
     next(error);
@@ -337,6 +368,10 @@ router.put('/:id', authenticate, requireSeller, async (req: Request, res: Respon
     if (price !== undefined) {
       WishlistAlertsJob.onProductPriceUpdated(id).catch(() => {});
     }
+
+    catalogVisualIndexService.indexProduct(id).catch(err => {
+      console.warn('[VisualIndex] Background product reindex error:', err);
+    });
 
     ResponseUtil.success(res, updated, 'Product updated successfully');
   } catch (error) {

@@ -88,22 +88,25 @@ export class RuleBasedVisualSearchProvider implements IVisualSearchProvider {
       }
     }
 
-    // 3. Resolve category if provided or detected (cached in Redis to avoid DB roundtrips)
-    let allCategories: Array<{ id: string; nameAr: string; nameEn: string; slug: string }> | null = null;
-    try {
-      allCategories = await redis.getJson<Array<{ id: string; nameAr: string; nameEn: string; slug: string }>>('search:categories:active');
-    } catch (_) {}
-
-    if (!allCategories) {
-      allCategories = await prisma.category.findMany({
-        where: { isActive: true },
-        select: { id: true, nameAr: true, nameEn: true, slug: true },
+    // 3. Resolve category and its descendant hierarchy if provided
+    let targetCategoryIds: string[] | undefined;
+    if (context.categoryId) {
+      const targetCategory = await prisma.category.findFirst({
+        where: {
+          OR: [{ id: context.categoryId }, { slug: context.categoryId }],
+          isActive: true,
+        },
+        include: { children: { select: { id: true } } },
       });
-      redis.setJson('search:categories:active', allCategories, 900).catch(() => {});
-    }
-
-    if (context.categoryId && allCategories) {
-      detectedCategory = allCategories.find(c => c.id === context.categoryId);
+      if (targetCategory) {
+        detectedCategory = {
+          id: targetCategory.id,
+          nameAr: targetCategory.nameAr,
+          nameEn: targetCategory.nameEn,
+          slug: targetCategory.slug,
+        };
+        targetCategoryIds = [targetCategory.id, ...targetCategory.children.map(c => c.id)];
+      }
     }
 
     // 4. Retrieve matching products from database based on real visual ranking
@@ -128,10 +131,14 @@ export class RuleBasedVisualSearchProvider implements IVisualSearchProvider {
         isSuspended: false,
       };
 
-      if (context.minPrice || context.maxPrice) {
+      if (context.minPrice != null || context.maxPrice != null) {
         where.price = {};
-        if (context.minPrice) where.price.gte = context.minPrice;
-        if (context.maxPrice) where.price.lte = context.maxPrice;
+        if (context.minPrice != null && !isNaN(context.minPrice) && context.minPrice >= 0) {
+          where.price.gte = context.minPrice;
+        }
+        if (context.maxPrice != null && !isNaN(context.maxPrice) && context.maxPrice >= 0) {
+          where.price.lte = context.maxPrice;
+        }
       }
 
       if (context.inStock) {
@@ -141,8 +148,8 @@ export class RuleBasedVisualSearchProvider implements IVisualSearchProvider {
         ];
       }
 
-      if (detectedCategory) {
-        where.categoryId = detectedCategory.id;
+      if (targetCategoryIds && targetCategoryIds.length > 0) {
+        where.categoryId = { in: targetCategoryIds };
       }
 
       const fetchedProducts = await prisma.product.findMany({
@@ -167,8 +174,8 @@ export class RuleBasedVisualSearchProvider implements IVisualSearchProvider {
       }
     }
 
-    // 5. If visual matches are fewer than requested limit, fill with catalog items
-    if (products.length < limit) {
+    // 5. If text query was provided and visual matches are fewer than requested limit, fill with genuine text-matched items
+    if (products.length < limit && detectedTags.length > 0) {
       const existingIds = products.map(p => p.id);
       const fallbackWhere: any = {
         isActive: true,
@@ -176,20 +183,28 @@ export class RuleBasedVisualSearchProvider implements IVisualSearchProvider {
         id: { notIn: existingIds },
       };
 
-      if (detectedCategory) {
-        fallbackWhere.categoryId = detectedCategory.id;
+      if (targetCategoryIds && targetCategoryIds.length > 0) {
+        fallbackWhere.categoryId = { in: targetCategoryIds };
       }
 
-      if (detectedTags.length > 0) {
-        fallbackWhere.OR = detectedTags.map(tag => ({
-          OR: [
-            { nameAr: { contains: tag, mode: 'insensitive' } },
-            { nameEn: { contains: tag, mode: 'insensitive' } },
-            { descriptionAr: { contains: tag, mode: 'insensitive' } },
-            { descriptionEn: { contains: tag, mode: 'insensitive' } },
-          ],
-        }));
+      if (context.minPrice != null || context.maxPrice != null) {
+        fallbackWhere.price = {};
+        if (context.minPrice != null && !isNaN(context.minPrice) && context.minPrice >= 0) {
+          fallbackWhere.price.gte = context.minPrice;
+        }
+        if (context.maxPrice != null && !isNaN(context.maxPrice) && context.maxPrice >= 0) {
+          fallbackWhere.price.lte = context.maxPrice;
+        }
       }
+
+      fallbackWhere.OR = detectedTags.map(tag => ({
+        OR: [
+          { nameAr: { contains: tag, mode: 'insensitive' } },
+          { nameEn: { contains: tag, mode: 'insensitive' } },
+          { descriptionAr: { contains: tag, mode: 'insensitive' } },
+          { descriptionEn: { contains: tag, mode: 'insensitive' } },
+        ],
+      }));
 
       const moreProducts = await prisma.product.findMany({
         where: fallbackWhere,
