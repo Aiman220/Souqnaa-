@@ -134,6 +134,35 @@ async function runPushTests() {
   if (savedProj) process.env.FIREBASE_PROJECT_ID = savedProj;
   if (savedKey) process.env.FCM_SERVER_KEY = savedKey;
 
+  // 7. Delivery Service Truthful Reporting (No False Success on Pseudo-Tokens)
+  console.log('\n7. Delivery Service Truthful Outcome Reporting:');
+  const { notificationDeliveryService } = await import(
+    '../src/modules/notifications/services/notification-delivery.service'
+  );
+
+  const deliveryResult = await notificationDeliveryService.deliverChannels({
+    recipientId: 'test-user-without-devices-' + Date.now(),
+    channels: [NotificationChannel.IN_APP, NotificationChannel.PUSH],
+    content: {
+      titleAr: 'اختبار الحقيقة',
+      titleEn: 'Truth Test',
+      bodyAr: 'فحص عدم التقرير الكاذب للنجاح',
+      bodyEn: 'Checking honest delivery reporting',
+    },
+    category: 'ORDER',
+    priority: 'HIGH',
+  });
+
+  const inAppOutcome = deliveryResult.find((r) => r.channel === NotificationChannel.IN_APP);
+  const pushOutcome = deliveryResult.find((r) => r.channel === NotificationChannel.PUSH);
+
+  assert(inAppOutcome?.success === true, 'IN_APP channel succeeds via canonical database persistence');
+  assert(pushOutcome?.success === false, 'PUSH channel truthfully fails when recipient has no real push device');
+  assert(
+    !!pushOutcome?.error && pushOutcome.error.includes('no registered device tokens'),
+    'PUSH error explicitly reports lack of device tokens'
+  );
+
   console.log('\n==================================================');
   console.log(`🏁 TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);
   console.log('==================================================');

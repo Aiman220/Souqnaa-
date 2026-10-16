@@ -54,7 +54,8 @@ export class NotificationDeliveryService {
     // Fetch active device tokens once if push channel is requested
     let deviceTokens: string[] = [];
     if (params.channels.includes(NotificationChannel.PUSH)) {
-      const devices = await notificationTokenService.getActiveDevices(params.recipientId);
+      const recipientType = params.data?.recipientType;
+      const devices = await notificationTokenService.getActiveDevices(params.recipientId, recipientType);
       deviceTokens = devices.map((d) => d.deviceToken);
     }
 
@@ -113,17 +114,29 @@ export class NotificationDeliveryService {
         }
       }
 
+      // Check for push pseudo-token / empty token no-op
+      const isPushNoop =
+        channel === NotificationChannel.PUSH &&
+        (sendResult.messageId === 'no_tokens_noop' || sendResult.messageId === 'local_tokens_noop');
+
+      const isActuallySent = sendResult.success && !isPushNoop;
+      const actualError = isPushNoop
+        ? (sendResult.messageId === 'local_tokens_noop'
+            ? 'Recipient has only local pseudo-tokens (no real push token registered)'
+            : 'Recipient has no registered device tokens')
+        : sendResult.error;
+
       // 4. Update Delivery Record
       if (deliveryRecordId) {
         try {
           await prisma.notificationDelivery.update({
             where: { id: deliveryRecordId },
             data: {
-              status: sendResult.success
+              status: isActuallySent
                 ? NotificationDeliveryStatus.SENT
                 : NotificationDeliveryStatus.FAILED,
-              sentAt: sendResult.success ? new Date() : undefined,
-              lastError: sendResult.error || undefined,
+              sentAt: isActuallySent ? new Date() : undefined,
+              lastError: actualError || undefined,
             },
           });
         } catch (_) {}
@@ -132,8 +145,8 @@ export class NotificationDeliveryService {
       results.push({
         channel,
         provider: provider.providerName,
-        success: sendResult.success,
-        error: sendResult.error,
+        success: isActuallySent,
+        error: actualError,
       });
     }
 

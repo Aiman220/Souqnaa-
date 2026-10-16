@@ -160,10 +160,13 @@ export class NotificationDispatcher {
       },
     });
 
+    const channelsSent = deliveries.filter((d) => d.success).map((d) => d.channel);
+    const status = channelsSent.length > 0 ? 'DELIVERED' : 'FAILED';
+
     return {
       notificationId: savedNotificationId,
-      status: 'DELIVERED',
-      channelsSent: allowedChannels,
+      status,
+      channelsSent,
       channelsSuppressed: suppressedChannels,
       deliveries,
     };

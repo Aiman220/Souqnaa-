@@ -53,6 +53,7 @@ export interface PrintDocumentData {
       buildingNumber: string;
       additionalInfo: string;
       formatted: string;
+      plusCode?: string;
     };
   };
   items: PrintItem[];
@@ -100,6 +101,41 @@ export class SellerOrderPrintService {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  }
+
+  /**
+   * Encodes latitude and longitude into an official 10-char Google Plus Code (Open Location Code).
+   */
+  public static encodePlusCode(latitude: number, longitude: number): string {
+    const ALPHABET = '23456789CFGHJMPQRVWX';
+    let lat = Math.min(Math.max(latitude, -90.0), 90.0);
+    let lng = longitude;
+    while (lng < -180.0) lng += 360.0;
+    while (lng >= 180.0) lng -= 360.0;
+    if (lat === 90.0) lat = 89.999999;
+
+    let latVal = lat + 90.0;
+    let lngVal = lng + 180.0;
+    let code = '';
+    let latValUnit = 20.0;
+    let lngValUnit = 20.0;
+
+    for (let i = 0; i < 4; i++) {
+      const latDigit = Math.min(Math.max(Math.floor(latVal / latValUnit), 0), 19);
+      latVal -= latDigit * latValUnit;
+      const lngDigit = Math.min(Math.max(Math.floor(lngVal / lngValUnit), 0), 19);
+      lngVal -= lngDigit * lngValUnit;
+      code += ALPHABET[latDigit];
+      code += ALPHABET[lngDigit];
+      latValUnit /= 20.0;
+      lngValUnit /= 20.0;
+    }
+    code += '+';
+    const latDigit = Math.min(Math.max(Math.floor(latVal / latValUnit), 0), 19);
+    const lngDigit = Math.min(Math.max(Math.floor(lngVal / lngValUnit), 0), 19);
+    code += ALPHABET[latDigit];
+    code += ALPHABET[lngDigit];
+    return code;
   }
 
   /**
@@ -215,15 +251,29 @@ export class SellerOrderPrintService {
     const customerName = this.escapeHtml(rawCustomerName);
     const customerPhone = this.escapeHtml(addr.phone || addr.recipientPhone || parentOrder.user?.phone || 'غير متوفر');
 
-    const gov = this.escapeHtml(addr.governorate || addr.state || 'صنعاء');
-    const city = this.escapeHtml(addr.cityName || addr.city || 'الأمانة');
-    const district = this.escapeHtml(addr.neighborhood || addr.district || '');
-    const street = this.escapeHtml(addr.street || '');
-    const building = this.escapeHtml(addr.buildingNumber || addr.building || '');
-    const additional = this.escapeHtml(addr.additionalInfo || addr.additionalDetails || addr.landmark || '');
+    const cleanAddrText = (text: string | null | undefined): string => {
+      if (!text) return '';
+      let c = String(text).trim();
+      c = c.replace(/موقع\s*محدد(\s*على\s*الخريطة)?(\s*\([^)]*\))?/gi, '').trim();
+      c = c.replace(/\(?\s*\d{1,3}\.\d+[\s,.:;]+\d{1,3}\.\d+\s*\)?/g, '').trim();
+      c = c.replace(/^[\s,،\-–()]+|[\s,،\-–()]+$/g, '').trim();
+      return c;
+    };
+
+    const gov = this.escapeHtml(cleanAddrText(addr.governorate || addr.state || 'صنعاء'));
+    const city = this.escapeHtml(cleanAddrText(addr.cityName || addr.city || 'الأمانة'));
+    const district = this.escapeHtml(cleanAddrText(addr.neighborhood || addr.district || ''));
+    const street = this.escapeHtml(cleanAddrText(addr.street || ''));
+    const building = this.escapeHtml(cleanAddrText(addr.buildingNumber || addr.building || ''));
+    const additional = this.escapeHtml(cleanAddrText(addr.additionalInfo || addr.additionalDetails || addr.landmark || ''));
 
     const addressParts = [gov, city, district, street, building, additional].filter(Boolean);
     const formattedAddress = addressParts.join('، ') || 'عنوان التوصيل المسجل بالطلب';
+
+    const rawLat = Number(addr.latitude);
+    const rawLng = Number(addr.longitude);
+    const hasCoords = !isNaN(rawLat) && !isNaN(rawLng) && rawLat !== 0 && rawLng !== 0;
+    const plusCode = hasCoords ? this.encodePlusCode(rawLat, rawLng) : (addr.plusCode ? cleanAddrText(addr.plusCode) : '');
 
     // Itemized lines from database
     const rawItems: any[] = sellerOrder.items || [];
@@ -334,6 +384,7 @@ export class SellerOrderPrintService {
           buildingNumber: building,
           additionalInfo: additional,
           formatted: formattedAddress,
+          plusCode: plusCode,
         },
       },
       items,
@@ -1018,6 +1069,7 @@ export class SellerOrderPrintService {
         <div class="meta-row"><span class="lbl">اسم العميل المستلم:</span><span class="val">${d.customer.name}</span></div>
         <div class="meta-row"><span class="lbl">رقم هاتف التواصل:</span><span class="val" dir="ltr">${d.customer.phone}</span></div>
         <div class="meta-row"><span class="lbl">عنوان التوصيل:</span><span class="val">${d.customer.deliveryAddress.formatted}</span></div>
+        ${d.customer.deliveryAddress.plusCode ? `<div class="meta-row"><span class="lbl">رمز الموقع (Plus Code):</span><span class="val" dir="ltr" style="font-family: monospace; font-weight: 700; color: #0284c7;">📍 ${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
       </div>
     </div>
 
@@ -1279,6 +1331,7 @@ export class SellerOrderPrintService {
   <div class="row tight"><span>العميل:</span><span>${d.customer.name}</span></div>
   <div class="row tight"><span>الهاتف:</span><span dir="ltr">${d.customer.phone}</span></div>
   <div class="row tight"><span>العنوان:</span><span>${d.customer.deliveryAddress.cityName} - ${d.customer.deliveryAddress.neighborhood || d.customer.deliveryAddress.street || ''}</span></div>
+  ${d.customer.deliveryAddress.plusCode ? `<div class="row tight"><span>Plus Code:</span><span dir="ltr" class="bold" style="font-family: monospace; color: #0284c7;">📍 ${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
 
   <div class="divider"></div>
   ${d.qrCodeDataUri ? `<img class="qr-img" src="${d.qrCodeDataUri}" alt="QR" />` : ''}
@@ -1420,6 +1473,7 @@ export class SellerOrderPrintService {
   <div class="row"><span>الحالة:</span><span>${d.paymentStatusAr}</span></div>
   <div class="row"><span>العميل:</span><span>${d.customer.name}</span></div>
   <div class="row"><span>الهاتف:</span><span dir="ltr">${d.customer.phone}</span></div>
+  ${d.customer.deliveryAddress.plusCode ? `<div class="row"><span>Plus Code:</span><span dir="ltr" class="bold" style="font-family: monospace;">${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
 
   <div class="divider"></div>
   ${d.qrCodeDataUri ? `<img class="qr-img" src="${d.qrCodeDataUri}" alt="QR" />` : ''}
@@ -1637,6 +1691,7 @@ export class SellerOrderPrintService {
         <div>اسم العميل المستلم: <strong>${d.customer.name}</strong></div>
         <div>رقم هاتف التواصل: <strong dir="ltr">${d.customer.phone}</strong></div>
         <div style="grid-column: span 2;">عنوان التوصيل: <strong>${d.customer.deliveryAddress.formatted}</strong></div>
+        ${d.customer.deliveryAddress.plusCode ? `<div style="grid-column: span 2;">رمز الموقع الرقمي (Plus Code): <strong dir="ltr" style="font-family: monospace; color: #0284c7;">📍 ${d.customer.deliveryAddress.plusCode}</strong></div>` : ''}
       </div>
     </div>
 
@@ -1747,6 +1802,7 @@ export class SellerOrderPrintService {
   <div>العميل: <span class="bold">${d.customer.name}</span></div>
   <div>الهاتف: <span dir="ltr">${d.customer.phone}</span></div>
   <div>العنوان: <span>${d.customer.deliveryAddress.formatted}</span></div>
+  ${d.customer.deliveryAddress.plusCode ? `<div>Plus Code: <span class="bold" dir="ltr" style="font-family: monospace; color: #0284c7;">📍 ${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
   <div class="divider"></div>
 
   <div class="bold" style="margin-bottom: 4px;">المنتجات المطلوب تجهيزها:</div>
