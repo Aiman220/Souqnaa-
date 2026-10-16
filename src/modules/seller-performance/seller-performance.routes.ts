@@ -23,6 +23,9 @@ publicSellerPerformanceRouter.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const sellerId = String(req.params.sellerId);
+      if (sellerId === 'me') {
+        return next();
+      }
       const publicData = await SellerPerformanceService.getPublicSellerPerformance(sellerId);
       ResponseUtil.success(res, publicData);
     } catch (err) {
@@ -38,14 +41,38 @@ export const sellerPerformanceRouter = Router();
 sellerPerformanceRouter.use(authenticate, requireSeller);
 
 /**
- * Helper to get the authenticated seller record.
+ * Helper to get the authenticated seller record (auto-provisions if user is authenticated SELLER).
  */
 async function resolveCurrentSeller(userId: string) {
-  const seller = await prisma.seller.findUnique({
+  let seller = await prisma.seller.findUnique({
     where: { userId },
   });
   if (!seller) {
-    throw new AppError('حساب التاجر غير موجود', 404);
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new AppError('حساب التاجر غير موجود', 404);
+    }
+
+    const storeName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'متجري';
+    const storeSlug = `store-${userId.slice(0, 6)}-${Date.now().toString(36)}`;
+
+    seller = await prisma.$transaction(async (tx) => {
+      const createdSeller = await tx.seller.create({
+        data: {
+          userId: user.id,
+          status: 'ACTIVE',
+          commissionRate: 0.10,
+        },
+      });
+      await tx.store.create({
+        data: {
+          sellerId: createdSeller.id,
+          name: storeName,
+          slug: storeSlug,
+        },
+      });
+      return createdSeller;
+    });
   }
   return seller;
 }

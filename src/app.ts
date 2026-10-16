@@ -344,7 +344,12 @@ export const createApp = (): Application => {
   app.use(`${p}/addresses`, addressRoutes);
   app.use(`${p}/categories`, categoryRoutes);
   app.use(`${p}/products`, productRoutes);
-  // Public Seller Performance Score (accessible by customers & storefronts before protected seller routes)
+  // Authoritative Seller Performance Score Engine (Protected Seller Routes)
+  app.use(`${p}/sellers/me`, sellerPerformanceRouter);
+  app.use(`${p}/seller/me`, sellerPerformanceRouter);
+  app.use(`${p}/seller`, sellerPerformanceRouter);
+
+  // Public Seller Performance Score (accessible by customers & storefronts before generic routes)
   app.use(`${p}/stores`, publicSellerPerformanceRouter);
   app.use(`${p}/sellers`, publicSellerPerformanceRouter);
   app.use(`${p}/stores`, storeRoutes);

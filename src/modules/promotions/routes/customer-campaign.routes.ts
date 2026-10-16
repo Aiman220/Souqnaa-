@@ -33,9 +33,9 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       include: {
         badgeAssets: true,
         promotionalBanners: {
-          where: { status: 'APPROVED', isActive: true },
+          where: { status: { in: ['APPROVED', 'ACTIVE'] }, isActive: true },
           include: { placement: true },
-          take: 2,
+          take: 10,
         },
       },
     });

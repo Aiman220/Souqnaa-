@@ -76,21 +76,36 @@ class RedisService {
   // ── String / JSON ─────────────────────────────────────────────────────────
 
   async get(key: string): Promise<string | null> {
+    // 1. Check L1 in-memory cache first (0ms latency, eliminates transatlantic network hops)
+    const item = this.memoryCache.get(key);
+    if (item) {
+      if (item.expiry === 0 || Date.now() < item.expiry) {
+        return item.value;
+      }
+      this.memoryCache.delete(key);
+    }
+
+    // 2. Fetch from Redis (L2) if connected
     if (this.isConnected && this.client) {
       try {
-        return await this.client.get(key);
+        const val = await this.client.get(key);
+        if (val !== null) {
+          // Cache in L1 memory for up to 30s to make subsequent queries instant
+          this.memoryCache.set(key, { value: val, expiry: Date.now() + 30000 });
+        }
+        return val;
       } catch (_) {}
     }
-    const item = this.memoryCache.get(key);
-    if (!item) return null;
-    if (item.expiry > 0 && Date.now() > item.expiry) {
-      this.memoryCache.delete(key);
-      return null;
-    }
-    return item.value;
+
+    return null;
   }
 
   async set(key: string, value: string, ttlSeconds = 0): Promise<void> {
+    // 1. Update L1 in-memory cache immediately (0ms)
+    const expiry = ttlSeconds > 0 ? Date.now() + ttlSeconds * 1000 : 0;
+    this.memoryCache.set(key, { value, expiry });
+
+    // 2. Write through to Redis (L2)
     if (this.isConnected && this.client) {
       try {
         if (ttlSeconds > 0) {
@@ -101,20 +116,21 @@ class RedisService {
         return;
       } catch (_) {}
     }
-    const expiry = ttlSeconds > 0 ? Date.now() + ttlSeconds * 1000 : 0;
-    this.memoryCache.set(key, { value, expiry });
   }
 
   async del(key: string): Promise<void> {
+    // 1. Invalidate L1 memory cache immediately (0ms)
+    this.memoryCache.delete(key);
+    this.memorySets.delete(key);
+    this.memoryCounters.delete(key);
+
+    // 2. Invalidate in Redis (L2)
     if (this.isConnected && this.client) {
       try {
         await this.client.del(key);
         return;
       } catch (_) {}
     }
-    this.memoryCache.delete(key);
-    this.memorySets.delete(key);
-    this.memoryCounters.delete(key);
   }
 
   async getJson<T>(key: string): Promise<T | null> {
