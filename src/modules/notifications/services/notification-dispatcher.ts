@@ -147,6 +147,7 @@ export class NotificationDispatcher {
     const deliveries = await notificationDeliveryService.deliverChannels({
       notificationId: savedNotificationId,
       recipientId: event.recipientId,
+      recipientType: event.recipientType,
       channels: allowedChannels,
       content,
       category: event.category,

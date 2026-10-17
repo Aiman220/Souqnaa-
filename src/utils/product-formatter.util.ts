@@ -96,7 +96,10 @@ export function formatProductForClient(product: any, campaignPresentation?: any)
     reviewCount = typeof product.reviewCount === 'number' ? product.reviewCount : 0;
   }
 
-  const soldCount = typeof product.soldCount === 'number' ? product.soldCount : 0;
+  const rawSold = product.soldCount ?? product.sold_count ?? product.unitsSold ?? product.totalSold;
+  const soldCount = typeof rawSold === 'number'
+    ? rawSold
+    : (typeof rawSold === 'string' ? parseInt(rawSold, 10) || 0 : 0);
 
   const presentation = campaignPresentation !== undefined
     ? campaignPresentation
@@ -112,6 +115,7 @@ export function formatProductForClient(product: any, campaignPresentation?: any)
     rating,
     reviewCount,
     soldCount,
+    sold_count: soldCount, // Canonical backward-compatible alias
     variants,
     sellerId,
     images,

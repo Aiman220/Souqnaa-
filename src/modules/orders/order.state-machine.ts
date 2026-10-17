@@ -260,7 +260,7 @@ export class OrderStateMachine {
           });
         }
       } else if (targetStatusStr === 'DELIVERED') {
-        // Permanent stock deduction
+        // Permanent stock deduction & sold count increment
         for (const item of sellerOrder.items) {
           if (!item.variantId) {
             await tx.inventory.update({
@@ -268,6 +268,14 @@ export class OrderStateMachine {
               data: {
                 quantity: { decrement: item.quantity },
                 reserved: { decrement: item.quantity },
+              },
+            });
+          }
+          if (item.productId) {
+            await tx.product.update({
+              where: { id: item.productId },
+              data: {
+                soldCount: { increment: item.quantity },
               },
             });
           }
@@ -324,6 +332,23 @@ export class OrderStateMachine {
         });
 
         if (sellerBalance && wasDelivered) {
+          // Revert sold count for returned delivered items
+          for (const item of sellerOrder.items) {
+            if (item.productId) {
+              const currentProd = await tx.product.findUnique({
+                where: { id: item.productId },
+                select: { soldCount: true },
+              });
+              if (currentProd && currentProd.soldCount > 0) {
+                const newSoldCount = Math.max(0, currentProd.soldCount - item.quantity);
+                await tx.product.update({
+                  where: { id: item.productId },
+                  data: { soldCount: newSoldCount },
+                });
+              }
+            }
+          }
+
           const deduction = sellerOrder.sellerPayout || 0;
           if (deduction > 0) {
             const currentAvailable = sellerBalance.availableBalance || 0;
@@ -642,6 +667,24 @@ export class OrderStateMachine {
         });
 
         if (isCancellationOrRejection) {
+          if (currentStatus === 'DELIVERED') {
+            for (const item of so.items) {
+              if (item.productId) {
+                const currentProd = await tx.product.findUnique({
+                  where: { id: item.productId },
+                  select: { soldCount: true },
+                });
+                if (currentProd && currentProd.soldCount > 0) {
+                  const newSoldCount = Math.max(0, currentProd.soldCount - item.quantity);
+                  await tx.product.update({
+                    where: { id: item.productId },
+                    data: { soldCount: newSoldCount },
+                  });
+                }
+              }
+            }
+          }
+
           // Release reserved inventory
           for (const item of so.items) {
             if (item.variantId) {
@@ -676,7 +719,7 @@ export class OrderStateMachine {
             reason: reason || (targetStatusStr === 'CANCELLED_BY_CUSTOMER' ? 'إلغاء الطلب من قبل العميل' : 'إلغاء الطلب'),
           });
         } else if (targetStatusStr === 'DELIVERED') {
-          // Permanently deduct inventory & credit seller
+          // Permanently deduct inventory & credit seller & increment sold count
           for (const item of so.items) {
             if (!item.variantId) {
               await tx.inventory.update({
@@ -684,6 +727,14 @@ export class OrderStateMachine {
                 data: {
                   quantity: { decrement: item.quantity },
                   reserved: { decrement: item.quantity },
+                },
+              });
+            }
+            if (item.productId) {
+              await tx.product.update({
+                where: { id: item.productId },
+                data: {
+                  soldCount: { increment: item.quantity },
                 },
               });
             }

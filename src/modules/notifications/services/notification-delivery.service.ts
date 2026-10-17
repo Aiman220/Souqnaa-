@@ -41,6 +41,7 @@ export class NotificationDeliveryService {
   async deliverChannels(params: {
     notificationId?: string;
     recipientId: string;
+    recipientType?: string;
     channels: NotificationChannel[];
     content: RenderedNotificationContent;
     category: string;
@@ -54,7 +55,7 @@ export class NotificationDeliveryService {
     // Fetch active device tokens once if push channel is requested
     let deviceTokens: string[] = [];
     if (params.channels.includes(NotificationChannel.PUSH)) {
-      const recipientType = params.data?.recipientType;
+      const recipientType = params.recipientType || params.data?.recipientType;
       const devices = await notificationTokenService.getActiveDevices(params.recipientId, recipientType);
       deviceTokens = devices.map((d) => d.deviceToken);
     }

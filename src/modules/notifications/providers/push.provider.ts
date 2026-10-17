@@ -1,4 +1,5 @@
 import fs from 'fs';
+import path from 'path';
 import crypto from 'crypto';
 import {
   NotificationChannel,
@@ -66,7 +67,7 @@ export class FcmPushProvider implements NotificationProvider {
   }
 
   /**
-   * Resolves Google Service Account credentials from environment.
+   * Resolves Google Service Account credentials from environment or config.
    */
   public getGoogleCredentials(): GoogleCredentials | null {
     let projectId = process.env.FIREBASE_PROJECT_ID || process.env.FCM_PROJECT_ID;
@@ -74,19 +75,45 @@ export class FcmPushProvider implements NotificationProvider {
     let privateKey = process.env.FIREBASE_PRIVATE_KEY;
 
     const saEnv = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS;
-    if (saEnv) {
+    let loadedJson: any = null;
+
+    if (saEnv && saEnv.trim().startsWith('{') && saEnv.trim().endsWith('}')) {
       try {
-        let jsonStr = saEnv;
-        if (fs.existsSync(saEnv)) {
-          jsonStr = fs.readFileSync(saEnv, 'utf8');
-        }
-        const parsed = JSON.parse(jsonStr);
-        if (parsed.project_id) projectId = parsed.project_id;
-        if (parsed.client_email) clientEmail = parsed.client_email;
-        if (parsed.private_key) privateKey = parsed.private_key;
+        loadedJson = JSON.parse(saEnv);
       } catch (err: any) {
-        console.error('[FCM Push] Failed to parse FIREBASE_SERVICE_ACCOUNT JSON:', err.message);
+        console.error('[FCM Push] Failed to parse inline FIREBASE_SERVICE_ACCOUNT JSON:', err.message);
       }
+    }
+
+    if (!loadedJson && saEnv) {
+      const candidatePaths = [
+        saEnv,
+        path.resolve(process.cwd(), saEnv),
+        path.resolve(process.cwd(), 'config', path.basename(saEnv)),
+        path.resolve(process.cwd(), 'backend/config', path.basename(saEnv)),
+        path.resolve(__dirname, '../../../../config', path.basename(saEnv)),
+      ].filter((p): p is string => Boolean(p && typeof p === 'string'));
+
+      for (const candidate of candidatePaths) {
+        try {
+          if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+            const raw = fs.readFileSync(candidate, 'utf8');
+            loadedJson = JSON.parse(raw);
+            break;
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (loadedJson) {
+      if (loadedJson.project_id) projectId = loadedJson.project_id;
+      if (loadedJson.client_email) clientEmail = loadedJson.client_email;
+      if (loadedJson.private_key) privateKey = loadedJson.private_key;
+    }
+
+    // Canonical project ID normalization (guards against stale placeholder env vars)
+    if (projectId === 'souqnaa-marketplace') {
+      projectId = 'souqnaa';
     }
 
     if (projectId && clientEmail && privateKey) {

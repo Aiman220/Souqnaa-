@@ -956,10 +956,16 @@ function formatProductWithStock(product: any) {
     ? product.variants.reduce((sum: number, v: any) => sum + (v.stockQuantity || 0), 0)
     : 0;
   const stock = product.inventory?.quantity ?? (variantStock > 0 ? variantStock : 0);
+  const rawSold = product.soldCount ?? product.sold_count ?? product.unitsSold ?? product.totalSold;
+  const soldCount = typeof rawSold === 'number'
+    ? rawSold
+    : (typeof rawSold === 'string' ? parseInt(rawSold, 10) || 0 : 0);
 
   return {
     ...product,
     stock,
+    soldCount,
+    sold_count: soldCount,
   };
 }
 

@@ -1069,6 +1069,33 @@ export class RefundService {
         }
       }
 
+      // 2.2 Revert Product Sold Count for Refunded Items (§4)
+      if (refund.id) {
+        try {
+          const refundItems = await tx.refundRequestItem.findMany({
+            where: { refundRequestId: refund.id },
+            select: { productId: true, quantity: true },
+          });
+          for (const item of refundItems) {
+            if (item.productId && item.quantity > 0) {
+              const currentProd = await tx.product.findUnique({
+                where: { id: item.productId },
+                select: { soldCount: true },
+              });
+              if (currentProd && currentProd.soldCount > 0) {
+                const newSoldCount = Math.max(0, currentProd.soldCount - item.quantity);
+                await tx.product.update({
+                  where: { id: item.productId },
+                  data: { soldCount: newSoldCount },
+                });
+              }
+            }
+          }
+        } catch (soldErr) {
+          console.error('[Refund] Failed to adjust product soldCount on refund:', soldErr);
+        }
+      }
+
       // 3. Mark Refund as REFUND_COMPLETED
       await tx.refundRequest.update({
         where: { id: refund.id },
