@@ -317,6 +317,18 @@ export class RefundService {
       return updated;
     });
 
+    notificationDispatcher.dispatch(
+      NotificationEventFactory.refundEvent({
+        eventType: 'REFUND_ACCEPTED',
+        recipientId: updated.customerId,
+        refundId: updated.id,
+        refundNumber: updated.refundNumber,
+        orderId: updated.orderId,
+        amount: Number(updated.requestedAmount || 0),
+        isSeller: false,
+      })
+    ).catch(() => {});
+
     try {
       SocketService.get()?.emitGlobal('refund:seller_accepted', {
         refundId: updated.id,
@@ -457,6 +469,18 @@ export class RefundService {
 
       return res;
     });
+
+    notificationDispatcher.dispatch(
+      NotificationEventFactory.refundEvent({
+        eventType: 'REFUND_REJECTED',
+        recipientId: updated.customerId,
+        refundId: updated.id,
+        refundNumber: updated.refundNumber,
+        orderId: updated.orderId,
+        reason: rejectionReason,
+        isSeller: false,
+      })
+    ).catch(() => {});
 
     try {
       SocketService.get()?.emitGlobal('refund:seller_rejected', {
@@ -722,7 +746,7 @@ export class RefundService {
             ? `${refund.customerNote}\n[ملاحظة النزاع]: ${disputeReason}`
             : disputeReason,
         },
-        include: { items: true, evidence: true, customerDecisions: true, statusHistory: true, order: true },
+        include: { items: true, evidence: true, customerDecisions: true, statusHistory: true, order: true, seller: true },
       });
 
       // Notify Seller & Admin
@@ -742,6 +766,20 @@ export class RefundService {
 
       return res;
     });
+
+    if (updated.seller?.userId) {
+      notificationDispatcher.dispatch(
+        NotificationEventFactory.refundEvent({
+          eventType: 'REFUND_ESCALATED',
+          recipientId: updated.seller.userId,
+          refundId: updated.id,
+          refundNumber: updated.refundNumber,
+          orderId: updated.orderId,
+          reason: disputeReason,
+          isSeller: true,
+        })
+      ).catch(() => {});
+    }
 
     try {
       SocketService.get()?.emitGlobal('dispute:created', {

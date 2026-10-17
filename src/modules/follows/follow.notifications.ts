@@ -1,5 +1,8 @@
+import { randomUUID } from 'crypto';
 import { prisma } from '../../database/prisma';
 import { redis } from '../../database/redis';
+import { notificationDispatcher } from '../notifications/services/notification-dispatcher';
+import { NotificationCategory, NotificationPriority, AppType } from '../notifications/notification.types';
 
 const NOTIFICATION_BATCH_SIZE = 25; // Max followers per grouped notification
 const PENDING_KEY_PREFIX = 'notif:pending:followers:';
@@ -89,20 +92,28 @@ export async function flushSellerNotification(sellerId: string): Promise<void> {
       bodyEn = `${firstFollowerName} and ${count - 1} others are now following ${storeName}`;
     }
 
-    await prisma.notification.create({
+    await notificationDispatcher.dispatch({
+      eventId: randomUUID(),
+      idempotencyKey: `seller_follower_${sellerId}_${batch[0]}_${Date.now()}`,
+      eventType: 'SELLER_NEW_FOLLOWER',
+      category: NotificationCategory.SYSTEM,
+      priority: NotificationPriority.NORMAL,
+      recipientId: sellerId,
+      recipientType: AppType.SELLER,
+      entityType: 'seller',
+      entityId: sellerId,
       data: {
-        userId: sellerId,
+        followerIds: batch,
+        storeId: seller.stores[0]?.name,
+        count,
         titleAr,
         titleEn,
         bodyAr,
         bodyEn,
-        type: 'SELLER_NEW_FOLLOWER',
-        data: JSON.stringify({
-          followerIds: batch,
-          storeId: seller.stores[0]?.name,
-          count,
-        }),
       },
+      bypassQuietHours: false,
+      bypassRateLimit: true,
+      createdAt: new Date(),
     });
   }
 

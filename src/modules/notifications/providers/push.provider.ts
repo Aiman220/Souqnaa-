@@ -309,6 +309,9 @@ export class FcmPushProvider implements NotificationProvider {
     // Deliver via FCM HTTP v1 API
     if (creds) {
       try {
+        console.log(
+          `[FCM Push] [push_delivery_started] recipientId=${params.recipientId} category=${params.category || 'SYSTEM'} tokenCount=${fcmTokens.length}`
+        );
         const accessToken = await this.getAccessToken(creds);
         const url = `https://fcm.googleapis.com/v1/projects/${creds.projectId}/messages:send`;
 
@@ -328,12 +331,15 @@ export class FcmPushProvider implements NotificationProvider {
               const resJson = (await res.json()) as any;
               successfulMessageIds.push(resJson.name || `msg_${Date.now()}`);
               console.log(
-                `[FCM Push] Sent to ${this.sanitizeToken(token)} for user ${params.recipientId} | Message ID: ${resJson.name}`
+                `[FCM Push] [fcm_provider_accepted_or_rejected] status=ACCEPTED token=${this.sanitizeToken(token)} user=${params.recipientId} messageId=${resJson.name}`
               );
             } else {
               const errBody = await res.text();
               const sanitizedErr = errBody.replace(/[A-Za-z0-9_-]{20,}/g, '***');
               errors.push(`Status ${res.status}: ${sanitizedErr}`);
+              console.warn(
+                `[FCM Push] [fcm_provider_accepted_or_rejected] status=REJECTED token=${this.sanitizeToken(token)} httpStatus=${res.status} error=${sanitizedErr}`
+              );
 
               if (
                 res.status === 404 ||

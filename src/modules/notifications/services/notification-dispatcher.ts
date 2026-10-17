@@ -47,6 +47,10 @@ export class NotificationDispatcher {
    * Main Dispatch Pipeline
    */
   async dispatch(event: DomainNotificationEvent): Promise<DispatchResult> {
+    console.log(
+      `[NotificationDispatcher] [notification_dispatch_started] eventId=${event.eventId} eventType=${event.eventType} category=${event.category} recipientId=${event.recipientId} priority=${event.priority}`
+    );
+
     // 1. Emergency Kill Switch check (Critical security notifications always bypass)
     if (this.isEmergencyKillSwitchActive && event.category !== 'SECURITY') {
       return {
@@ -139,6 +143,9 @@ export class NotificationDispatcher {
         },
       });
       savedNotificationId = saved.id;
+      console.log(
+        `[NotificationDispatcher] [notification_persisted] notificationId=${saved.id} eventId=${event.eventId} channels=${JSON.stringify(allowedChannels)}`
+      );
     } catch (err: any) {
       console.error('[NotificationDispatcher] Failed to persist canonical notification:', err);
     }

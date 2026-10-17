@@ -40,12 +40,25 @@ export class NotificationPreferenceService {
    * Get all preferences for a user, filling in defaults for any missing category.
    */
   async getUserPreferences(userId: string): Promise<UserPreferencesMap> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    });
+    const userRole = user?.role || 'CUSTOMER';
+
     const records = await prisma.notificationPreference.findMany({
       where: { userId },
     });
 
     const map: UserPreferencesMap = {};
     for (const r of records) {
+      if (userRole === 'CUSTOMER' && (r.category === NotificationCategory.ADMIN || r.category === NotificationCategory.SELLER)) {
+        continue;
+      }
+      if (userRole === 'SELLER' && r.category === NotificationCategory.ADMIN) {
+        continue;
+      }
+
       map[r.category] = {
         pushEnabled: r.pushEnabled,
         emailEnabled: r.emailEnabled,
@@ -61,6 +74,13 @@ export class NotificationPreferenceService {
     // Default for categories not yet saved
     const allCategories = Object.values(NotificationCategory);
     for (const cat of allCategories) {
+      if (userRole === 'CUSTOMER' && (cat === NotificationCategory.ADMIN || cat === NotificationCategory.SELLER)) {
+        continue;
+      }
+      if (userRole === 'SELLER' && cat === NotificationCategory.ADMIN) {
+        continue;
+      }
+
       if (!map[cat]) {
         const isMarketing =
           cat === NotificationCategory.PROMOTION ||

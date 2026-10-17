@@ -567,13 +567,13 @@ export class NotificationTemplateService {
       entityId: event.entityId,
     };
 
-    const titleAr = this.interpolate(template.titleAr, variables);
-    const titleEn = this.interpolate(template.titleEn, variables) || titleAr;
-    const bodyAr = this.interpolate(template.bodyAr, variables);
-    const bodyEn = this.interpolate(template.bodyEn, variables) || bodyAr;
+    const titleAr = (event.data?.titleAr as string) || this.interpolate(template.titleAr, variables);
+    const titleEn = (event.data?.titleEn as string) || this.interpolate(template.titleEn, variables) || titleAr;
+    const bodyAr = (event.data?.bodyAr as string) || (event.data?.messageAr as string) || this.interpolate(template.bodyAr, variables);
+    const bodyEn = (event.data?.bodyEn as string) || (event.data?.messageEn as string) || this.interpolate(template.bodyEn, variables) || bodyAr;
 
-    let deepLink: string | undefined = undefined;
-    if (template.deepLinkPattern) {
+    let deepLink: string | undefined = (event.data?.deepLink as string) || undefined;
+    if (!deepLink && template.deepLinkPattern) {
       deepLink = this.interpolate(template.deepLinkPattern, variables);
     }
 
