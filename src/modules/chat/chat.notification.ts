@@ -2,6 +2,7 @@ import { prisma } from '../../database/prisma';
 import { SocketService } from '../../services/websocket/socket.service';
 import { notificationDispatcher } from '../notifications/services/notification-dispatcher';
 import { NotificationEventFactory } from '../notifications/events/domain-events';
+import { AppType } from '../notifications/notification.types';
 
 interface ChatNotificationParams {
   conversationId: string;
@@ -40,6 +41,7 @@ export async function sendChatNotification({
             id: true,
             firstName: true,
             lastName: true,
+            role: true,
           },
         },
       },
@@ -124,18 +126,28 @@ export async function sendChatNotification({
         continue;
       }
 
-      // Check if recipient is actively online in WebSocket
-      const isOnline = socketSvc ? socketSvc.isUserOnline(recipient.userId) : false;
-      if (isOnline) {
-        // Recipient is online and receives the message via WebSocket directly
+      // If recipient is actively inside this specific conversation room right now, they see messages live
+      const isViewingConversation = socketSvc ? socketSvc.isUserInConversation(recipient.userId, conversationId) : false;
+      if (isViewingConversation) {
         continue;
+      }
+
+      // Determine recipient appType dynamically from role
+      let recipientType = AppType.CUSTOMER;
+      const userRole = recipient.user?.role as string | undefined;
+      if (userRole === 'SELLER') {
+        recipientType = AppType.SELLER;
+      } else if (userRole === 'ADMIN' || userRole === 'SUPER_ADMIN') {
+        recipientType = AppType.ADMIN;
       }
 
       // Dispatch through Centralized SOUQNAA Notification Platform
       const chatEvent = NotificationEventFactory.chatEvent({
         eventType: 'CHAT_MESSAGE_RECEIVED',
         recipientId: recipient.userId,
+        recipientType,
         conversationId,
+        messageId,
         senderId,
         senderName: senderNameAr,
         messageText: cleanText || (type === 'image' ? '📷 صورة' : '📎 مرفق'),

@@ -435,6 +435,7 @@ export class NotificationEventFactory {
       | 'CHAT_PRODUCT_SHARED';
     recipientId: string;
     conversationId: string;
+    messageId?: string;
     senderId: string;
     senderName: string;
     messageText?: string;
@@ -445,10 +446,10 @@ export class NotificationEventFactory {
   }): DomainNotificationEvent {
     return {
       eventId: randomUUID(),
-      idempotencyKey: `chat_${params.conversationId}_${params.recipientId}_${Date.now()}`,
+      idempotencyKey: `chat_${params.messageId || params.conversationId}_${params.recipientId}`,
       eventType: params.eventType,
       category: NotificationCategory.CHAT,
-      priority: NotificationPriority.NORMAL,
+      priority: NotificationPriority.HIGH,
       recipientId: params.recipientId,
       recipientType: params.recipientType || AppType.CUSTOMER,
       entityType: 'chat',

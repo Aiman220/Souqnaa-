@@ -49,6 +49,15 @@ export class SocketService {
     return !!(sockets && sockets.length > 0);
   }
 
+  isUserInConversation(userId: string, conversationId: string): boolean {
+    if (!this.io) return false;
+    const sockets = this.userSockets.get(userId);
+    if (!sockets || sockets.length === 0) return false;
+    const room = this.io.sockets.adapter.rooms.get(`conversation:${conversationId}`);
+    if (!room) return false;
+    return sockets.some((sid) => room.has(sid));
+  }
+
   async getLastSeen(userId: string): Promise<Date | null> {
     const memoryLastSeen = this.userLastSeen.get(userId);
     if (memoryLastSeen) return memoryLastSeen;
