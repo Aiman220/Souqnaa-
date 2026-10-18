@@ -270,6 +270,13 @@ export class NotificationTemplateService {
       bodyEn: '{{campaignTitleEn}} is live now! Up to {{discountPercentage}}% off.',
       deepLinkPattern: 'souqnaa://campaigns/{{campaignId}}',
     },
+    BROADCAST_CAMPAIGN: {
+      titleAr: 'تخفيضات وعروض خاصة 🌟',
+      titleEn: 'Special Offers 🌟',
+      bodyAr: 'عروض حصرية لجميع عملاء سوقناا تبدأ الآن!',
+      bodyEn: 'Exclusive offers starting now!',
+      deepLinkPattern: 'souqnaa://campaigns/{{campaignId}}',
+    },
 
     // ── Price Drop & Stock Alerts ───────────────────────────────────────────
     PRICE_DROPPED: {
@@ -316,6 +323,20 @@ export class NotificationTemplateService {
       titleEn: 'New order received! 🛍️',
       bodyAr: 'لديك طلب جديد رقم #{{orderNumber}} بقيمة {{totalAmount}} YER.',
       bodyEn: 'You have a new order #{{orderNumber}} worth {{totalAmount}} YER.',
+      deepLinkPattern: 'souqnaa://seller/orders/{{orderId}}',
+    },
+    SELLER_ORDER_RECEIVED: {
+      titleAr: 'أكد العميل استلام الطلب',
+      titleEn: 'Customer confirmed order received',
+      bodyAr: 'أكد العميل استلام الطلب رقم #{{orderNumber}}. افتح سوقنا لعرض تفاصيل الطلب.',
+      bodyEn: 'The customer confirmed receipt of order #{{orderNumber}}. Open SOUQNA to view the order.',
+      deepLinkPattern: 'souqnaa://seller/orders/{{orderId}}',
+    },
+    SELLER_ORDER_CANCELLED: {
+      titleAr: 'تم إلغاء الطلب',
+      titleEn: 'Order cancelled',
+      bodyAr: 'تم إلغاء الطلب رقم #{{orderNumber}} من قبل العميل.',
+      bodyEn: 'Order #{{orderNumber}} was cancelled by the customer.',
       deepLinkPattern: 'souqnaa://seller/orders/{{orderId}}',
     },
     SELLER_PAYMENT_RECEIVED: {
@@ -441,7 +462,7 @@ export class NotificationTemplateService {
    */
   private inferCategory(code: string): NotificationCategory {
     if (code.startsWith('CART_ABANDONMENT_') || code.startsWith('CART_REMINDER')) return NotificationCategory.CART_ABANDONMENT;
-    if (code.startsWith('ORDER_') || code.startsWith('SELLER_NEW_ORDER')) return NotificationCategory.ORDER;
+    if (code.startsWith('ORDER_') || code.startsWith('SELLER_ORDER') || code.startsWith('SELLER_NEW_ORDER')) return NotificationCategory.ORDER;
     if (code.startsWith('PAYMENT_')) return NotificationCategory.PAYMENT;
     if (code.startsWith('REFUND_') || code.startsWith('SELLER_REFUND_')) return NotificationCategory.REFUND;
     if (code.startsWith('WALLET_') || code.startsWith('WITHDRAWAL_') || code.startsWith('SELLER_PAYMENT_')) return NotificationCategory.WALLET;
@@ -550,6 +571,7 @@ export class NotificationTemplateService {
       titleEn: 'Notification from SOUQNAA',
       bodyAr: 'لديك تحديث جديد في حسابك.',
       bodyEn: 'You have a new update in your account.',
+      deepLinkPattern: 'souqnaa://notifications',
     };
 
     return fallback;

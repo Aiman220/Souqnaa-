@@ -185,12 +185,16 @@ export class FcmPushProvider implements NotificationProvider {
     const isUrgent = params.priority === NotificationPriority.URGENT;
     const isHigh = isUrgent || params.priority === NotificationPriority.HIGH;
 
+    const resolvedDeepLink = params.content.deepLink || (params.data?.deepLink as string) || '';
+    const resolvedEntityType = params.entityType || (params.data?.entityType as string) || '';
+    const resolvedEntityId = params.entityId || (params.data?.entityId as string) || '';
+
     const dataEntries: Record<string, string> = {
       notificationId: String(params.notificationId || ''),
       category: String(params.category || 'SYSTEM'),
-      entityType: String(params.entityType || ''),
-      entityId: String(params.entityId || ''),
-      deepLink: String(params.content.deepLink || ''),
+      entityType: String(resolvedEntityType),
+      entityId: String(resolvedEntityId),
+      deepLink: String(resolvedDeepLink),
       titleAr: String(params.content.titleAr || ''),
       titleEn: String(params.content.titleEn || ''),
       bodyAr: String(params.content.bodyAr || ''),
@@ -199,7 +203,7 @@ export class FcmPushProvider implements NotificationProvider {
 
     if (params.data) {
       for (const [k, v] of Object.entries(params.data)) {
-        if (v !== undefined && v !== null && !dataEntries[k]) {
+        if (v !== undefined && v !== null && (!dataEntries[k] || dataEntries[k] === '')) {
           dataEntries[k] = typeof v === 'string' ? v : JSON.stringify(v);
         }
       }

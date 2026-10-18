@@ -68,20 +68,27 @@ export class NotificationEventFactory {
 
   // ── Seller Orders ──────────────────────────────────────────────────────────
   static sellerOrderEvent(params: {
-    eventType: 'SELLER_NEW_ORDER' | 'SELLER_PAYMENT_RECEIVED' | 'SELLER_REFUND_REQUEST';
+    eventType:
+      | 'SELLER_NEW_ORDER'
+      | 'SELLER_PAYMENT_RECEIVED'
+      | 'SELLER_REFUND_REQUEST'
+      | 'SELLER_ORDER_RECEIVED'
+      | 'SELLER_ORDER_CANCELLED';
     recipientId: string;
     orderId: string;
     orderNumber: string;
     totalAmount?: number;
     sellerOrderId?: string;
     refundId?: string;
+    cancelReason?: string;
   }): DomainNotificationEvent {
+    const isUrgent = params.eventType === 'SELLER_ORDER_CANCELLED';
     return {
       eventId: randomUUID(),
       idempotencyKey: `seller_order_${params.orderId}_${params.recipientId}_${params.eventType}`,
       eventType: params.eventType,
       category: NotificationCategory.ORDER,
-      priority: NotificationPriority.HIGH,
+      priority: isUrgent ? NotificationPriority.URGENT : NotificationPriority.HIGH,
       recipientId: params.recipientId,
       recipientType: AppType.SELLER,
       entityType: 'order',
@@ -92,11 +99,46 @@ export class NotificationEventFactory {
         totalAmount: params.totalAmount,
         sellerOrderId: params.sellerOrderId,
         refundId: params.refundId,
+        cancelReason: params.cancelReason,
       },
-      bypassQuietHours: false,
+      bypassQuietHours: isUrgent,
       bypassRateLimit: true,
       createdAt: new Date(),
     };
+  }
+
+  static sellerOrderReceivedEvent(params: {
+    recipientId: string;
+    orderId: string;
+    orderNumber: string;
+    totalAmount?: number;
+    sellerOrderId?: string;
+  }): DomainNotificationEvent {
+    return this.sellerOrderEvent({
+      eventType: 'SELLER_ORDER_RECEIVED',
+      recipientId: params.recipientId,
+      orderId: params.orderId,
+      orderNumber: params.orderNumber,
+      totalAmount: params.totalAmount,
+      sellerOrderId: params.sellerOrderId,
+    });
+  }
+
+  static sellerOrderCancelledEvent(params: {
+    recipientId: string;
+    orderId: string;
+    orderNumber: string;
+    sellerOrderId?: string;
+    reason?: string;
+  }): DomainNotificationEvent {
+    return this.sellerOrderEvent({
+      eventType: 'SELLER_ORDER_CANCELLED',
+      recipientId: params.recipientId,
+      orderId: params.orderId,
+      orderNumber: params.orderNumber,
+      sellerOrderId: params.sellerOrderId,
+      cancelReason: params.reason,
+    });
   }
 
   // ── Payments ──────────────────────────────────────────────────────────────

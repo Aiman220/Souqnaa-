@@ -15,7 +15,11 @@ export class AnalyticsExportService {
 
   private static escapeCsvCell(cell: string | number | null | undefined): string {
     if (cell === null || cell === undefined) return '""';
-    const str = String(cell);
+    let str = String(cell).trim();
+    const isPureNumber = typeof cell === 'number' || (!isNaN(Number(str)) && !str.includes(' '));
+    if (!isPureNumber && /^[=+\-@\t\r]/.test(str)) {
+      str = `'${str}`;
+    }
     if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
       return `"${str.replace(/"/g, '""')}"`;
     }

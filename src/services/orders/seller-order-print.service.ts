@@ -145,9 +145,13 @@ export class SellerOrderPrintService {
     if (cachedSouqnaLogoBase64) return cachedSouqnaLogoBase64;
     try {
       const candidatePaths = [
+        path.resolve(__dirname, '../../assets/souqna_logo.png'),
+        path.resolve(process.cwd(), 'src/assets/souqna_logo.png'),
         path.resolve(__dirname, '../../../../apps/customer/assets/images/souqna_logo.png'),
         path.resolve(process.cwd(), '../apps/customer/assets/images/souqna_logo.png'),
         path.resolve(process.cwd(), 'apps/customer/assets/images/souqna_logo.png'),
+        path.resolve(process.cwd(), '../apps/seller/assets/images/souqna_logo.png'),
+        path.resolve(process.cwd(), 'apps/seller/assets/images/souqna_logo.png'),
         'e:/سوقناا/apps/customer/assets/images/souqna_logo.png',
         'E:/سوقناا/apps/customer/assets/images/souqna_logo.png',
       ];
@@ -425,10 +429,12 @@ export class SellerOrderPrintService {
   public static renderHtmlDocument(data: PrintDocumentData, autoPrint = false): string {
     switch (data.documentType) {
       case 'PACKING_SLIP':
-        return data.format === 'A4'
-          ? this.renderPackingSlipA4(data, autoPrint)
-          : this.renderPackingSlipThermal(data, autoPrint);
+        if (data.format === '58MM') return this.renderPackingSlipThermal58mm(data, autoPrint);
+        if (data.format === '80MM') return this.renderPackingSlipThermal80mm(data, autoPrint);
+        return this.renderPackingSlipA4(data, autoPrint);
       case 'STATEMENT':
+        if (data.format === '58MM') return this.renderSellerStatementThermal58mm(data, autoPrint);
+        if (data.format === '80MM') return this.renderSellerStatementThermal80mm(data, autoPrint);
         return this.renderSellerStatementA4(data, autoPrint);
       case 'INVOICE':
       default:
@@ -1755,9 +1761,9 @@ export class SellerOrderPrintService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 5. PACKING SLIP (THERMAL) RENDERER
+  // 5. PACKING SLIP (THERMAL 80MM) RENDERER
   // ─────────────────────────────────────────────────────────────────────────────
-  private static renderPackingSlipThermal(d: PrintDocumentData, autoPrint: boolean): string {
+  private static renderPackingSlipThermal80mm(d: PrintDocumentData, autoPrint: boolean): string {
     const printScript = this.getSharedPrintScript(autoPrint);
 
     return `<!DOCTYPE html>
@@ -1765,12 +1771,12 @@ export class SellerOrderPrintService {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
-  <title>بوليصة_تجهيز_حرارية_${d.sellerOrderNumber}</title>
+  <title>بوصلة_تجهيز_80مم_${d.sellerOrderNumber}</title>
   <style>
     @page { size: 80mm auto; margin: 2mm 3mm; }
     * { box-sizing: border-box; }
     body {
-      font-family: 'Courier New', Courier, monospace, sans-serif;
+      font-family: 'Courier New', Courier, monospace, 'Cairo', sans-serif;
       width: 72mm;
       max-width: 100%;
       margin: 0 auto;
@@ -1781,7 +1787,7 @@ export class SellerOrderPrintService {
       direction: rtl;
     }
     .no-print { text-align: center; margin-bottom: 8px; }
-    .btn { padding: 6px 12px; background: #0284c7; color: #fff; border: none; border-radius: 4px; font-size: 11px; font-weight: bold; }
+    .btn { padding: 6px 12px; background: #0284c7; color: #fff; border: none; border-radius: 4px; font-size: 11px; font-weight: bold; width: 100%; }
     .center { text-align: center; }
     .bold { font-weight: bold; }
     .divider { border-top: 1px dashed #000; margin: 6px 0; }
@@ -1790,15 +1796,18 @@ export class SellerOrderPrintService {
 </head>
 <body>
   <div class="no-print">
-    <button id="doPrintBtn" type="button" class="btn" onclick="triggerPrint();">🖨️ طباعة بوليصة التجهيز الحرارية</button>
+    <button id="doPrintBtn" type="button" class="btn" onclick="triggerPrint();">🖨️ طباعة بوصلة التجهيز (80 مم)</button>
   </div>
-  <div class="center bold" style="font-size: 14px;">سوقناا • بوليصة تجهيز</div>
-  <div class="center" style="font-size: 10.5px;">PACKING SLIP (NO FINANCIALS)</div>
+  <div class="center bold" style="font-size: 14px;">سوقناا • بوصلة تجهيز</div>
+  <div class="center" style="font-size: 10px;">PACKING SLIP (80MM - NO FINANCIALS)</div>
   <div class="divider"></div>
 
   <div>المتجر: <span class="bold">${d.store.name}</span></div>
   <div>طلب المتجر: <span class="bold" dir="ltr">${d.sellerOrderNumber}</span></div>
   <div>الرئيسي: <span dir="ltr">${d.mainOrderNumber}</span></div>
+  <div>التاريخ: <span>${d.orderDateFormattedAr}</span></div>
+  <div class="divider"></div>
+
   <div>العميل: <span class="bold">${d.customer.name}</span></div>
   <div>الهاتف: <span dir="ltr">${d.customer.phone}</span></div>
   <div>العنوان: <span>${d.customer.deliveryAddress.formatted}</span></div>
@@ -1807,22 +1816,296 @@ export class SellerOrderPrintService {
 
   <div class="bold" style="margin-bottom: 4px;">المنتجات المطلوب تجهيزها:</div>
   ${d.items
-        .map(
-          (it) => `
-    <div style="margin-bottom: 6px;">
-      <div>[ ] <strong>${it.productName}</strong></div>
-      <div style="font-size: 10px; margin-right: 14px;">الكمية: <strong>${it.quantity}</strong> • SKU: ${it.sku}</div>
+    .map(
+      (it) => `
+    <div style="margin-bottom: 6px; padding-bottom: 4px; border-bottom: 0.5px dotted #ccc;">
+      <div>[  ] <strong>${it.productName}</strong></div>
+      ${it.variant ? `<div style="font-size: 10px; color: #444;">المواصفات: ${it.variant}</div>` : ''}
+      <div style="font-size: 10px; margin-right: 12px;">الكمية: <strong>${it.quantity}</strong> • SKU: ${it.sku}</div>
     </div>
   `
-        )
-        .join('')}
+    )
+    .join('')}
 
   <div class="divider"></div>
-  <div>[ ] فحص الجودة (Checked)</div>
-  <div>[ ] تم التغليف والإغلاق (Packed)</div>
+  <div>[  ] فحص الجودة (Checked)</div>
+  <div>[  ] تم التغليف والإغلاق (Packed)</div>
   <div class="divider"></div>
-  ${d.qrCodeDataUri ? `<img src="${d.qrCodeDataUri}" style="width: 85px; height: 85px; display: block; margin: 0 auto;" alt="QR" />` : ''}
+  ${d.qrCodeDataUri ? `<img src="${d.qrCodeDataUri}" style="width: 80px; height: 80px; display: block; margin: 0 auto;" alt="QR" />` : ''}
   <div class="center" style="font-size: 9px; font-family: monospace;">${d.qrPayload.slice(0, 30)}</div>
+  ${printScript}
+</body>
+</html>`;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 5b. PACKING SLIP (THERMAL 58MM) RENDERER
+  // ─────────────────────────────────────────────────────────────────────────────
+  private static renderPackingSlipThermal58mm(d: PrintDocumentData, autoPrint: boolean): string {
+    const printScript = this.getSharedPrintScript(autoPrint);
+
+    return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+  <title>بوصلة_تجهيز_58مم_${d.sellerOrderNumber}</title>
+  <style>
+    @page { size: 58mm auto; margin: 1mm 2mm; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Courier New', Courier, monospace, 'Cairo', sans-serif;
+      width: 48mm;
+      max-width: 100%;
+      margin: 0 auto;
+      padding: 4px 1px 16px;
+      color: #000;
+      background: #fff;
+      font-size: 10px;
+      direction: rtl;
+    }
+    .no-print { text-align: center; margin-bottom: 6px; }
+    .btn { padding: 5px 10px; background: #0284c7; color: #fff; border: none; border-radius: 4px; font-size: 10px; font-weight: bold; width: 100%; }
+    .center { text-align: center; }
+    .bold { font-weight: bold; }
+    .divider { border-top: 1px dashed #000; margin: 4px 0; }
+    @media print { .no-print { display: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="no-print">
+    <button id="doPrintBtn" type="button" class="btn" onclick="triggerPrint();">🖨️ طباعة بوصلة التجهيز (58 مم)</button>
+  </div>
+  <div class="center bold" style="font-size: 12px;">سوقناا • بوصلة تجهيز</div>
+  <div class="center" style="font-size: 8.5px;">PACKING SLIP (58MM)</div>
+  <div class="divider"></div>
+
+  <div>المتجر: <span class="bold">${d.store.name}</span></div>
+  <div>الطلب: <span class="bold" dir="ltr">${d.sellerOrderNumber}</span></div>
+  <div>الرئيسي: <span dir="ltr">${d.shortOrderNumber || d.mainOrderNumber}</span></div>
+  <div>التاريخ: <span>${d.orderDateFormattedAr}</span></div>
+  <div class="divider"></div>
+
+  <div>العميل: <span class="bold">${d.customer.name}</span></div>
+  <div>الهاتف: <span dir="ltr">${d.customer.phone}</span></div>
+  <div>العنوان: <span>${d.customer.deliveryAddress.formatted}</span></div>
+  ${d.customer.deliveryAddress.plusCode ? `<div>Plus Code: <span class="bold" dir="ltr" style="font-family: monospace; color: #0284c7;">📍 ${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
+  <div class="divider"></div>
+
+  <div class="bold" style="margin-bottom: 3px;">المنتجات للتجهيز والفحص:</div>
+  ${d.items
+    .map(
+      (it) => `
+    <div style="margin-bottom: 5px; padding-bottom: 3px; border-bottom: 0.5px dotted #999;">
+      <div>[  ] <strong>${it.productName}</strong></div>
+      ${it.variant ? `<div style="font-size: 9px; color: #333;">المواصفات: ${it.variant}</div>` : ''}
+      <div style="font-size: 9px;">الكمية: <strong>${it.quantity}</strong> • SKU: ${it.sku}</div>
+    </div>
+  `
+    )
+    .join('')}
+
+  <div class="divider"></div>
+  <div>[  ] فحص الجودة (Quality OK)</div>
+  <div>[  ] تم التغليف والإغلاق (Packed)</div>
+  <div class="divider"></div>
+  ${d.qrCodeDataUri ? `<img src="${d.qrCodeDataUri}" style="width: 70px; height: 70px; display: block; margin: 4px auto;" alt="QR" />` : ''}
+  <div class="center" style="font-size: 8px; font-family: monospace;">${d.qrPayload.slice(0, 26)}</div>
+  ${printScript}
+</body>
+</html>`;
+  }
+
+  // Alias for backward compatibility
+  private static renderPackingSlipThermal(d: PrintDocumentData, autoPrint: boolean): string {
+    return this.renderPackingSlipThermal80mm(d, autoPrint);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 5c. SELLER STATEMENT (THERMAL 80MM) RENDERER
+  // ─────────────────────────────────────────────────────────────────────────────
+  private static renderSellerStatementThermal80mm(d: PrintDocumentData, autoPrint: boolean): string {
+    const printScript = this.getSharedPrintScript(autoPrint);
+    const fin = d.sellerFinancials;
+
+    return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+  <title>كشف_حساب_حراري_80مم_${d.sellerOrderNumber}</title>
+  <style>
+    @page { size: 80mm auto; margin: 2mm 3mm; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Courier New', Courier, monospace, 'Cairo', sans-serif;
+      width: 72mm;
+      max-width: 100%;
+      margin: 0 auto;
+      padding: 6px 2px 20px;
+      color: #000;
+      background: #fff;
+      font-size: 11px;
+      direction: rtl;
+    }
+    .no-print { text-align: center; margin-bottom: 8px; }
+    .btn { padding: 6px 12px; background: #4f46e5; color: #fff; border: none; border-radius: 4px; font-size: 11px; font-weight: bold; width: 100%; }
+    .center { text-align: center; }
+    .bold { font-weight: bold; }
+    .divider { border-top: 1px dashed #000; margin: 6px 0; }
+    .row { display: flex; justify-content: space-between; margin: 3px 0; }
+    .highlight-net { background: #f0fdf4; border: 1px solid #16a34a; padding: 4px; border-radius: 4px; font-weight: bold; font-size: 12px; margin: 6px 0; }
+    @media print { .no-print { display: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="no-print">
+    <button id="doPrintBtn" type="button" class="btn" onclick="triggerPrint();">🖨️ طباعة كشف الحساب المالي (80 مم)</button>
+  </div>
+  <div class="center bold" style="font-size: 13.5px;">سوقناا • كشف حساب مالي</div>
+  <div class="center" style="font-size: 9.5px;">SELLER ORDER FINANCIAL STATEMENT (80MM)</div>
+  <div class="divider"></div>
+
+  <div>المتجر: <span class="bold">${d.store.name}</span></div>
+  <div>طلب المتجر: <span class="bold" dir="ltr">${d.sellerOrderNumber}</span></div>
+  <div>الطلب الرئيسي: <span dir="ltr">${d.mainOrderNumber}</span></div>
+  <div>التاريخ: <span>${d.orderDateFormattedAr}</span></div>
+  <div>طريقة دفع العميل: <span>${d.paymentMethodAr}</span></div>
+  <div class="divider"></div>
+
+  <div class="bold" style="margin-bottom: 4px;">تسوية مبيعات الطلب للمتجر:</div>
+  <div class="row">
+    <span>إجمالي مبيعات المتجر:</span>
+    <span class="bold">${fin.sellerGrossAmount.toLocaleString()} ${d.totals.currency}</span>
+  </div>
+  <div class="row">
+    <span>عمولة المنصة:</span>
+    <span style="color: #dc2626;">-${fin.platformCommission.toLocaleString()} ${d.totals.currency}</span>
+  </div>
+  ${fin.discountContribution > 0 ? `
+  <div class="row">
+    <span>مساهمة المتجر بالخصم:</span>
+    <span style="color: #dc2626;">-${fin.discountContribution.toLocaleString()} ${d.totals.currency}</span>
+  </div>` : ''}
+  ${fin.platformFundedDiscount > 0 ? `
+  <div class="row">
+    <span>تعويض عروض المنصة:</span>
+    <span style="color: #16a34a;">+${fin.platformFundedDiscount.toLocaleString()} ${d.totals.currency}</span>
+  </div>` : ''}
+  ${fin.refundDeduction > 0 ? `
+  <div class="row">
+    <span>استقطاعات المرتجع:</span>
+    <span style="color: #dc2626;">-${fin.refundDeduction.toLocaleString()} ${d.totals.currency}</span>
+  </div>` : ''}
+
+  <div class="divider"></div>
+  <div class="row highlight-net">
+    <span>صافي مستحقات البائع:</span>
+    <span dir="ltr">${fin.netSellerAmount.toLocaleString()} ${d.totals.currency}</span>
+  </div>
+
+  <div class="row">
+    <span>حالة تحويل المحفظة:</span>
+    <span class="bold">${fin.walletReleaseStatus}</span>
+  </div>
+  ${fin.walletReleaseDate ? `
+  <div class="row">
+    <span>تاريخ التحرير المتوقع:</span>
+    <span>${fin.walletReleaseDate}</span>
+  </div>` : ''}
+
+  <div class="divider"></div>
+  <div class="center" style="font-size: 8.5px; color: #555;">وثيقة تسوية داخلية معتمدة — منصة سوقناا</div>
+  ${d.qrCodeDataUri ? `<img src="${d.qrCodeDataUri}" style="width: 75px; height: 75px; display: block; margin: 4px auto;" alt="QR" />` : ''}
+  <div class="center" style="font-size: 8px; font-family: monospace;">${d.qrPayload.slice(0, 30)}</div>
+  ${printScript}
+</body>
+</html>`;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 5d. SELLER STATEMENT (THERMAL 58MM) RENDERER
+  // ─────────────────────────────────────────────────────────────────────────────
+  private static renderSellerStatementThermal58mm(d: PrintDocumentData, autoPrint: boolean): string {
+    const printScript = this.getSharedPrintScript(autoPrint);
+    const fin = d.sellerFinancials;
+
+    return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+  <title>كشف_حساب_حراري_58مم_${d.sellerOrderNumber}</title>
+  <style>
+    @page { size: 58mm auto; margin: 1mm 2mm; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Courier New', Courier, monospace, 'Cairo', sans-serif;
+      width: 48mm;
+      max-width: 100%;
+      margin: 0 auto;
+      padding: 4px 1px 16px;
+      color: #000;
+      background: #fff;
+      font-size: 10px;
+      direction: rtl;
+    }
+    .no-print { text-align: center; margin-bottom: 6px; }
+    .btn { padding: 5px 10px; background: #4f46e5; color: #fff; border: none; border-radius: 4px; font-size: 10px; font-weight: bold; width: 100%; }
+    .center { text-align: center; }
+    .bold { font-weight: bold; }
+    .divider { border-top: 1px dashed #000; margin: 4px 0; }
+    .row { display: flex; justify-content: space-between; margin: 2px 0; }
+    .highlight-net { background: #f0fdf4; border: 1px solid #16a34a; padding: 3px; border-radius: 4px; font-weight: bold; font-size: 11px; margin: 4px 0; }
+    @media print { .no-print { display: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="no-print">
+    <button id="doPrintBtn" type="button" class="btn" onclick="triggerPrint();">🖨️ طباعة كشف الحساب (58 مم)</button>
+  </div>
+  <div class="center bold" style="font-size: 12px;">سوقناا • كشف حساب مالي</div>
+  <div class="center" style="font-size: 8px;">ORDER STATEMENT (58MM)</div>
+  <div class="divider"></div>
+
+  <div>المتجر: <span class="bold">${d.store.name}</span></div>
+  <div>الطلب: <span class="bold" dir="ltr">${d.sellerOrderNumber}</span></div>
+  <div>التاريخ: <span>${d.orderDateFormattedAr}</span></div>
+  <div class="divider"></div>
+
+  <div class="row">
+    <span>المبيعات:</span>
+    <span class="bold">${fin.sellerGrossAmount.toLocaleString()} ${d.totals.currency}</span>
+  </div>
+  <div class="row">
+    <span>عمولة المنصة:</span>
+    <span style="color: #dc2626;">-${fin.platformCommission.toLocaleString()}</span>
+  </div>
+  ${fin.discountContribution > 0 ? `
+  <div class="row">
+    <span>خصم المتجر:</span>
+    <span>-${fin.discountContribution.toLocaleString()}</span>
+  </div>` : ''}
+  ${fin.refundDeduction > 0 ? `
+  <div class="row">
+    <span>المرتجع:</span>
+    <span>-${fin.refundDeduction.toLocaleString()}</span>
+  </div>` : ''}
+
+  <div class="divider"></div>
+  <div class="row highlight-net">
+    <span>الصافي للبائع:</span>
+    <span dir="ltr">${fin.netSellerAmount.toLocaleString()} ${d.totals.currency}</span>
+  </div>
+
+  <div class="row">
+    <span>المحفظة:</span>
+    <span class="bold">${fin.walletReleaseStatus}</span>
+  </div>
+
+  <div class="divider"></div>
+  ${d.qrCodeDataUri ? `<img src="${d.qrCodeDataUri}" style="width: 65px; height: 65px; display: block; margin: 4px auto;" alt="QR" />` : ''}
+  <div class="center" style="font-size: 7.5px;">وثيقة تسوية داخلية للبائع</div>
   ${printScript}
 </body>
 </html>`;

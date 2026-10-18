@@ -8,6 +8,9 @@ import {
 import { AppError } from '../../../middleware/error.middleware';
 import { bannerCacheService } from './banner-cache.service';
 import { SocketService } from '../../../services/websocket/socket.service';
+import { randomUUID } from 'crypto';
+import { notificationDispatcher } from '../../notifications/services/notification-dispatcher';
+import { NotificationCategory, NotificationPriority, AppType } from '../../notifications/notification.types';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -1191,6 +1194,27 @@ class SellerPromotionService {
       },
     });
 
+    notificationDispatcher.dispatch({
+      eventId: randomUUID(),
+      idempotencyKey: `seller_promo_${promotionId}_${eventType}`,
+      eventType: 'PROMOTION_STATUS_CHANGED',
+      category: NotificationCategory.PROMOTION,
+      priority: NotificationPriority.NORMAL,
+      recipientId: seller.userId,
+      recipientType: AppType.SELLER,
+      entityType: 'PROMOTION',
+      entityId: promotionId,
+      data: {
+        titleAr: msg.titleAr,
+        titleEn: msg.titleAr,
+        bodyAr: msg.bodyAr,
+        bodyEn: msg.bodyAr,
+        promotionId,
+        deepLink: 'souqnaa://seller/marketing',
+      },
+      createdAt: new Date(),
+    }).catch(() => {});
+
     try {
       const socket = SocketService.get();
       if (socket) {
@@ -1226,6 +1250,30 @@ class SellerPromotionService {
         data: JSON.stringify({ promotionId, sellerId }),
       })),
     });
+
+    for (const a of admins) {
+      notificationDispatcher.dispatch({
+        eventId: randomUUID(),
+        idempotencyKey: `admin_promo_${promotionId}_${a.id}`,
+        eventType: 'ADMIN_PROMOTION_PENDING',
+        category: NotificationCategory.SYSTEM,
+        priority: NotificationPriority.HIGH,
+        recipientId: a.id,
+        recipientType: AppType.ADMIN,
+        entityType: 'PROMOTION',
+        entityId: promotionId,
+        data: {
+          titleAr: 'طلب حملة إعلانية جديد',
+          titleEn: 'New Seller Promotion Request',
+          bodyAr: 'يوجد طلب حملة إعلانية جديد يحتاج مراجعة واعتماد',
+          bodyEn: 'A new seller promotion is pending review and approval',
+          promotionId,
+          sellerId,
+          deepLink: 'souqnaa://admin/promotions',
+        },
+        createdAt: new Date(),
+      }).catch(() => {});
+    }
 
     try {
       const socket = SocketService.get();

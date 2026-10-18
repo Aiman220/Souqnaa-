@@ -1,5 +1,6 @@
 import { Server as HttpServer } from 'http';
 import { Server, Socket } from 'socket.io';
+import { randomUUID } from 'crypto';
 import { JwtUtil } from '../../utils/jwt.util';
 import { prisma } from '../../database/prisma';
 import { verifyProductPayload, verifyOrderPayload } from '../../modules/chat/chat.routes';
@@ -124,6 +125,74 @@ export class SocketService {
           isOnline: true,
         });
       }
+
+      // Join authorized order room
+      socket.on('join:order', async (orderId: string, ack?: (res: any) => void) => {
+        try {
+          if (!orderId || isGuest) {
+            if (ack) ack({ success: false, error: 'Unauthorized to subscribe to order updates' });
+            return;
+          }
+          const cleanOrderId = String(orderId).trim();
+          const userRole = socket.data.user?.role;
+
+          let isAuthorized = false;
+          if (userRole === 'ADMIN') {
+            isAuthorized = true;
+          } else {
+            const order = await prisma.order.findFirst({
+              where: {
+                OR: [
+                  { id: cleanOrderId },
+                  { orderNumber: cleanOrderId },
+                  { sellerOrders: { some: { id: cleanOrderId } } },
+                  { sellerOrders: { some: { sellerOrderNumber: cleanOrderId } } },
+                ],
+              },
+              select: {
+                id: true,
+                orderNumber: true,
+                userId: true,
+                sellerOrders: {
+                  select: {
+                    id: true,
+                    sellerId: true,
+                    seller: { select: { userId: true } },
+                  },
+                },
+              },
+            });
+
+            if (order) {
+              if (order.userId === userId) {
+                isAuthorized = true;
+              } else if (order.sellerOrders.some((so) => so.seller?.userId === userId || so.sellerId === userId)) {
+                isAuthorized = true;
+              }
+            }
+          }
+
+          if (isAuthorized) {
+            socket.join(`order:${cleanOrderId}`);
+            console.log(`[Socket.IO] User ${userId} (${userRole}) joined authorized order room: order:${cleanOrderId}`);
+            if (ack) ack({ success: true, room: `order:${cleanOrderId}` });
+          } else {
+            console.warn(`[Socket.IO] Unauthorized order subscription rejected for user ${userId} on order ${cleanOrderId}`);
+            if (ack) ack({ success: false, error: 'Unauthorized to subscribe to this order' });
+          }
+        } catch (err: any) {
+          console.error(`[Socket.IO] join:order error for ${userId}:`, err);
+          if (ack) ack({ success: false, error: 'Failed to join order room' });
+        }
+      });
+
+      socket.on('leave:order', (orderId: string) => {
+        if (orderId) {
+          const cleanOrderId = String(orderId).trim();
+          socket.leave(`order:${cleanOrderId}`);
+          console.log(`[Socket.IO] User ${userId} left order room: order:${cleanOrderId}`);
+        }
+      });
 
       // Join conversation room
       socket.on('join:conversation', async (conversationId: string) => {
@@ -804,6 +873,90 @@ export class SocketService {
     if (this.io) {
       this.io.to(room).emit(event, data);
     }
+  }
+
+  emitToOrder(orderId: string, event: string, data: any): void {
+    if (this.io) {
+      this.io.to(`order:${orderId}`).emit(event, data);
+    }
+  }
+
+  emitOrderStatusUpdate(params: {
+    orderId: string;
+    orderNumber: string;
+    sellerOrderId?: string;
+    status: string;
+    parentStatus?: string;
+    version?: number;
+    timestamp?: string;
+    changedByRole: string;
+    customerUserId?: string;
+    sellerUserIds?: string[];
+    extra?: Record<string, any>;
+  }): void {
+    if (!this.io) return;
+    const {
+      orderId,
+      orderNumber,
+      sellerOrderId,
+      status,
+      parentStatus,
+      version = Date.now(),
+      timestamp = new Date().toISOString(),
+      changedByRole,
+      customerUserId,
+      sellerUserIds = [],
+      extra = {},
+    } = params;
+
+    const payload = {
+      eventId: randomUUID(),
+      orderId,
+      orderNumber,
+      sellerOrderId,
+      status,
+      parentStatus: parentStatus || status,
+      version,
+      timestamp,
+      changedByRole,
+      ...extra,
+    };
+
+    const specificEvent = `order:${status.toLowerCase()}`;
+
+    // 1. Emit to order rooms (orderId, orderNumber, sellerOrderId)
+    this.io.to(`order:${orderId}`).emit('order:status', payload);
+    this.io.to(`order:${orderId}`).emit(specificEvent, payload);
+    if (orderNumber && orderNumber !== orderId) {
+      this.io.to(`order:${orderNumber}`).emit('order:status', payload);
+      this.io.to(`order:${orderNumber}`).emit(specificEvent, payload);
+    }
+    if (sellerOrderId && sellerOrderId !== orderId) {
+      this.io.to(`order:${sellerOrderId}`).emit('order:status', payload);
+      this.io.to(`order:${sellerOrderId}`).emit(specificEvent, payload);
+    }
+
+    // 2. Emit to Customer's private room
+    if (customerUserId) {
+      this.io.to(`user:${customerUserId}`).emit('order:status', payload);
+      this.io.to(`user:${customerUserId}`).emit(specificEvent, payload);
+    }
+
+    // 3. Emit to all associated Seller private rooms
+    for (const sUserId of sellerUserIds) {
+      if (sUserId) {
+        this.io.to(`user:${sUserId}`).emit('order:status', payload);
+        this.io.to(`user:${sUserId}`).emit(specificEvent, payload);
+      }
+    }
+
+    // 4. Emit to Admin orders room
+    this.io.to('admin:orders').emit('order:status', payload);
+    this.io.to('admin:orders').emit(specificEvent, payload);
+
+    // 5. Global broadcast for backward compatibility
+    this.io.emit('order:status', payload);
+    this.io.emit(specificEvent, payload);
   }
 
   emitGlobal(event: string, data: any): void {

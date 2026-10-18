@@ -99,12 +99,15 @@ export class NotificationScheduler {
             priority: NotificationPriority.NORMAL,
             recipientId: u.id,
             recipientType: u.role === 'SELLER' ? AppType.SELLER : AppType.CUSTOMER,
+            entityType: 'campaign',
+            entityId: campaign.id,
             data: {
               titleAr: campaign.titleAr,
               titleEn: campaign.titleEn || campaign.titleAr,
               bodyAr: campaign.bodyAr,
               bodyEn: campaign.bodyEn || campaign.bodyAr,
               campaignId: campaign.id,
+              deepLink: u.role === 'SELLER' ? 'souqnaa://seller/marketing' : `souqnaa://campaigns/${campaign.id}`,
             },
             bypassQuietHours: false,
             bypassRateLimit: true, // Admin mass broadcasts bypass individual rate limit

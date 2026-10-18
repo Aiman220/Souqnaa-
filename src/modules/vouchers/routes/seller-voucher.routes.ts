@@ -7,6 +7,9 @@ import { ResponseUtil } from '../../../utils/response.util';
 import { AppError } from '../../../middleware/error.middleware';
 import { VoucherService } from '../voucher.service';
 import { VoucherAnalyticsService } from '../services/voucher-analytics.service';
+import { randomUUID } from 'crypto';
+import { notificationDispatcher } from '../../notifications/services/notification-dispatcher';
+import { NotificationCategory, NotificationPriority, AppType } from '../../notifications/notification.types';
 
 const router = Router();
 router.use(authenticate, requireSeller);
@@ -411,6 +414,30 @@ router.post(
               }),
             },
           });
+
+          notificationDispatcher.dispatch({
+            eventId: randomUUID(),
+            idempotencyKey: `voucher_gift_${voucher.id}_${customerId}`,
+            eventType: 'VOUCHER_RECEIVED',
+            category: NotificationCategory.PROMOTION,
+            priority: NotificationPriority.NORMAL,
+            recipientId: customerId,
+            recipientType: AppType.CUSTOMER,
+            entityType: 'VOUCHER',
+            entityId: voucher.id,
+            data: {
+              titleAr: notificationTitleAr,
+              titleEn: notificationTitleEn,
+              bodyAr: notificationBodyAr,
+              bodyEn: notificationBodyEn,
+              voucherId: voucher.id,
+              voucherCode: voucher.code,
+              storeId: store?.id,
+              discountText,
+              deepLink: 'souqnaa://vouchers',
+            },
+            createdAt: new Date(),
+          }).catch(() => {});
 
           // 3. Socket real-time push
           try {

@@ -26,32 +26,27 @@ export class StatementNumberService {
     const currentYear = year || new Date().getFullYear();
     const prefix = this.PREFIXES[statementType] || 'SQ-STMT';
 
-    // Use transaction with raw row locking or upsert with increment for strict concurrency safety
-    const sequence = await prisma.$transaction(async (tx) => {
-      // Upsert statement sequence record
-      const seq = await tx.statementSequence.upsert({
-        where: {
-          statementType_year: {
-            statementType,
-            year: currentYear,
-          },
-        },
-        create: {
+    // Use direct atomic upsert with increment for strict concurrency safety in PostgreSQL
+    const seq = await prisma.statementSequence.upsert({
+      where: {
+        statementType_year: {
           statementType,
           year: currentYear,
-          currentValue: 1,
         },
-        update: {
-          currentValue: {
-            increment: 1,
-          },
+      },
+      create: {
+        statementType,
+        year: currentYear,
+        currentValue: 1,
+      },
+      update: {
+        currentValue: {
+          increment: 1,
         },
-      });
-
-      return seq.currentValue;
+      },
     });
 
-    const sequenceFormatted = String(sequence).padStart(6, '0');
+    const sequenceFormatted = String(seq.currentValue).padStart(6, '0');
     return `${prefix}-${currentYear}-${sequenceFormatted}`;
   }
 

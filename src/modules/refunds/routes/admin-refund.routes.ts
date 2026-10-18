@@ -12,6 +12,8 @@ import { CustomerWalletService } from '../../wallet/customer-wallet.service';
 import { SocketService } from '../../../services/websocket/socket.service';
 import { RefundStateMachine } from '../refund.state-machine';
 import { RefundActorType, RefundStatus, UserRoleType, RefundDestination, ManualTransferStatus, NotificationType } from '@prisma/client';
+import { notificationDispatcher } from '../../notifications/services/notification-dispatcher';
+import { NotificationEventFactory } from '../../notifications/events/domain-events';
 
 const router = Router();
 router.use(authenticate);
@@ -583,6 +585,18 @@ router.post('/:id/messages', async (req: Request, res: Response, next: NextFunct
           data: JSON.stringify({ refundId: refund.id }),
         },
       });
+      notificationDispatcher.dispatch(
+        NotificationEventFactory.refundEvent({
+          eventType: 'REFUND_ESCALATED',
+          recipientId: refund.customerId,
+          refundId: refund.id,
+          refundNumber: refund.refundNumber,
+          orderId: refund.orderId,
+          reason: message.trim(),
+          isSeller: false,
+        })
+      ).catch(() => {});
+
       // Notify seller
       if (refund.seller?.userId) {
         await prisma.notification.create({
@@ -596,6 +610,17 @@ router.post('/:id/messages', async (req: Request, res: Response, next: NextFunct
             data: JSON.stringify({ refundId: refund.id }),
           },
         });
+        notificationDispatcher.dispatch(
+          NotificationEventFactory.refundEvent({
+            eventType: 'REFUND_ESCALATED',
+            recipientId: refund.seller.userId,
+            refundId: refund.id,
+            refundNumber: refund.refundNumber,
+            orderId: refund.orderId,
+            reason: message.trim(),
+            isSeller: true,
+          })
+        ).catch(() => {});
       }
     }
 

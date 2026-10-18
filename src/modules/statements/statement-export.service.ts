@@ -117,7 +117,12 @@ export class StatementExportService {
     if (value === null || value === undefined) {
       return '""';
     }
-    const str = String(value).trim();
+    let str = String(value).trim();
+    // Protect against CSV formula injection while preserving pure numbers
+    const isPureNumber = typeof value === 'number' || (!isNaN(Number(str)) && !str.includes(' '));
+    if (!isPureNumber && /^[=+\-@\t\r]/.test(str)) {
+      str = `'${str}`;
+    }
     // Escape quotes
     return `"${str.replace(/"/g, '""')}"`;
   }

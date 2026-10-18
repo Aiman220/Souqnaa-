@@ -182,6 +182,7 @@ export class OrderStateMachine {
       where: { id: sellerOrderId },
       include: {
         items: true,
+        seller: { select: { id: true, userId: true } },
         order: {
           include: {
             payment: true,
@@ -478,23 +479,20 @@ export class OrderStateMachine {
 
     // 6. Realtime WebSocket Broadcast
     try {
-      const payload = {
-        orderId: sellerOrder.orderId,
-        orderNumber: sellerOrder.order?.orderNumber,
-        sellerOrderId: sellerOrder.id,
-        status: targetStatusStr,
-        parentStatus: result.parentStatus,
-        changedByRole,
-      };
       const socket = SocketService.get();
       if (socket) {
-        socket.emitGlobal('order:status', payload);
-        const specificEvent = `order:${targetStatusStr.toLowerCase()}`;
-        socket.emitGlobal(specificEvent, payload);
-        if (sellerOrder.order?.userId) {
-          socket.emitToUser(sellerOrder.order.userId, 'order:status', payload);
-          socket.emitToUser(sellerOrder.order.userId, specificEvent, payload);
-        }
+        socket.emitOrderStatusUpdate({
+          orderId: sellerOrder.orderId,
+          orderNumber: sellerOrder.order?.orderNumber || '',
+          sellerOrderId: sellerOrder.id,
+          status: targetStatusStr,
+          parentStatus: result.parentStatus,
+          version: (result.sellerOrder as any)?.updatedAt ? new Date((result.sellerOrder as any).updatedAt).getTime() : Date.now(),
+          timestamp: new Date().toISOString(),
+          changedByRole,
+          customerUserId: sellerOrder.order?.userId,
+          sellerUserIds: sellerOrder.seller?.userId ? [sellerOrder.seller.userId] : [],
+        });
       }
     } catch (_) {}
 
@@ -503,8 +501,13 @@ export class OrderStateMachine {
       const orderEvtMap: Record<string, any> = {
         CONFIRMED: 'ORDER_CONFIRMED',
         PROCESSING: 'ORDER_PROCESSING',
+        READY_TO_SHIP: 'ORDER_READY_TO_SHIP',
         SHIPPED: 'ORDER_SHIPPED',
         DELIVERED: 'ORDER_DELIVERED',
+        CANCELLED_BY_CUSTOMER: 'ORDER_CANCELLED',
+        CANCELLED_BY_SELLER: 'ORDER_CANCELLED',
+        REJECTED_BY_SELLER: 'ORDER_CANCELLED',
+        CANCELLED_BY_ADMIN: 'ORDER_CANCELLED',
         CANCELLED: 'ORDER_CANCELLED',
       };
       const eventType = orderEvtMap[targetStatusStr];
@@ -516,6 +519,7 @@ export class OrderStateMachine {
             orderId: sellerOrder.orderId,
             orderNumber: sellerOrder.order.orderNumber,
             totalAmount: Number(sellerOrder.order.subtotal || 0),
+            cancelReason: reason,
           })
         ).catch(() => {});
       }
@@ -626,7 +630,12 @@ export class OrderStateMachine {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
       include: {
-        sellerOrders: { include: { items: true } },
+        sellerOrders: {
+          include: {
+            items: true,
+            seller: { select: { id: true, userId: true } },
+          },
+        },
         payment: true,
       },
     });
@@ -848,13 +857,98 @@ export class OrderStateMachine {
 
     // 6. Broadcast via Socket
     try {
-      SocketService.get()?.emitGlobal('order:status', {
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-        status: targetStatusStr,
-        changedByRole,
-      });
+      const socket = SocketService.get();
+      if (socket) {
+        const sellerUserIds: string[] = order.sellerOrders
+          .map((so: any) => so.seller?.userId)
+          .filter((uid: any): uid is string => Boolean(uid));
+
+        socket.emitOrderStatusUpdate({
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          status: targetStatusStr,
+          parentStatus: targetStatusStr,
+          version: (result as any)?.updatedAt ? new Date((result as any).updatedAt).getTime() : Date.now(),
+          timestamp: new Date().toISOString(),
+          changedByRole,
+          customerUserId: order.userId,
+          sellerUserIds,
+          extra: {
+            customerConfirmed: targetStatusStr === 'DELIVERED' && changedByRole === 'CUSTOMER',
+          },
+        });
+      }
     } catch (_) {}
+
+    // 6.5. Dispatch Notifications for Whole Order Transitions
+    try {
+      if (targetStatusStr === 'DELIVERED' && changedByRole === 'CUSTOMER') {
+        // Customer confirmed order received -> Notify each seller (Push + In-App)
+        for (const so of order.sellerOrders) {
+          const sUserId = so.seller?.userId;
+          if (sUserId) {
+            notificationDispatcher.dispatch(
+              NotificationEventFactory.sellerOrderReceivedEvent({
+                recipientId: sUserId,
+                orderId: order.id,
+                orderNumber: so.sellerOrderNumber || order.orderNumber,
+                sellerOrderId: so.id,
+                totalAmount: Number(so.sellerPayout || 0),
+              })
+            ).catch((err) => {
+              console.error('[Orders] Failed to dispatch seller order received notification:', err);
+            });
+          }
+        }
+      } else if (targetStatusStr === 'DELIVERED' && changedByRole !== 'CUSTOMER') {
+        // Order delivered by seller/courier/admin -> Notify customer
+        if (order.userId) {
+          notificationDispatcher.dispatch(
+            NotificationEventFactory.orderEvent({
+              eventType: 'ORDER_DELIVERED',
+              recipientId: order.userId,
+              orderId: order.id,
+              orderNumber: order.orderNumber,
+              totalAmount: Number(order.total || 0),
+            })
+          ).catch(() => {});
+        }
+      } else if (targetStatusStr.startsWith('CANCELLED_')) {
+        if (changedByRole === 'CUSTOMER') {
+          // Cancelled by customer -> Notify each seller
+          for (const so of order.sellerOrders) {
+            const sUserId = so.seller?.userId;
+            if (sUserId) {
+              notificationDispatcher.dispatch(
+                NotificationEventFactory.sellerOrderCancelledEvent({
+                  recipientId: sUserId,
+                  orderId: order.id,
+                  orderNumber: so.sellerOrderNumber || order.orderNumber,
+                  sellerOrderId: so.id,
+                  reason,
+                })
+              ).catch(() => {});
+            }
+          }
+        } else {
+          // Cancelled by seller/admin -> Notify customer
+          if (order.userId) {
+            notificationDispatcher.dispatch(
+              NotificationEventFactory.orderEvent({
+                eventType: 'ORDER_CANCELLED',
+                recipientId: order.userId,
+                orderId: order.id,
+                orderNumber: order.orderNumber,
+                totalAmount: Number(order.total || 0),
+                cancelReason: reason,
+              })
+            ).catch(() => {});
+          }
+        }
+      }
+    } catch (notifErr) {
+      console.error('[Orders] Whole order transition notification error:', notifErr);
+    }
 
     // 7. SOUQNAA Coins Purchase Rewards trigger (§19, §20)
     if (targetStatusStr === 'DELIVERED' && order.userId) {

@@ -1391,6 +1391,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
     } catch (_) {}
 
     // Centralized Domain Notification Event Dispatches (§1 - SOUQNAA NOTIFICATION PLATFORM)
+    const sellerUserIds: string[] = [];
     try {
       notificationEventBus.publish(
         NotificationEventFactory.orderEvent({
@@ -1408,6 +1409,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           select: { userId: true },
         });
         if (sRecord?.userId) {
+          sellerUserIds.push(sRecord.userId);
           notificationEventBus.publish(
             NotificationEventFactory.sellerOrderEvent({
               eventType: 'SELLER_NEW_ORDER',
@@ -1425,8 +1427,36 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
     }
 
     try {
-      SocketService.get()?.emitToUser(req.user!.userId, 'order:created', fullOrder);
-      SocketService.get()?.emitGlobal('order:status', { orderId: order.id, status: order.status });
+      const socket = SocketService.get();
+      if (socket) {
+        socket.emitOrderStatusUpdate({
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          status: order.status,
+          parentStatus: order.status,
+          version: fullOrder?.updatedAt ? fullOrder.updatedAt.getTime() : Date.now(),
+          timestamp: new Date().toISOString(),
+          changedByRole: 'CUSTOMER',
+          customerUserId: req.user!.userId,
+          sellerUserIds,
+        });
+        if (fullOrder) {
+          socket.emitToUser(req.user!.userId, 'order:created', fullOrder);
+        }
+        for (const so of createdSellerOrders) {
+          const sRecord = await prisma.seller.findUnique({
+            where: { id: so.sellerId },
+            select: { userId: true },
+          });
+          if (sRecord?.userId) {
+            socket.emitToUser(sRecord.userId, 'order:created', {
+              ...(fullOrder || order),
+              sellerOrderId: so.id,
+              sellerOrderNumber: so.sellerOrderNumber,
+            });
+          }
+        }
+      }
     } catch (_) {}
 
     ResponseUtil.created(res, fullOrder, 'تم إنشاء الطلب بنجاح');
@@ -2402,7 +2432,7 @@ router.post('/:id/cancellation-request', async (req: Request, res: Response, nex
 // 6. CUSTOMER CONFIRM DELIVERY (POST /api/v1/orders/:id/confirm-delivery)
 // Valid when status === 'SHIPPED'
 // ==============================================================================
-router.post('/:id/confirm-delivery', async (req: Request, res: Response, next: NextFunction) => {
+router.post(['/:id/confirm-delivery', '/:id/confirm-received', '/:id/received'], async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
 
@@ -2427,7 +2457,22 @@ router.post('/:id/confirm-delivery', async (req: Request, res: Response, next: N
       note: 'تم تأكيد استلام الشحنة من قبل العميل بنجاح',
     });
 
-    ResponseUtil.success(res, updated, 'تم تأكيد استلام الطلب بنجاح، شكراً لتسوقك معنا!');
+    const fullUpdatedOrder = await prisma.order.findUnique({
+      where: { id: order.id },
+      include: {
+        sellerOrders: {
+          include: {
+            items: true,
+            seller: { select: { id: true, userId: true } },
+          },
+        },
+        statusHistory: { orderBy: { createdAt: 'desc' } },
+        payment: true,
+        deliveryAddress: true,
+      },
+    });
+
+    ResponseUtil.success(res, fullUpdatedOrder || updated, 'تم تأكيد استلام الطلب بنجاح، شكراً لتسوقك معنا!');
   } catch (error) {
     next(error);
   }
