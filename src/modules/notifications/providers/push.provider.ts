@@ -293,8 +293,10 @@ export class FcmPushProvider implements NotificationProvider {
       };
     }
 
-    const fcmTokens = tokens.filter((t) => !t.startsWith('local_'));
-    const localTokens = tokens.filter((t) => t.startsWith('local_'));
+    // Deduplicate tokens to guarantee no recipient receives multiple identical push deliveries
+    const uniqueTokens = Array.from(new Set(tokens.filter((t): t is string => Boolean(t && typeof t === 'string'))));
+    const fcmTokens = uniqueTokens.filter((t) => !t.startsWith('local_'));
+    const localTokens = uniqueTokens.filter((t) => t.startsWith('local_'));
     if (localTokens.length > 0) {
       console.log(
         `[FCM Push] Skipped ${localTokens.length} local pseudo-token(s) for recipient ${params.recipientId}`

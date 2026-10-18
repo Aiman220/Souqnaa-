@@ -57,7 +57,7 @@ export class NotificationDeliveryService {
     if (params.channels.includes(NotificationChannel.PUSH)) {
       const recipientType = params.recipientType || params.data?.recipientType;
       const devices = await notificationTokenService.getActiveDevices(params.recipientId, recipientType);
-      deviceTokens = devices.map((d) => d.deviceToken);
+      deviceTokens = Array.from(new Set(devices.map((d) => d.deviceToken).filter(Boolean)));
     }
 
     for (const channel of params.channels) {

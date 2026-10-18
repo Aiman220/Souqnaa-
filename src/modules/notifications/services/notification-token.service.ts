@@ -81,7 +81,24 @@ export class NotificationTokenService {
       },
     });
 
-    // 2. Synchronize legacy NotificationToken table for backward compatibility
+    // 2. Deactivate any duplicate records for this user having the same token under an older deviceId
+    if (deviceToken && !deviceToken.startsWith('local_')) {
+      try {
+        await prisma.notificationDevice.updateMany({
+          where: {
+            userId,
+            deviceToken,
+            id: { not: device.id },
+            isActive: true,
+          },
+          data: {
+            isActive: false,
+          },
+        });
+      } catch (_) {}
+    }
+
+    // 3. Synchronize legacy NotificationToken table for backward compatibility
     try {
       await prisma.notificationToken.upsert({
         where: { fcmToken: deviceToken },
@@ -102,6 +119,7 @@ export class NotificationTokenService {
 
   /**
    * Get all active devices for a user.
+   * Guarantees each physical device token is returned at most once.
    */
   async getActiveDevices(userId: string, appType?: AppType | string) {
     const where: any = {
@@ -112,10 +130,23 @@ export class NotificationTokenService {
       where.appType = appType;
     }
 
-    return prisma.notificationDevice.findMany({
+    const devices = await prisma.notificationDevice.findMany({
       where,
       orderBy: { lastSeenAt: 'desc' },
     });
+
+    const seenTokens = new Set<string>();
+    const uniqueDevices: typeof devices = [];
+
+    for (const d of devices) {
+      const token = d.deviceToken;
+      if (token && !seenTokens.has(token)) {
+        seenTokens.add(token);
+        uniqueDevices.push(d);
+      }
+    }
+
+    return uniqueDevices;
   }
 
   /**
