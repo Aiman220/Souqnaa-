@@ -1,6 +1,6 @@
+import { config } from './config';
 import http from 'http';
 import { createApp } from './app';
-import { config } from './config';
 import { SocketService } from './services/websocket/socket.service';
 import { WishlistAlertsJob } from './services/jobs/wishlist-alerts.job';
 import { FlashSaleScheduler } from './services/jobs/flash-sale.job';

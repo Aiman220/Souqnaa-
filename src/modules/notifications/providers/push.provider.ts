@@ -67,6 +67,22 @@ export class FcmPushProvider implements NotificationProvider {
   }
 
   /**
+   * Sanitizes and formats RSA PEM private key.
+   * Strips outer quotes, expands escaped newlines, and normalizes line breaks.
+   */
+  private formatPrivateKey(rawKey: string): string {
+    let key = rawKey.trim();
+    if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+      key = key.slice(1, -1);
+    }
+    key = key.replace(/\\n/g, '\n').replace(/\r\n/g, '\n');
+    if (!key.endsWith('\n')) {
+      key += '\n';
+    }
+    return key;
+  }
+
+  /**
    * Resolves Google Service Account credentials from environment or config.
    */
   public getGoogleCredentials(): GoogleCredentials | null {
@@ -85,13 +101,17 @@ export class FcmPushProvider implements NotificationProvider {
       }
     }
 
-    if (!loadedJson && saEnv) {
+    if (!loadedJson) {
+      const saBasename = saEnv ? path.basename(saEnv) : 'firebase-service-account.json';
       const candidatePaths = [
         saEnv,
-        path.resolve(process.cwd(), saEnv),
-        path.resolve(process.cwd(), 'config', path.basename(saEnv)),
-        path.resolve(process.cwd(), 'backend/config', path.basename(saEnv)),
-        path.resolve(__dirname, '../../../../config', path.basename(saEnv)),
+        saEnv ? path.resolve(process.cwd(), saEnv) : null,
+        path.resolve(process.cwd(), 'config', saBasename),
+        path.resolve(process.cwd(), 'backend/config', saBasename),
+        path.resolve(__dirname, '../../../../config', saBasename),
+        path.resolve(__dirname, '../../../config', saBasename),
+        path.resolve(__dirname, '../../config', saBasename),
+        path.resolve(__dirname, '../config', saBasename),
       ].filter((p): p is string => Boolean(p && typeof p === 'string'));
 
       for (const candidate of candidatePaths) {
@@ -120,7 +140,7 @@ export class FcmPushProvider implements NotificationProvider {
       return {
         projectId,
         clientEmail,
-        privateKey: privateKey.replace(/\\n/g, '\n'),
+        privateKey: this.formatPrivateKey(privateKey),
       };
     }
 
