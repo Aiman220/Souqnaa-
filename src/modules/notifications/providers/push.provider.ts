@@ -22,6 +22,7 @@ export class FcmPushProvider implements NotificationProvider {
   providerName = 'FCM';
 
   private cachedAccessToken: { token: string; expiresAt: number } | null = null;
+  private sentCampaignTokens = new Set<string>();
 
   /**
    * Resolves the Android Notification Channel ID from the category.
@@ -303,12 +304,30 @@ export class FcmPushProvider implements NotificationProvider {
       );
     }
 
-    if (fcmTokens.length === 0) {
+    const campaignId = String(params.data?.campaignId || (params.entityType === 'campaign' ? params.entityId : '') || '');
+
+    // Deduplicate tokens for broadcast campaigns across multiple accounts sharing a physical device
+    const eligibleTokens = fcmTokens.filter((token) => {
+      if (campaignId) {
+        const key = `${campaignId}:${token}`;
+        if (this.sentCampaignTokens.has(key)) {
+          console.log(`[FCM Push] Skipped duplicate broadcast push for token ${this.sanitizeToken(token)} in campaign ${campaignId}`);
+          return false;
+        }
+        this.sentCampaignTokens.add(key);
+        if (this.sentCampaignTokens.size > 20000) {
+          this.sentCampaignTokens.clear();
+        }
+      }
+      return true;
+    });
+
+    if (eligibleTokens.length === 0) {
       return {
         success: true,
         provider: this.providerName,
         channel: this.channel,
-        messageId: 'local_tokens_noop',
+        messageId: 'campaign_token_already_delivered_noop',
       };
     }
 
@@ -336,12 +355,12 @@ export class FcmPushProvider implements NotificationProvider {
     if (creds) {
       try {
         console.log(
-          `[FCM Push] [push_delivery_started] recipientId=${params.recipientId} category=${params.category || 'SYSTEM'} tokenCount=${fcmTokens.length}`
+          `[FCM Push] [push_delivery_started] recipientId=${params.recipientId} category=${params.category || 'SYSTEM'} tokenCount=${eligibleTokens.length}`
         );
         const accessToken = await this.getAccessToken(creds);
         const url = `https://fcm.googleapis.com/v1/projects/${creds.projectId}/messages:send`;
 
-        for (const token of fcmTokens) {
+        for (const token of eligibleTokens) {
           const payload = this.buildFcmMessage(token, params);
           try {
             const res = await fetch(url, {

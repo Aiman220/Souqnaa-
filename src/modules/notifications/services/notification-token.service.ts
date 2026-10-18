@@ -81,13 +81,13 @@ export class NotificationTokenService {
       },
     });
 
-    // 2. Deactivate any duplicate records for this user having the same token under an older deviceId
+    // 2. Deactivate any previous records on this device token (ensures 1 active user per physical device/token)
     if (deviceToken && !deviceToken.startsWith('local_')) {
       try {
         await prisma.notificationDevice.updateMany({
           where: {
-            userId,
             deviceToken,
+            appType,
             id: { not: device.id },
             isActive: true,
           },
