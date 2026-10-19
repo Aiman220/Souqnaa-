@@ -138,6 +138,18 @@ export class StatementExportService {
   }
 
   /**
+   * Formats currency representation to official Yemeni Rial standard
+   */
+  public static formatCurrency(curr?: string): string {
+    if (!curr) return 'ريال يمني (ر.ي)';
+    const c = curr.trim().toUpperCase();
+    if (c === 'YER' || c === 'ر.ي' || c === 'ريال يمني') {
+      return 'ريال يمني (ر.ي)';
+    }
+    return curr;
+  }
+
+  /**
    * Generates UTF-8 BOM CSV text for the statement lines and summary with specialized Arabic organization.
    */
   public static generateCsv(snapshot: StatementSnapshotDto): string {
@@ -164,7 +176,7 @@ export class StatementExportService {
     const startDateStr = new Date(snapshot.periodStart).toISOString().slice(0, 10);
     const endDateStr = new Date(snapshot.periodEnd).toISOString().slice(0, 10);
     lines.push(`${this.escapeCell('الفترة المالية:')},${this.escapeCell(`من ${startDateStr} إلى ${endDateStr}`)}`);
-    lines.push(`${this.escapeCell('عملة الكشف:')},${this.escapeCell(snapshot.currency || 'YER')}`);
+    lines.push(`${this.escapeCell('عملة الكشف:')},${this.escapeCell(this.formatCurrency(snapshot.currency))}`);
     lines.push(`${this.escapeCell('تاريخ الإصدار والاعتماد:')},${this.escapeCell(new Date(snapshot.createdAt).toISOString().replace('T', ' ').slice(0, 19))}`);
     
     if (snapshot.settlementId) {
@@ -184,7 +196,7 @@ export class StatementExportService {
         if (key === 'effectiveCommissionRate') {
           lines.push(`${this.escapeCell(labelAr)},${this.escapeCell(`${(val * 100).toFixed(2)}%`)},${this.escapeCell('%')}`);
         } else {
-          lines.push(`${this.escapeCell(labelAr)},${this.formatNumber(val)},${this.escapeCell(snapshot.currency || 'YER')}`);
+          lines.push(`${this.escapeCell(labelAr)},${this.formatNumber(val)},${this.escapeCell(this.formatCurrency(snapshot.currency))}`);
         }
       } else if (val instanceof Date) {
         lines.push(`${this.escapeCell(labelAr)},${this.escapeCell(val.toISOString().slice(0, 10))},""`);
@@ -259,7 +271,7 @@ export class StatementExportService {
         this.formatNumber(li.taxAmount),
         this.formatNumber(li.commissionAmount),
         this.formatNumber(li.netAmount),
-        this.escapeCell(li.currency || snapshot.currency || 'YER'),
+        this.escapeCell(this.formatCurrency(li.currency || snapshot.currency)),
         this.escapeCell(statusAr),
       ];
       lines.push(row.join(','));
@@ -301,7 +313,7 @@ export class StatementExportService {
         this.formatNumber(li.taxAmount),
         this.formatNumber(li.commissionAmount),
         this.formatNumber(li.netAmount),
-        this.escapeCell(li.currency || snapshot.currency || 'YER'),
+        this.escapeCell(this.formatCurrency(li.currency || snapshot.currency)),
         this.escapeCell(statusAr),
       ];
       lines.push(row.join(','));
@@ -345,7 +357,7 @@ export class StatementExportService {
         this.formatNumber(baseVal),
         this.escapeCell(rateVal),
         this.formatNumber(li.commissionAmount),
-        this.escapeCell(li.currency || snapshot.currency || 'YER'),
+        this.escapeCell(this.formatCurrency(li.currency || snapshot.currency)),
         this.escapeCell(statusAr),
       ];
       lines.push(row.join(','));
@@ -387,7 +399,7 @@ export class StatementExportService {
         this.escapeCell(taxRate),
         this.formatNumber(li.grossAmount),
         this.formatNumber(li.taxAmount || li.netAmount),
-        this.escapeCell(li.currency || snapshot.currency || 'YER'),
+        this.escapeCell(this.formatCurrency(li.currency || snapshot.currency)),
         this.escapeCell(statusAr),
       ];
       lines.push(row.join(','));

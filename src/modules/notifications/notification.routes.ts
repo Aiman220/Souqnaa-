@@ -8,7 +8,8 @@ import { notificationTemplateService } from './services/notification-template.se
 import { notificationAnalyticsService } from './services/notification-analytics.service';
 import { notificationDispatcher } from './services/notification-dispatcher';
 import { NotificationEventFactory } from './events/domain-events';
-import { NotificationCategory, NotificationPriority, AppType } from './notification.types';
+import { NotificationCategory, NotificationPriority, AppType, normalizePriority } from './notification.types';
+import { adminNotificationRouter } from './services/admin-notification-router.service';
 import { smtpEmailProvider } from './providers/email.provider';
 import { smsNotificationProvider } from './providers/sms.provider';
 import { EmailTemplateKey } from './templates/email-templates';
@@ -28,14 +29,33 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     const skip = (page - 1) * limit;
 
     const category = req.query.category as string | undefined;
+    const priority = req.query.priority as string | undefined;
     const unreadOnly = req.query.unread === 'true';
 
-    const where: any = { userId: req.user!.userId };
+    const userFilter: any = req.user!.role === 'ADMIN'
+      ? { OR: [{ userId: req.user!.userId }, { recipientType: 'ADMIN' }] }
+      : { userId: req.user!.userId };
+
+    const where: any = { ...userFilter };
     if (category && category !== 'ALL') {
       where.category = category;
     }
     if (unreadOnly) {
       where.isRead = false;
+    }
+    if (priority && priority !== 'ALL') {
+      const norm = normalizePriority(priority);
+      if (norm === 'P0') {
+        where.priority = { in: ['P0', 'P0_CRITICAL', 'URGENT', 'CRITICAL'] };
+      } else if (norm === 'P1') {
+        where.priority = { in: ['P1', 'P1_HIGH', 'HIGH'] };
+      } else if (norm === 'P2') {
+        where.priority = { in: ['P2', 'P2_ROUTINE', 'NORMAL'] };
+      } else if (norm === 'P3') {
+        where.priority = { in: ['P3', 'P3_INFO', 'LOW', 'INFO'] };
+      } else {
+        where.priority = priority;
+      }
     }
 
     const [items, total, unreadCount] = await Promise.all([
@@ -47,7 +67,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       }),
       prisma.notification.count({ where }),
       prisma.notification.count({
-        where: { userId: req.user!.userId, isRead: false },
+        where: { ...userFilter, isRead: false },
       }),
     ]);
 
@@ -67,11 +87,78 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
+// ==============================================================================
+// 1.1 ADMIN PREFERENCES & PRIORITY ROUTING (§4, §5, §7)
+// ==============================================================================
+
+// GET /api/v1/notifications/admin/preferences — Get current admin's comprehensive preferences
+router.get('/admin/preferences', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (req.user!.role !== 'ADMIN') return ResponseUtil.forbidden(res, 'Admin privileges required');
+    const preferences = await notificationPreferenceService.getAdminPreferences(req.user!.userId);
+    ResponseUtil.success(res, preferences);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PUT /api/v1/notifications/admin/preferences — Update admin preferences
+router.put('/admin/preferences', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (req.user!.role !== 'ADMIN') return ResponseUtil.forbidden(res, 'Admin privileges required');
+    const updated = await notificationPreferenceService.updateAdminPreferences(req.user!.userId, req.body);
+    ResponseUtil.success(res, updated, 'Admin preferences updated successfully');
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/v1/notifications/admin/mute — Temporarily mute non-P0 admin notifications
+router.post('/admin/mute', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (req.user!.role !== 'ADMIN') return ResponseUtil.forbidden(res, 'Admin privileges required');
+    const hours = parseInt(req.body.hours, 10) || 0;
+    const result = await notificationPreferenceService.muteAdminNotifications(req.user!.userId, hours);
+    ResponseUtil.success(res, result, hours > 0 ? `Notifications muted for ${hours} hours` : 'Notifications unmuted');
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/v1/notifications/admin/route-alert — Intelligently route alert via RBAC
+router.post('/admin/route-alert', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (req.user!.role !== 'ADMIN') return ResponseUtil.forbidden(res, 'Admin privileges required');
+    const { eventType, category, priority, titleAr, titleEn, messageAr, messageEn, referenceId, incidentId, data } = req.body;
+    if (!eventType || !titleAr || !messageAr) {
+      return ResponseUtil.badRequest(res, 'eventType, titleAr, and messageAr are required');
+    }
+    const result = await adminNotificationRouter.routeAndDispatch({
+      eventType,
+      category,
+      priority,
+      titleAr,
+      titleEn: titleEn || titleAr,
+      messageAr,
+      messageEn: messageEn || messageAr,
+      referenceId,
+      incidentId,
+      data,
+    });
+    ResponseUtil.success(res, result, `Alert routed to ${result.recipientsCount} authorized administrators`);
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/v1/notifications/unread-count — Light & fast unread counter
 router.get('/unread-count', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const userFilter: any = req.user!.role === 'ADMIN'
+      ? { OR: [{ userId: req.user!.userId }, { recipientType: 'ADMIN' }] }
+      : { userId: req.user!.userId };
     const unreadCount = await prisma.notification.count({
-      where: { userId: req.user!.userId, isRead: false },
+      where: { ...userFilter, isRead: false },
     });
     ResponseUtil.success(res, { unreadCount });
   } catch (error) {
@@ -83,8 +170,11 @@ router.get('/unread-count', async (req: Request, res: Response, next: NextFuncti
 router.all('/read-all', async (req: Request, res: Response, next: NextFunction) => {
   if (req.method !== 'PATCH' && req.method !== 'PUT' && req.method !== 'POST') return next();
   try {
+    const userFilter: any = req.user!.role === 'ADMIN'
+      ? { OR: [{ userId: req.user!.userId }, { recipientType: 'ADMIN' }] }
+      : { userId: req.user!.userId };
     await prisma.notification.updateMany({
-      where: { userId: req.user!.userId, isRead: false },
+      where: { ...userFilter, isRead: false },
       data: { isRead: true, readAt: new Date() },
     });
     ResponseUtil.success(res, null, 'All notifications marked as read');
@@ -98,8 +188,11 @@ router.all('/:id/read', async (req: Request, res: Response, next: NextFunction) 
   if (req.method !== 'PATCH' && req.method !== 'PUT' && req.method !== 'POST') return next();
   try {
     const id = String(req.params.id);
+    const userFilter: any = req.user!.role === 'ADMIN'
+      ? { OR: [{ userId: req.user!.userId }, { recipientType: 'ADMIN' }] }
+      : { userId: req.user!.userId };
     const notif = await prisma.notification.updateMany({
-      where: { id, userId: req.user!.userId },
+      where: { id, ...userFilter },
       data: { isRead: true, readAt: new Date() },
     });
 

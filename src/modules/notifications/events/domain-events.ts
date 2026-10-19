@@ -505,42 +505,143 @@ export class NotificationEventFactory {
     };
   }
 
-  // ── Admin Alerts ──────────────────────────────────────────────────────────
+  // ── Admin Alerts & Incident Management ────────────────────────────────────
   static adminAlertEvent(params: {
     eventType:
       | 'ADMIN_ALERT'
       | 'NEW_SELLER_REGISTRATION'
+      | 'DEPOSIT_APPROVAL_REQUEST'
+      | 'ROUTINE_ORDER_ACTIVITY'
       | 'REFUND_DISPUTE'
+      | 'SETTLEMENT_FAILURE'
+      | 'SELLER_DEBT_THRESHOLD'
+      | 'SUSPICIOUS_TRANSACTION'
+      | 'DELIVERY_FAILURE_SPIKE'
       | 'HIGH_ERROR_RATE'
-      | 'FRAUD_ALERT';
+      | 'FRAUD_ALERT'
+      | 'CRITICAL_SECURITY_INCIDENT'
+      | 'MAJOR_OUTAGE'
+      | 'PAYMENT_GATEWAY_OUTAGE'
+      | 'DATA_INTEGRITY_ALERT'
+      | 'SCHEDULED_REPORT_COMPLETED'
+      | 'SYSTEM_CONFIG_CHANGED'
+      | 'ROUTINE_SUMMARY_DIGEST'
+      | 'INCIDENT_RESOLVED'
+      | string;
     recipientId: string;
     titleAr: string;
     titleEn: string;
     messageAr: string;
     messageEn: string;
+    priority?: NotificationPriority | string;
     referenceId?: string;
+    incidentId?: string;
+    isResolved?: boolean;
+    digestGroupKey?: string;
+    idempotencyKey?: string;
+    requiredPermission?: string;
+    requiredRole?: string;
+    data?: Record<string, any>;
   }): DomainNotificationEvent {
+    const rawPriority = params.priority || NotificationPriority.HIGH;
+    const isP0 =
+      rawPriority === NotificationPriority.P0_CRITICAL ||
+      rawPriority === 'P0' ||
+      rawPriority === NotificationPriority.URGENT ||
+      params.eventType === 'CRITICAL_SECURITY_INCIDENT' ||
+      params.eventType === 'MAJOR_OUTAGE' ||
+      params.eventType === 'PAYMENT_GATEWAY_OUTAGE' ||
+      params.eventType === 'DATA_INTEGRITY_ALERT';
+
+    const isP1 =
+      !isP0 &&
+      (rawPriority === NotificationPriority.P1_HIGH ||
+        rawPriority === 'P1' ||
+        rawPriority === NotificationPriority.HIGH ||
+        params.eventType === 'REFUND_DISPUTE' ||
+        params.eventType === 'SETTLEMENT_FAILURE' ||
+        params.eventType === 'SELLER_DEBT_THRESHOLD' ||
+        params.eventType === 'SUSPICIOUS_TRANSACTION' ||
+        params.eventType === 'DELIVERY_FAILURE_SPIKE' ||
+        params.eventType === 'FRAUD_ALERT');
+
+    const isP3 =
+      !isP0 &&
+      !isP1 &&
+      (rawPriority === NotificationPriority.P3_INFO ||
+        rawPriority === 'P3' ||
+        rawPriority === NotificationPriority.LOW ||
+        params.eventType === 'SCHEDULED_REPORT_COMPLETED' ||
+        params.eventType === 'SYSTEM_CONFIG_CHANGED');
+
+    const resolvedPriority = isP0
+      ? NotificationPriority.P0_CRITICAL
+      : isP1
+      ? NotificationPriority.P1_HIGH
+      : isP3
+      ? NotificationPriority.P3_INFO
+      : NotificationPriority.P2_ROUTINE;
+
+    // Stable deterministic idempotency key (guarantees deduplication without false collision)
+    const idempotencyKey =
+      params.idempotencyKey ||
+      (params.incidentId
+        ? `incident_${params.incidentId}_${params.eventType}`
+        : `admin_${params.recipientId}_${params.eventType}_${params.referenceId || 'general'}`);
+
     return {
       eventId: randomUUID(),
-      idempotencyKey: `admin_${params.recipientId}_${params.eventType}_${Date.now()}`,
+      idempotencyKey,
       eventType: params.eventType,
       category: NotificationCategory.ADMIN,
-      priority: NotificationPriority.HIGH,
+      priority: resolvedPriority,
       recipientId: params.recipientId,
       recipientType: AppType.ADMIN,
-      entityType: 'admin',
-      entityId: params.referenceId,
+      entityType: params.incidentId ? 'incident' : 'admin',
+      entityId: params.incidentId || params.referenceId,
+      incidentId: params.incidentId,
+      isResolved: params.isResolved,
+      digestGroupKey: params.digestGroupKey,
+      requiredPermission: params.requiredPermission,
+      requiredRole: params.requiredRole,
       data: {
+        ...(params.data || {}),
         titleAr: params.titleAr,
         titleEn: params.titleEn,
         messageAr: params.messageAr,
         messageEn: params.messageEn,
         referenceId: params.referenceId,
+        incidentId: params.incidentId,
+        isResolved: params.isResolved,
+        priority: resolvedPriority,
       },
-      bypassQuietHours: true,
-      bypassRateLimit: true,
+      bypassQuietHours: isP0, // Only P0 critical incidents bypass quiet hours immediately
+      bypassRateLimit: isP0 || isP1, // Critical and operational alerts bypass rate limits
       createdAt: new Date(),
     };
+  }
+
+  static adminRecoveryEvent(params: {
+    incidentId: string;
+    recipientId: string;
+    incidentType: string;
+    titleAr?: string;
+    titleEn?: string;
+    messageAr?: string;
+    messageEn?: string;
+  }): DomainNotificationEvent {
+    return NotificationEventFactory.adminAlertEvent({
+      eventType: 'INCIDENT_RESOLVED',
+      recipientId: params.recipientId,
+      incidentId: params.incidentId,
+      isResolved: true,
+      priority: NotificationPriority.P1_HIGH,
+      idempotencyKey: `incident_${params.incidentId}_resolved`,
+      titleAr: params.titleAr || `تم حل العطل/الحادثة: ${params.incidentType} ✓`,
+      titleEn: params.titleEn || `Incident Resolved: ${params.incidentType}`,
+      messageAr: params.messageAr || `تمت استعادة العمليات الطبيعية بنجاح وإغلاق التنبيه الحرج المرتبط بالحادثة.`,
+      messageEn: params.messageEn || `Normal marketplace operations restored successfully. Incident marked resolved.`,
+    });
   }
 
   // ── Reviews ───────────────────────────────────────────────────────────────

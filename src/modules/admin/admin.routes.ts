@@ -23,6 +23,7 @@ import {
 import { OrderStateMachine } from '../orders/order.state-machine';
 import { SocketService } from '../../services/websocket/socket.service';
 import { CustomerWalletService } from '../wallet/customer-wallet.service';
+import { RefundService } from '../refunds/services/refund.service';
 import { OrderInvoiceService } from '../../services/orders/order-invoice.service';
 import { redis } from '../../database/redis';
 import { config } from '../../config';
@@ -2482,6 +2483,46 @@ router.post('/returns/:id/approve', async (req: Request, res: Response, next: Ne
       data: { status: OrderStatus.RETURN_APPROVED },
     });
 
+    // Deduct from seller wallet and synchronize authoritative refund
+    try {
+      const activeRefund = await prisma.refundRequest.findFirst({
+        where: {
+          orderId: returnReq.orderId,
+          status: { in: [RefundStatus.UNDER_SELLER_REVIEW, RefundStatus.ADMIN_REVIEW, RefundStatus.REQUESTED, RefundStatus.SELLER_REVIEW] },
+        },
+      });
+
+      if (activeRefund) {
+        await RefundService.adminResolve({
+          refundId: activeRefund.id,
+          adminUserId: req.user!.userId,
+          decision: amount < returnReq.order.total ? 'APPROVE_PARTIAL' : 'APPROVE_FULL',
+          approvedAmount: amount,
+          decisionReason: 'موافقة الإدارة على طلب الإرجاع والاسترداد المالي',
+        });
+      } else {
+        const sOrder = returnReq.sellerOrderId
+          ? await prisma.sellerOrder.findUnique({ where: { id: returnReq.sellerOrderId } })
+          : await prisma.sellerOrder.findFirst({ where: { orderId: returnReq.orderId } });
+
+        if (sOrder?.sellerId) {
+          await RefundService.adjustSellerSettlement(
+            {
+              sellerId: sOrder.sellerId,
+              orderId: returnReq.orderId,
+              sellerOrderId: sOrder.id,
+              currency: returnReq.order.currency || 'YER',
+              refundNumber: `RET-${returnReq.id.substring(0, 8).toUpperCase()}`,
+            },
+            amount,
+            prisma
+          );
+        }
+      }
+    } catch (settleErr) {
+      console.error('[AdminReturnApprove] Error adjusting seller settlement:', settleErr);
+    }
+
     await logAdminAction(req.user?.userId, 'RETURN_APPROVED', 'return_requests', { id, orderId: returnReq.orderId, amount }, req);
 
     try {
@@ -2521,7 +2562,7 @@ router.post('/refunds/:id/process', async (req: Request, res: Response, next: Ne
 
     const order = await prisma.order.findFirst({
       where: { OR: [{ id }, { orderNumber: id }] },
-      include: { payment: true },
+      include: { payment: true, sellerOrders: true },
     });
 
     if (!order) throw new AppError('الطلب غير موجود', 404);
@@ -2563,6 +2604,25 @@ router.post('/refunds/:id/process', async (req: Request, res: Response, next: Ne
             tx
           );
         } catch (_) {}
+      }
+
+      // Deduct from seller wallet
+      const sellerId = order.sellerOrders[0]?.sellerId;
+      if (sellerId) {
+        try {
+          await RefundService.adjustSellerSettlement(
+            {
+              sellerId,
+              orderId: order.id,
+              currency: order.currency || 'YER',
+              refundNumber: `REF-${ref.id.substring(0, 8).toUpperCase()}`,
+            },
+            refundAmount,
+            tx
+          );
+        } catch (settleErr) {
+          console.error('[AdminRefundProcess] Error adjusting seller settlement:', settleErr);
+        }
       }
 
       await tx.orderStatusHistory.create({
@@ -2965,25 +3025,20 @@ router.post('/disputes/:id/resolve', async (req: Request, res: Response, next: N
           } catch (_) {}
         }
 
-        // Adjust seller balance
-        const balance = await tx.sellerBalance.findUnique({ where: { sellerId: dispute.sellerId } });
-        if (balance) {
-          await tx.sellerBalance.update({
-            where: { sellerId: dispute.sellerId },
-            data: {
-              availableBalance: Math.max(0, balance.availableBalance - parsedRefundAmount),
+        // Adjust seller balance via authoritative refund service (accounting for commission & liabilities)
+        try {
+          await RefundService.adjustSellerSettlement(
+            {
+              sellerId: dispute.sellerId,
+              orderId: dispute.orderId,
+              currency: 'YER',
+              refundNumber: `DISPUTE-${dispute.id.substring(0, 8)}`,
             },
-          });
-
-          await tx.sellerTransaction.create({
-            data: {
-              sellerBalanceId: balance.id,
-              amount: -parsedRefundAmount,
-              type: 'REFUND',
-              referenceId: dispute.orderId,
-              description: `استرجاع مالي للعميل إثر تسوية نزاع (Dispute #${id})`,
-            },
-          });
+            parsedRefundAmount,
+            tx
+          );
+        } catch (settleErr) {
+          console.error('[AdminDisputeResolve] Error adjusting seller settlement:', settleErr);
         }
       }
 

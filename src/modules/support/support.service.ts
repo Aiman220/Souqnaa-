@@ -1304,6 +1304,29 @@ export class SupportService {
             io.emitToConversation(conv.id, 'message:new', payload);
             io.emitToConversation(conv.id, 'new:message', payload);
           }
+
+          // Also emit directly to individual user rooms to guarantee live delivery
+          // even if the client's room join event lagged or reconnected
+          if (conv.requesterId) {
+            io.emitToUser(conv.requesterId, 'message:new', payload);
+            io.emitToUser(conv.requesterId, 'new:message', payload);
+          }
+          if (conv.assignedAgent?.adminUserId) {
+            io.emitToUser(conv.assignedAgent.adminUserId, 'message:new', payload);
+            io.emitToUser(conv.assignedAgent.adminUserId, 'new:message', payload);
+          }
+          try {
+            const members = await prisma.conversationMember.findMany({
+              where: { conversationId: conv.conversationId },
+              select: { userId: true },
+            });
+            for (const m of members) {
+              if (m.userId !== conv.requesterId && m.userId !== conv.assignedAgent?.adminUserId) {
+                io.emitToUser(m.userId, 'message:new', payload);
+                io.emitToUser(m.userId, 'new:message', payload);
+              }
+            }
+          } catch (_) {}
         }
       }
     } catch (_) {}

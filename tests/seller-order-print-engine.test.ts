@@ -100,6 +100,7 @@ describe('SOUQNA Universal Seller Order Print & Export Engine', () => {
       },
       qrCodeDataUri: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=',
       qrPayload: 'https://souqnaa.com/verify/SO-987654-1',
+      deliveryNotes: 'يرجى الاتصال قبل الوصول والتسليم عند البوابة',
       printAudit: {
         printCount: 1,
         lastPrintedAt: '2026-10-18T10:30:00.000Z',
@@ -142,6 +143,9 @@ describe('SOUQNA Universal Seller Order Print & Export Engine', () => {
         // Packing slip must contain warehouse checklist indicators
         assert.ok(html.includes('بوصلة التجهيز') || html.includes('PACKING SLIP'), 'Must be titled as Packing Slip');
         assert.ok(html.includes('فحص') || html.includes('تجهيز') || html.includes('checkbox') || html.includes('☐'), 'Must contain pick/pack warehouse markers');
+
+        // Packing slip must display delivery notes from checkout screen
+        assert.ok(html.includes('ملاحظات') && html.includes('البوابة'), 'Must display delivery notes in packing slip');
 
         // Packing slip must NOT display order prices, platform fees, or grand total
         assert.ok(!html.includes('67,500') && !html.includes('67500'), 'Must not display total price');

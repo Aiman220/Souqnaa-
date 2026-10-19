@@ -1542,47 +1542,58 @@ router.get('/me/orders', async (req: Request, res: Response, next: NextFunction)
           },
         };
 
-    const orders = await prisma.sellerOrder.findMany({
-      where: {
-        sellerId: seller.id,
-        ...(statusFilter ? { status: statusFilter } : {}),
-        ...paymentFilter,
-      },
-      include: {
-        order: {
-          select: {
-            orderNumber: true,
-            displayOrderNumber: true,
-            orderSequence: true,
-            createdAt: true,
-            deliveryScheduleType: true,
-            deliveryDate: true,
-            deliveryTimeSlot: true,
-            slotBooking: { include: { timeSlot: true } },
-            addressSnapshot: true,
-            notes: true,
-            user: { select: { firstName: true, lastName: true, phone: true } },
-            returnRequests: { orderBy: { createdAt: 'desc' }, take: 1 },
-            refundRequests: {
-              include: { evidence: true },
-              orderBy: { createdAt: 'desc' },
-              take: 1,
+    const page = req.query.page ? Math.max(1, parseInt(req.query.page as string, 10) || 1) : undefined;
+    const limit = req.query.limit ? Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 20)) : undefined;
+    const skip = page && limit ? (page - 1) * limit : undefined;
+
+    const where = {
+      sellerId: seller.id,
+      ...(statusFilter ? { status: statusFilter } : {}),
+      ...paymentFilter,
+    };
+
+    const [orders, total] = await Promise.all([
+      prisma.sellerOrder.findMany({
+        where,
+        include: {
+          order: {
+            select: {
+              orderNumber: true,
+              displayOrderNumber: true,
+              orderSequence: true,
+              createdAt: true,
+              deliveryScheduleType: true,
+              deliveryDate: true,
+              deliveryTimeSlot: true,
+              slotBooking: { include: { timeSlot: true } },
+              addressSnapshot: true,
+              notes: true,
+              user: { select: { firstName: true, lastName: true, phone: true } },
+              returnRequests: { orderBy: { createdAt: 'desc' }, take: 1 },
+              refundRequests: {
+                include: { evidence: true },
+                orderBy: { createdAt: 'desc' },
+                take: 1,
+              },
             },
           },
+          items: true,
+          deliveryMethod: true,
+          deliveryQuoteSnapshot: true,
+          cancellationRequests: true,
+          statusHistory: { orderBy: { createdAt: 'desc' }, take: 1 },
+          refundRequests: {
+            include: { evidence: true },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
         },
-        items: true,
-        deliveryMethod: true,
-        deliveryQuoteSnapshot: true,
-        cancellationRequests: true,
-        statusHistory: { orderBy: { createdAt: 'desc' }, take: 1 },
-        refundRequests: {
-          include: { evidence: true },
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+        orderBy: { createdAt: 'desc' },
+        ...(skip !== undefined ? { skip } : {}),
+        ...(limit !== undefined ? { take: limit } : {}),
+      }),
+      page && limit ? prisma.sellerOrder.count({ where }) : Promise.resolve(0),
+    ]);
 
     const enrichedOrders = orders.map((o) => {
       const firstRefund = (o.refundRequests && o.refundRequests[0]) || (o.order?.refundRequests && o.order.refundRequests[0]);
@@ -1604,7 +1615,14 @@ router.get('/me/orders', async (req: Request, res: Response, next: NextFunction)
       };
     });
 
-    ResponseUtil.success(res, enrichedOrders);
+    const meta = page && limit ? {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    } : undefined;
+
+    ResponseUtil.success(res, enrichedOrders, undefined, 200, meta);
   } catch (error) {
     next(error);
   }

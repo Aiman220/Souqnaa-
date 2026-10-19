@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import {
   NotificationChannel,
   NotificationPriority,
+  normalizePriority,
 } from '../notification.types';
 import {
   NotificationProvider,
@@ -202,9 +203,21 @@ export class FcmPushProvider implements NotificationProvider {
    * Builds platform-compliant FCM HTTP v1 payload with stringified data fields.
    */
   public buildFcmMessage(token: string, params: ProviderSendParams) {
-    const channelId = this.getAndroidChannelId(params.category || 'SYSTEM');
-    const isUrgent = params.priority === NotificationPriority.URGENT;
-    const isHigh = isUrgent || params.priority === NotificationPriority.HIGH;
+    const normPriority = normalizePriority(params.priority);
+    const isP0 = normPriority === 'P0';
+    const isP1 = normPriority === 'P1';
+    const isHigh = isP0 || isP1;
+
+    // Sound policy: P0 always rings; P1 is silent by default unless explicitly enabled in recipient preferences
+    const playSound =
+      isP0 ||
+      params.data?.soundEnabled === true ||
+      params.data?.soundEnabled === 'true' ||
+      params.data?.p0SoundEnabled === true;
+
+    const channelId = isP0
+      ? 'souqna_security_channel'
+      : this.getAndroidChannelId(params.category || 'SYSTEM');
 
     const resolvedDeepLink = params.content.deepLink || (params.data?.deepLink as string) || '';
     const resolvedEntityType = params.entityType || (params.data?.entityType as string) || '';
@@ -213,6 +226,7 @@ export class FcmPushProvider implements NotificationProvider {
     const dataEntries: Record<string, string> = {
       notificationId: String(params.notificationId || ''),
       category: String(params.category || 'SYSTEM'),
+      priority: normPriority,
       entityType: String(resolvedEntityType),
       entityId: String(resolvedEntityId),
       deepLink: String(resolvedDeepLink),
@@ -240,18 +254,18 @@ export class FcmPushProvider implements NotificationProvider {
         },
         data: dataEntries,
         android: {
-          priority: isHigh ? 'HIGH' : 'NORMAL',
+          priority: isP0 ? 'HIGH' : isP1 ? 'NORMAL' : 'NORMAL',
           notification: {
             channel_id: channelId,
-            sound: 'default',
+            ...(playSound ? { sound: 'default' } : {}),
             click_action: 'FLUTTER_NOTIFICATION_CLICK',
             icon: 'ic_notification',
-            color: '#10B981',
+            color: isP0 ? '#EF4444' : '#10B981',
           },
         },
         apns: {
           headers: {
-            'apns-priority': isHigh ? '10' : '5',
+            'apns-priority': isP0 ? '10' : '5',
           },
           payload: {
             aps: {
@@ -260,14 +274,14 @@ export class FcmPushProvider implements NotificationProvider {
                 body: params.content.bodyAr,
               },
               badge: 1,
-              sound: 'default',
+              ...(playSound ? { sound: 'default' } : {}),
               category: params.category || 'SYSTEM',
             },
           },
         },
         webpush: {
           headers: {
-            Urgency: isHigh ? 'high' : 'normal',
+            Urgency: isP0 ? 'high' : 'normal',
           },
           notification: {
             icon: '/icons/Icon-192.png',
@@ -302,6 +316,15 @@ export class FcmPushProvider implements NotificationProvider {
       console.log(
         `[FCM Push] Skipped ${localTokens.length} local pseudo-token(s) for recipient ${params.recipientId}`
       );
+    }
+
+    if (fcmTokens.length === 0) {
+      return {
+        success: true,
+        provider: this.providerName,
+        channel: this.channel,
+        messageId: 'local_tokens_noop',
+      };
     }
 
     const campaignId = String(params.data?.campaignId || (params.entityType === 'campaign' ? params.entityId : '') || '');

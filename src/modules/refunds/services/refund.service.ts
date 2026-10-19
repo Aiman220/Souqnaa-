@@ -11,6 +11,9 @@ import {
   PaymentMethodType,
   TransactionType,
   DisputeStatus,
+  OrderStatus,
+  SellerOrderStatus,
+  ReturnRequestStatus,
 } from '@prisma/client';
 import { RefundStateMachine } from '../refund.state-machine';
 import { RefundEligibilityService } from './refund-eligibility.service';
@@ -180,6 +183,51 @@ export class RefundService {
         );
       }
 
+      // Synchronize Order and SellerOrder status to RETURN_REQUESTED (Awaiting seller review)
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: OrderStatus.RETURN_REQUESTED },
+      });
+
+      if (sellerOrderId) {
+        await tx.sellerOrder.update({
+          where: { id: sellerOrderId },
+          data: { status: SellerOrderStatus.RETURN_REQUESTED },
+        });
+      } else {
+        await tx.sellerOrder.updateMany({
+          where: { orderId: order.id },
+          data: { status: SellerOrderStatus.RETURN_REQUESTED },
+        });
+      }
+
+      // Record ReturnRequest with PENDING status for seller review
+      await tx.returnRequest.create({
+        data: {
+          orderId: order.id,
+          sellerOrderId: sellerOrderId || null,
+          customerId,
+          reason: resolvedReasonText || 'طلب استرجاع',
+          description: description || null,
+          status: ReturnRequestStatus.PENDING,
+          refundAmount: totalAuthoritativeAmount,
+        },
+      });
+
+      await tx.orderStatusHistory.create({
+        data: {
+          orderId: order.id,
+          sellerOrderId: sellerOrderId || null,
+          fromStatus: order.status,
+          toStatus: 'RETURN_REQUESTED',
+          status: OrderStatus.RETURN_REQUESTED,
+          changedBy: customerId,
+          changedByRole: 'CUSTOMER',
+          reason: resolvedReasonText || 'طلب استرجاع',
+          note: `تم تقديم طلب الاسترجاع وهو قيد مراجعة المتجر: ${resolvedReasonText || 'طلب استرجاع'}${description ? ` - ${description}` : ''}`,
+        },
+      });
+
       return req;
     });
 
@@ -296,6 +344,47 @@ export class RefundService {
           sellerResponse: reason || 'موافقة المتجر',
         },
         include: { items: true, sellerDecisions: true, statusHistory: true, order: true },
+      });
+
+      // Synchronize order and sellerOrder status to RETURN_APPROVED
+      await tx.order.update({
+        where: { id: refund.orderId },
+        data: { status: OrderStatus.RETURN_APPROVED },
+      });
+
+      if (refund.sellerOrderId) {
+        await tx.sellerOrder.update({
+          where: { id: refund.sellerOrderId },
+          data: { status: SellerOrderStatus.RETURN_APPROVED },
+        });
+      }
+
+      // Mark ReturnRequest as APPROVED
+      await tx.returnRequest.updateMany({
+        where: {
+          orderId: refund.orderId,
+          status: ReturnRequestStatus.PENDING,
+        },
+        data: {
+          status: ReturnRequestStatus.APPROVED,
+          refundAmount: refund.requestedAmount,
+          resolvedBy: sellerUserId,
+          resolvedAt: new Date(),
+        },
+      });
+
+      await tx.orderStatusHistory.create({
+        data: {
+          orderId: refund.orderId,
+          sellerOrderId: refund.sellerOrderId || null,
+          fromStatus: refund.order?.status || 'RETURN_REQUESTED',
+          toStatus: 'RETURN_APPROVED',
+          status: OrderStatus.RETURN_APPROVED,
+          changedBy: sellerUserId,
+          changedByRole: 'SELLER',
+          reason: reason || 'موافقة المتجر على طلب الاسترجاع',
+          note: `تمت موافقة المتجر على طلب الإرجاع وجارٍ خصم المبلغ من محفظة المتجر`,
+        },
       });
 
       // Automatically execute financial refund upon seller acceptance
@@ -1195,13 +1284,45 @@ export class RefundService {
 
       // Adjust Seller Settlement immediately upon refund commitment
       await this.adjustSellerSettlement(refund, approvedAmount, tx);
+    } else {
+      // Destination 3: ORIGINAL_PAYMENT_METHOD, BANK_TRANSFER, etc.
+      // 1. Adjust Seller Settlement immediately upon refund commitment
+      await this.adjustSellerSettlement(refund, approvedAmount, tx);
+
+      // 2. Mark Refund as REFUND_COMPLETED
+      await tx.refundRequest.update({
+        where: { id: refund.id },
+        data: {
+          status: RefundStatus.REFUND_COMPLETED,
+          resolvedAt: new Date(),
+        },
+      });
+
+      await tx.refundStatusHistory.create({
+        data: {
+          refundRequestId: refund.id,
+          fromStatus: refund.status,
+          toStatus: RefundStatus.REFUND_COMPLETED,
+          changedBy: adminUserId || refund.customerId,
+          actorType: adminUserId ? RefundActorType.ADMIN : RefundActorType.SYSTEM,
+          reason: 'اعتماد الاسترداد المالي وإعادة قيد المبالغ على حساب المتجر',
+        },
+      });
+
+      // 3. Update payment status if exists
+      if (refund.orderId) {
+        await tx.payment.updateMany({
+          where: { orderId: refund.orderId },
+          data: { status: PaymentStatus.REFUNDED },
+        });
+      }
     }
   }
 
   /**
    * Adjusts seller settlement, platform commission reversal, and liabilities.
    */
-  private static async adjustSellerSettlement(refund: any, approvedAmount: number, tx: any) {
+  public static async adjustSellerSettlement(refund: any, approvedAmount: number, tx: any) {
     let sellerBalance = await tx.sellerBalance.findUnique({
       where: { sellerId: refund.sellerId },
     });

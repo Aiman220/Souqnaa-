@@ -81,6 +81,7 @@ export interface PrintDocumentData {
   };
   qrCodeDataUri: string;
   qrPayload: string;
+  deliveryNotes?: string;
   printAudit: {
     printCount: number;
     lastPrintedAt?: string;
@@ -279,6 +280,9 @@ export class SellerOrderPrintService {
     const hasCoords = !isNaN(rawLat) && !isNaN(rawLng) && rawLat !== 0 && rawLng !== 0;
     const plusCode = hasCoords ? this.encodePlusCode(rawLat, rawLng) : (addr.plusCode ? cleanAddrText(addr.plusCode) : '');
 
+    const rawDeliveryNotes = parentOrder.notes || sellerOrder.notes || addr.deliveryNotes || addr.notes || parentOrder.deliveryNotes || parentOrder.deliveryInstructions || '';
+    const deliveryNotes = this.escapeHtml(rawDeliveryNotes ? String(rawDeliveryNotes).trim() : '');
+
     // Itemized lines from database
     const rawItems: any[] = sellerOrder.items || [];
     const items: PrintItem[] = rawItems.map((it: any, index: number) => {
@@ -416,6 +420,7 @@ export class SellerOrderPrintService {
       },
       qrCodeDataUri,
       qrPayload,
+      deliveryNotes,
       printAudit: {
         printCount: sellerOrder.printCount || 0,
         lastPrintedAt: sellerOrder.lastPrintedAt ? new Date(sellerOrder.lastPrintedAt).toISOString() : undefined,
@@ -558,8 +563,8 @@ export class SellerOrderPrintService {
       top: 0;
       left: 0;
       right: 0;
-      height: 8px;
-      background: linear-gradient(90deg, #FF6B00 0%, #F97316 40%, #0D9488 75%, #0284C7 100%);
+      height: 3.5px;
+      background: #FF6B00;
     }
 
     .watermark-bg {
@@ -1076,6 +1081,7 @@ export class SellerOrderPrintService {
         <div class="meta-row"><span class="lbl">رقم هاتف التواصل:</span><span class="val" dir="ltr">${d.customer.phone}</span></div>
         <div class="meta-row"><span class="lbl">عنوان التوصيل:</span><span class="val">${d.customer.deliveryAddress.formatted}</span></div>
         ${d.customer.deliveryAddress.plusCode ? `<div class="meta-row"><span class="lbl">رمز الموقع (Plus Code):</span><span class="val" dir="ltr" style="font-family: monospace; font-weight: 700; color: #0284c7;">📍 ${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
+        ${d.deliveryNotes ? `<div class="meta-row" style="margin-top: 4px; padding-top: 4px; border-top: 0.5px dashed #cbd5e1;"><span class="lbl" style="color:#ea580c; font-weight:700;">ملاحظات التوصيل:</span><span class="val" style="color:#0f172a; font-weight:700;">${d.deliveryNotes}</span></div>` : ''}
       </div>
     </div>
 
@@ -1338,6 +1344,7 @@ export class SellerOrderPrintService {
   <div class="row tight"><span>الهاتف:</span><span dir="ltr">${d.customer.phone}</span></div>
   <div class="row tight"><span>العنوان:</span><span>${d.customer.deliveryAddress.cityName} - ${d.customer.deliveryAddress.neighborhood || d.customer.deliveryAddress.street || ''}</span></div>
   ${d.customer.deliveryAddress.plusCode ? `<div class="row tight"><span>Plus Code:</span><span dir="ltr" class="bold" style="font-family: monospace; color: #0284c7;">📍 ${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
+  ${d.deliveryNotes ? `<div class="row tight"><span>ملاحظات:</span><span class="bold">${d.deliveryNotes}</span></div>` : ''}
 
   <div class="divider"></div>
   ${d.qrCodeDataUri ? `<img class="qr-img" src="${d.qrCodeDataUri}" alt="QR" />` : ''}
@@ -1480,6 +1487,7 @@ export class SellerOrderPrintService {
   <div class="row"><span>العميل:</span><span>${d.customer.name}</span></div>
   <div class="row"><span>الهاتف:</span><span dir="ltr">${d.customer.phone}</span></div>
   ${d.customer.deliveryAddress.plusCode ? `<div class="row"><span>Plus Code:</span><span dir="ltr" class="bold" style="font-family: monospace;">${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
+  ${d.deliveryNotes ? `<div class="row"><span>ملاحظات:</span><span class="bold">${d.deliveryNotes}</span></div>` : ''}
 
   <div class="divider"></div>
   ${d.qrCodeDataUri ? `<img class="qr-img" src="${d.qrCodeDataUri}" alt="QR" />` : ''}
@@ -1500,7 +1508,7 @@ export class SellerOrderPrintService {
 
     const souqnaLogoHtml = d.souqnaLogoDataUri
       ? `<img style="height: 48px; object-fit: contain;" src="${d.souqnaLogoDataUri}" alt="سوقناا" />`
-      : `<h1 style="margin:0; color:#0284c7;">سوقناا | SOUQNAA</h1>`;
+      : `<h1 style="margin:0; color:#FF6B00;">سوقناا | SOUQNAA</h1>`;
 
     const storeLogoHtml = d.store.logo
       ? `<img style="width: 40px; height: 40px; border-radius: 8px; object-fit: cover; border: 1px solid #cbd5e1;" src="${d.store.logo}" alt="${d.store.name}" />`
@@ -1526,7 +1534,7 @@ export class SellerOrderPrintService {
     }
     .no-print { display: flex; justify-content: center; gap: 12px; margin-bottom: 16px; padding: 0 10px; }
     .btn { padding: 11px 24px; border-radius: 10px; font-size: 14px; font-weight: 800; cursor: pointer; border: none; }
-    .btn-primary { background: #0284c7; color: #fff; }
+    .btn-primary { background: #FF6B00; color: #fff; }
     .btn-secondary { background: #fff; color: #1e293b; border: 1px solid #cbd5e1; }
     .sheet {
       width: 210mm;
@@ -1541,14 +1549,14 @@ export class SellerOrderPrintService {
     }
     .top-bar {
       position: absolute;
-      top: 0; left: 0; right: 0; height: 8px;
-      background: linear-gradient(90deg, #0284c7 0%, #0d9488 100%);
+      top: 0; left: 0; right: 0; height: 3.5px;
+      background: #FF6B00;
     }
     .header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      border-bottom: 2px solid #0284c7;
+      border-bottom: 1px solid #e2e8f0;
       padding-bottom: 14px;
       gap: 12px;
     }
@@ -1698,6 +1706,12 @@ export class SellerOrderPrintService {
         <div>رقم هاتف التواصل: <strong dir="ltr">${d.customer.phone}</strong></div>
         <div style="grid-column: span 2;">عنوان التوصيل: <strong>${d.customer.deliveryAddress.formatted}</strong></div>
         ${d.customer.deliveryAddress.plusCode ? `<div style="grid-column: span 2;">رمز الموقع الرقمي (Plus Code): <strong dir="ltr" style="font-family: monospace; color: #0284c7;">📍 ${d.customer.deliveryAddress.plusCode}</strong></div>` : ''}
+        ${d.deliveryNotes ? `
+        <div style="grid-column: span 2; margin-top: 6px; padding: 8px 12px; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 6px;">
+          <strong style="color: #ea580c; font-size: 11.5px;">📝 ملاحظات وتعليمات التوصيل (مُدخلة من العميل في شاشة الدفع):</strong>
+          <div style="font-size: 12px; font-weight: bold; color: #0f172a; margin-top: 3px;">${d.deliveryNotes}</div>
+        </div>
+        ` : ''}
       </div>
     </div>
 
@@ -1812,6 +1826,7 @@ export class SellerOrderPrintService {
   <div>الهاتف: <span dir="ltr">${d.customer.phone}</span></div>
   <div>العنوان: <span>${d.customer.deliveryAddress.formatted}</span></div>
   ${d.customer.deliveryAddress.plusCode ? `<div>Plus Code: <span class="bold" dir="ltr" style="font-family: monospace; color: #0284c7;">📍 ${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
+  ${d.deliveryNotes ? `<div>ملاحظات التوصيل: <span class="bold">${d.deliveryNotes}</span></div>` : ''}
   <div class="divider"></div>
 
   <div class="bold" style="margin-bottom: 4px;">المنتجات المطلوب تجهيزها:</div>
@@ -1890,6 +1905,7 @@ export class SellerOrderPrintService {
   <div>الهاتف: <span dir="ltr">${d.customer.phone}</span></div>
   <div>العنوان: <span>${d.customer.deliveryAddress.formatted}</span></div>
   ${d.customer.deliveryAddress.plusCode ? `<div>Plus Code: <span class="bold" dir="ltr" style="font-family: monospace; color: #0284c7;">📍 ${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
+  ${d.deliveryNotes ? `<div>ملاحظات: <span class="bold">${d.deliveryNotes}</span></div>` : ''}
   <div class="divider"></div>
 
   <div class="bold" style="margin-bottom: 3px;">المنتجات للتجهيز والفحص:</div>
@@ -1949,7 +1965,7 @@ export class SellerOrderPrintService {
       direction: rtl;
     }
     .no-print { text-align: center; margin-bottom: 8px; }
-    .btn { padding: 6px 12px; background: #4f46e5; color: #fff; border: none; border-radius: 4px; font-size: 11px; font-weight: bold; width: 100%; }
+    .btn { padding: 6px 12px; background: #FF6B00; color: #fff; border: none; border-radius: 4px; font-size: 11px; font-weight: bold; width: 100%; }
     .center { text-align: center; }
     .bold { font-weight: bold; }
     .divider { border-top: 1px dashed #000; margin: 6px 0; }
@@ -2051,7 +2067,7 @@ export class SellerOrderPrintService {
       direction: rtl;
     }
     .no-print { text-align: center; margin-bottom: 6px; }
-    .btn { padding: 5px 10px; background: #4f46e5; color: #fff; border: none; border-radius: 4px; font-size: 10px; font-weight: bold; width: 100%; }
+    .btn { padding: 5px 10px; background: #FF6B00; color: #fff; border: none; border-radius: 4px; font-size: 10px; font-weight: bold; width: 100%; }
     .center { text-align: center; }
     .bold { font-weight: bold; }
     .divider { border-top: 1px dashed #000; margin: 4px 0; }
@@ -2120,7 +2136,7 @@ export class SellerOrderPrintService {
 
     const souqnaLogoHtml = d.souqnaLogoDataUri
       ? `<img style="height: 48px; object-fit: contain;" src="${d.souqnaLogoDataUri}" alt="سوقناا" />`
-      : `<h1 style="margin:0; color:#4f46e5;">سوقناا | SOUQNAA</h1>`;
+      : `<h1 style="margin:0; color:#FF6B00;">سوقناا | SOUQNAA</h1>`;
 
     const storeLogoHtml = d.store.logo
       ? `<img style="width: 44px; height: 44px; border-radius: 8px; object-fit: cover; border: 1px solid #cbd5e1;" src="${d.store.logo}" alt="${d.store.name}" />`
@@ -2146,7 +2162,7 @@ export class SellerOrderPrintService {
     }
     .no-print { display: flex; justify-content: center; gap: 12px; margin-bottom: 16px; padding: 0 10px; }
     .btn { padding: 11px 24px; border-radius: 10px; font-size: 14px; font-weight: 800; cursor: pointer; border: none; }
-    .btn-primary { background: #4f46e5; color: #fff; }
+    .btn-primary { background: #FF6B00; color: #fff; }
     .btn-secondary { background: #fff; color: #1e293b; border: 1px solid #cbd5e1; }
     .sheet {
       width: 210mm;
@@ -2161,22 +2177,23 @@ export class SellerOrderPrintService {
     }
     .top-bar {
       position: absolute;
-      top: 0; left: 0; right: 0; height: 8px;
-      background: linear-gradient(90deg, #4f46e5 0%, #0d9488 100%);
+      top: 0; left: 0; right: 0; height: 3.5px;
+      background: #FF6B00;
     }
     .header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      border-bottom: 2px solid #4f46e5;
+      border-bottom: 1px solid #e2e8f0;
       padding-bottom: 14px;
       gap: 12px;
     }
     .brand-group { display: flex; align-items: center; gap: 14px; }
     .badge {
       display: inline-block;
-      background: #eef2ff;
-      color: #4338ca;
+      background: #FFF7ED;
+      color: #EA580C;
+      border: 1px solid #FFEDD5;
       padding: 3px 10px;
       border-radius: 6px;
       font-weight: 800;
@@ -2200,7 +2217,7 @@ export class SellerOrderPrintService {
       overflow: hidden;
     }
     .statement-table th {
-      background: #1e1b4b;
+      background: #0f172a;
       color: #fff;
       padding: 11px 14px;
       text-align: right;
@@ -2283,7 +2300,7 @@ export class SellerOrderPrintService {
         ${storeLogoHtml}
         <div class="order-box">
           <div style="font-size: 11px; font-weight: bold; color: #64748b;">رقم طلب المتجر:</div>
-          <div style="font-size: 16px; font-weight: 900; color: #4f46e5; font-family: 'Inter', monospace;">${d.sellerOrderNumber}</div>
+          <div style="font-size: 16px; font-weight: 900; color: #FF6B00; font-family: 'Inter', monospace;">${d.sellerOrderNumber}</div>
           <div style="font-size: 12px; font-weight: 700; color: #64748b; font-family: 'Inter', monospace;">الرئيسي: ${d.mainOrderNumber}</div>
         </div>
       </div>
@@ -2291,7 +2308,7 @@ export class SellerOrderPrintService {
 
     <div class="info-grid">
       <div>تاريخ الطلب: <strong>${d.orderDateFormattedAr}</strong></div>
-      <div>حالة استحقاق المحفظة: <strong style="color: #4f46e5;">${fin.walletReleaseStatus}</strong></div>
+      <div>حالة استحقاق المحفظة: <strong style="color: #059669;">${fin.walletReleaseStatus}</strong></div>
       <div>طريقة دفع العميل: <strong>${d.paymentMethodAr}</strong></div>
       <div>موعد تحرير الرصيد المتوقع: <strong>${fin.walletReleaseDate}</strong></div>
     </div>
@@ -2349,7 +2366,7 @@ export class SellerOrderPrintService {
       </table>
     </div>
 
-    <div style="margin-top: 20px; padding: 12px 14px; background: #fdf2f8; border: 1px dashed #f472b6; border-radius: 8px; font-size: 11.5px; color: #831843;">
+    <div style="margin-top: 20px; padding: 12px 14px; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; font-size: 11.5px; color: #475569;">
       📌 ملاحظة هامة: هذا الكشف يوضح بدقة الحسابات المالية الخاصة بمتجركم فقط لهذا الطلب، ولا يتم إرفاقه للعميل مع الشحنة للحفاظ على سرية تسويات المتجر مع المنصة.
     </div>
 

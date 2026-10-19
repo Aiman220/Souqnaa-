@@ -1,8 +1,12 @@
 import { prisma } from '../../../database/prisma';
+import { redis } from '../../../database/redis';
 import {
   NotificationCategory,
   NotificationChannel,
   DomainNotificationEvent,
+  AdminNotificationPreferences,
+  normalizePriority,
+  AppType,
 } from '../notification.types';
 
 export interface UserPreferencesMap {
@@ -153,6 +157,158 @@ export class NotificationPreferenceService {
   }
 
   /**
+   * Default preferences tailored specifically for System Administrators (§3, §4)
+   */
+  public static readonly DEFAULT_ADMIN_PREFERENCES: AdminNotificationPreferences = {
+    p0PushEnabled: true,
+    p0SoundEnabled: true,
+    p0VibrationEnabled: true,
+    p1PushEnabled: true,
+    p1SoundEnabled: false, // Silent push by default to prevent fatigue
+    p2DigestEnabled: true, // Aggregated 30-min summary by default
+    p2DigestIntervalMinutes: 30,
+    p2InstantPush: false,
+    p3NotificationCenterOnly: true,
+    p3PushEnabled: false,
+    quietHoursEnabled: true,
+    quietHoursStart: '22:00',
+    quietHoursEnd: '08:00',
+    timezone: 'Asia/Riyadh',
+    mutedUntil: null,
+    subscribedCategories: [
+      'FINANCE',
+      'SECURITY',
+      'ORDERS',
+      'SELLERS',
+      'SYSTEM',
+      'REFUND',
+      'DISPUTE',
+      'PAYMENT',
+      'ADMIN',
+    ],
+  };
+
+  /**
+   * Fetch admin notification preferences (cached in Redis, backed by database).
+   */
+  async getAdminPreferences(userId: string): Promise<AdminNotificationPreferences> {
+    const redisKey = `admin:pref:${userId}`;
+    try {
+      const cached = await redis.get(redisKey);
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch (_) {}
+
+    // Fallback to database record for category ADMIN
+    const dbRecord = await prisma.notificationPreference.findUnique({
+      where: {
+        userId_category: {
+          userId,
+          category: NotificationCategory.ADMIN,
+        },
+      },
+    });
+
+    const prefs: AdminNotificationPreferences = {
+      ...NotificationPreferenceService.DEFAULT_ADMIN_PREFERENCES,
+      ...(dbRecord
+        ? {
+            quietHoursEnabled: dbRecord.quietHoursEnabled,
+            quietHoursStart: dbRecord.quietHoursStart || '22:00',
+            quietHoursEnd: dbRecord.quietHoursEnd || '08:00',
+            timezone: dbRecord.timezone || 'Asia/Riyadh',
+            p1PushEnabled: dbRecord.pushEnabled,
+          }
+        : {}),
+    };
+
+    // Cache in Redis for fast repeated access (1 hour TTL)
+    try {
+      await redis.set(redisKey, JSON.stringify(prefs), 3600);
+    } catch (_) {}
+
+    return prefs;
+  }
+
+  /**
+   * Update admin notification preferences with multi-device sync and audit logging.
+   */
+  async updateAdminPreferences(
+    userId: string,
+    data: Partial<AdminNotificationPreferences>
+  ): Promise<AdminNotificationPreferences> {
+    const current = await this.getAdminPreferences(userId);
+    const updated: AdminNotificationPreferences = {
+      ...current,
+      ...data,
+      // P0 critical alerts push cannot be disabled by policy
+      p0PushEnabled: true,
+    };
+
+    // 1. Update in Redis cache
+    const redisKey = `admin:pref:${userId}`;
+    try {
+      await redis.set(redisKey, JSON.stringify(updated), 3600);
+    } catch (_) {}
+
+    // 2. Persist in database
+    try {
+      await prisma.notificationPreference.upsert({
+        where: {
+          userId_category: {
+            userId,
+            category: NotificationCategory.ADMIN,
+          },
+        },
+        update: {
+          pushEnabled: updated.p1PushEnabled,
+          quietHoursEnabled: updated.quietHoursEnabled,
+          quietHoursStart: updated.quietHoursStart,
+          quietHoursEnd: updated.quietHoursEnd,
+          timezone: updated.timezone,
+        },
+        create: {
+          userId,
+          category: NotificationCategory.ADMIN,
+          pushEnabled: updated.p1PushEnabled,
+          emailEnabled: true,
+          smsEnabled: false,
+          inAppEnabled: true,
+          quietHoursEnabled: updated.quietHoursEnabled,
+          quietHoursStart: updated.quietHoursStart,
+          quietHoursEnd: updated.quietHoursEnd,
+          timezone: updated.timezone,
+        },
+      });
+    } catch (_) {}
+
+    // 3. Write immutable audit log
+    try {
+      await prisma.notificationAuditLog.create({
+        data: {
+          adminId: userId,
+          action: 'PREFERENCE_CHANGED',
+          targetType: 'USER',
+          targetId: userId,
+          details: JSON.stringify(data),
+        },
+      });
+    } catch (_) {}
+
+    return updated;
+  }
+
+  /**
+   * Temporarily mute admin notifications for N hours (P0 critical incidents bypass).
+   */
+  async muteAdminNotifications(userId: string, hours: number): Promise<{ mutedUntil: string | null }> {
+    const mutedUntil = hours > 0 ? new Date(Date.now() + hours * 3600 * 1000).toISOString() : null;
+    await this.updateAdminPreferences(userId, { mutedUntil });
+    return { mutedUntil };
+  }
+
+  /**
    * Evaluates which channels are allowed for an event based on user preferences and quiet hours.
    */
   async evaluateAllowedChannels(
@@ -162,6 +318,125 @@ export class NotificationPreferenceService {
     suppressedChannels: NotificationChannel[];
     isQuietHoursSuppressed: boolean;
   }> {
+    const allowedChannels: NotificationChannel[] = [];
+    const suppressedChannels: NotificationChannel[] = [];
+
+    // In-App & Realtime are always allowed so events remain visible in Notification Center
+    allowedChannels.push(NotificationChannel.IN_APP);
+    allowedChannels.push(NotificationChannel.REAL_TIME);
+
+    // If event explicitly specifies channel overrides, respect them
+    if (event.channelsOverride && event.channelsOverride.length > 0) {
+      return {
+        allowedChannels: event.channelsOverride,
+        suppressedChannels: [],
+        isQuietHoursSuppressed: false,
+      };
+    }
+
+    // =========================================================================
+    // A. ADMIN NOTIFICATION PRIORITY ROUTING & FATIGUE MITIGATION
+    // =========================================================================
+    if (event.recipientType === AppType.ADMIN) {
+      const adminPrefs = await this.getAdminPreferences(event.recipientId);
+      const priority = normalizePriority(event.priority);
+
+      // Check temporary muting
+      const isMuted = Boolean(
+        adminPrefs.mutedUntil && new Date(adminPrefs.mutedUntil) > new Date()
+      );
+
+      // Check quiet hours
+      const isQuiet =
+        !event.bypassQuietHours &&
+        priority !== 'P0' &&
+        this.isQuietHoursActive(adminPrefs);
+
+      // ── P0: Critical Incidents ──────────────────────────────────────────────
+      if (priority === 'P0') {
+        // Critical alerts ALWAYS deliver immediate push; sound/vibration subject to explicit pref
+        allowedChannels.push(NotificationChannel.PUSH);
+        return {
+          allowedChannels,
+          suppressedChannels,
+          isQuietHoursSuppressed: false,
+        };
+      }
+
+      // If temporarily muted, suppress push for non-P0 alerts
+      if (isMuted) {
+        suppressedChannels.push(NotificationChannel.PUSH);
+        return {
+          allowedChannels,
+          suppressedChannels,
+          isQuietHoursSuppressed: false,
+        };
+      }
+
+      // ── P1: High-Priority Operational Alerts ─────────────────────────────────
+      if (priority === 'P1') {
+        if (isQuiet) {
+          suppressedChannels.push(NotificationChannel.PUSH);
+          return {
+            allowedChannels,
+            suppressedChannels,
+            isQuietHoursSuppressed: true,
+          };
+        }
+        if (adminPrefs.p1PushEnabled) {
+          allowedChannels.push(NotificationChannel.PUSH);
+        } else {
+          suppressedChannels.push(NotificationChannel.PUSH);
+        }
+        return {
+          allowedChannels,
+          suppressedChannels,
+          isQuietHoursSuppressed: false,
+        };
+      }
+
+      // ── P2: Routine Business Notifications ──────────────────────────────────
+      if (priority === 'P2') {
+        if (isQuiet) {
+          suppressedChannels.push(NotificationChannel.PUSH);
+          return {
+            allowedChannels,
+            suppressedChannels,
+            isQuietHoursSuppressed: true,
+          };
+        }
+        // If admin opted for instant push, send push; otherwise defer to 30-min digest summary
+        if (adminPrefs.p2InstantPush) {
+          allowedChannels.push(NotificationChannel.PUSH);
+        } else {
+          // Defer push to digest worker to prevent notification fatigue (§3, §6)
+          suppressedChannels.push(NotificationChannel.PUSH);
+        }
+        return {
+          allowedChannels,
+          suppressedChannels,
+          isQuietHoursSuppressed: false,
+        };
+      }
+
+      // ── P3: Informational Notifications ─────────────────────────────────────
+      if (priority === 'P3') {
+        if (!isQuiet && adminPrefs.p3PushEnabled && !adminPrefs.p3NotificationCenterOnly) {
+          allowedChannels.push(NotificationChannel.PUSH);
+        } else {
+          suppressedChannels.push(NotificationChannel.PUSH);
+        }
+        return {
+          allowedChannels,
+          suppressedChannels,
+          isQuietHoursSuppressed: isQuiet,
+        };
+      }
+    }
+
+    // =========================================================================
+    // B. CUSTOMER & SELLER NOTIFICATION PREFERENCES (PRESERVED)
+    // =========================================================================
     const preferences = await this.getUserPreferences(event.recipientId);
     const catPref = preferences[event.category] || {
       pushEnabled: true,
@@ -173,15 +448,6 @@ export class NotificationPreferenceService {
 
     const isMandatory = this.mandatoryCategories.has(event.category);
     const isQuiet = !event.bypassQuietHours && this.isQuietHoursActive(catPref);
-
-    const allowedChannels: NotificationChannel[] = [];
-    const suppressedChannels: NotificationChannel[] = [];
-
-    // In-App is always recorded so user can see it in Notification Center
-    allowedChannels.push(NotificationChannel.IN_APP);
-
-    // Real-Time WebSocket
-    allowedChannels.push(NotificationChannel.REAL_TIME);
 
     // Push Notification
     if (isMandatory || (catPref.pushEnabled && !isQuiet)) {
@@ -202,15 +468,6 @@ export class NotificationPreferenceService {
       allowedChannels.push(NotificationChannel.SMS);
     } else {
       suppressedChannels.push(NotificationChannel.SMS);
-    }
-
-    // If event specifies channel overrides (e.g. admin test send), respect them
-    if (event.channelsOverride && event.channelsOverride.length > 0) {
-      return {
-        allowedChannels: event.channelsOverride,
-        suppressedChannels,
-        isQuietHoursSuppressed: false,
-      };
     }
 
     return {

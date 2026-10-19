@@ -208,6 +208,8 @@ export class OrderStateMachine {
       targetStatusStr.startsWith('CANCELLED_') || targetStatusStr === 'REJECTED_BY_SELLER';
 
     const result = await prisma.$transaction(async (tx) => {
+      const soldCountUpdates: Array<{ productId: string; soldCount: number; delta: number }> = [];
+
       // 1. Update Seller Order Status
       const updatedSellerOrder = await tx.sellerOrder.update({
         where: { id: sellerOrderId },
@@ -261,24 +263,33 @@ export class OrderStateMachine {
           });
         }
       } else if (targetStatusStr === 'DELIVERED') {
-        // Permanent stock deduction & sold count increment
-        for (const item of sellerOrder.items) {
-          if (!item.variantId) {
-            await tx.inventory.update({
-              where: { productId: item.productId },
-              data: {
-                quantity: { decrement: item.quantity },
-                reserved: { decrement: item.quantity },
-              },
-            });
-          }
-          if (item.productId) {
-            await tx.product.update({
-              where: { id: item.productId },
-              data: {
-                soldCount: { increment: item.quantity },
-              },
-            });
+        const wasDelivered = currentStatus === 'DELIVERED';
+        // Permanent stock deduction & sold count increment (Idempotent: only if not previously delivered)
+        if (!wasDelivered) {
+          for (const item of sellerOrder.items) {
+            if (!item.variantId) {
+              await tx.inventory.update({
+                where: { productId: item.productId },
+                data: {
+                  quantity: { decrement: item.quantity },
+                  reserved: { decrement: item.quantity },
+                },
+              });
+            }
+            if (item.productId) {
+              const updatedProduct = await tx.product.update({
+                where: { id: item.productId },
+                data: {
+                  soldCount: { increment: item.quantity },
+                },
+                select: { id: true, soldCount: true },
+              });
+              soldCountUpdates.push({
+                productId: updatedProduct.id,
+                soldCount: updatedProduct.soldCount,
+                delta: item.quantity,
+              });
+            }
           }
         }
 
@@ -326,8 +337,12 @@ export class OrderStateMachine {
           isCod: isCodOrder,
         });
       } else if (targetStatusStr === 'RETURN_APPROVED' || targetStatusStr === 'REFUNDED') {
-        // If order had previously been delivered, adjust seller balance and liabilities
-        const wasDelivered = currentStatus === 'DELIVERED';
+        // If order had previously been delivered or in return flow, adjust seller balance and liabilities
+        const wasDelivered =
+          currentStatus === 'DELIVERED' ||
+          currentStatus === 'RETURN_REQUESTED' ||
+          currentStatus === 'RETURN_APPROVED' ||
+          Boolean(sellerOrder.deliveredAt || (sellerOrder.order as any)?.deliveredAt);
         const sellerBalance = await tx.sellerBalance.findUnique({
           where: { sellerId: sellerOrder.sellerId },
         });
@@ -342,9 +357,15 @@ export class OrderStateMachine {
               });
               if (currentProd && currentProd.soldCount > 0) {
                 const newSoldCount = Math.max(0, currentProd.soldCount - item.quantity);
-                await tx.product.update({
+                const updatedProduct = await tx.product.update({
                   where: { id: item.productId },
                   data: { soldCount: newSoldCount },
+                  select: { id: true, soldCount: true },
+                });
+                soldCountUpdates.push({
+                  productId: updatedProduct.id,
+                  soldCount: updatedProduct.soldCount,
+                  delta: -item.quantity,
                 });
               }
             }
@@ -474,6 +495,7 @@ export class OrderStateMachine {
       return {
         sellerOrder: updatedSellerOrder,
         parentStatus,
+        soldCountUpdates,
       };
     });
 
@@ -493,6 +515,18 @@ export class OrderStateMachine {
           customerUserId: sellerOrder.order?.userId,
           sellerUserIds: sellerOrder.seller?.userId ? [sellerOrder.seller.userId] : [],
         });
+
+        // Broadcast product sold count updates to all connected clients
+        if (result.soldCountUpdates && result.soldCountUpdates.length > 0) {
+          for (const upd of result.soldCountUpdates) {
+            socket.emitGlobal('product:sold_count_updated', {
+              productId: upd.productId,
+              soldCount: upd.soldCount,
+              delta: upd.delta,
+              timestamp: new Date().toISOString(),
+            });
+          }
+        }
       }
     } catch (_) {}
 
@@ -656,6 +690,8 @@ export class OrderStateMachine {
       targetStatusStr.startsWith('CANCELLED_') || targetStatusStr === 'REJECTED_BY_SELLER';
 
     const result = await prisma.$transaction(async (tx) => {
+      const soldCountUpdates: Array<{ productId: string; soldCount: number; delta: number }> = [];
+
       // 1. Update Order Status
       const updatedOrder = await tx.order.update({
         where: { id: orderId },
@@ -667,6 +703,7 @@ export class OrderStateMachine {
 
       // 2. Cascade status to all child SellerOrders
       for (const so of order.sellerOrders) {
+        const soWasDelivered = so.status === 'DELIVERED';
         await tx.sellerOrder.update({
           where: { id: so.id },
           data: {
@@ -676,7 +713,7 @@ export class OrderStateMachine {
         });
 
         if (isCancellationOrRejection) {
-          if (currentStatus === 'DELIVERED') {
+          if (currentStatus === 'DELIVERED' || soWasDelivered) {
             for (const item of so.items) {
               if (item.productId) {
                 const currentProd = await tx.product.findUnique({
@@ -685,9 +722,15 @@ export class OrderStateMachine {
                 });
                 if (currentProd && currentProd.soldCount > 0) {
                   const newSoldCount = Math.max(0, currentProd.soldCount - item.quantity);
-                  await tx.product.update({
+                  const updatedProduct = await tx.product.update({
                     where: { id: item.productId },
                     data: { soldCount: newSoldCount },
+                    select: { id: true, soldCount: true },
+                  });
+                  soldCountUpdates.push({
+                    productId: updatedProduct.id,
+                    soldCount: updatedProduct.soldCount,
+                    delta: -item.quantity,
                   });
                 }
               }
@@ -729,23 +772,32 @@ export class OrderStateMachine {
           });
         } else if (targetStatusStr === 'DELIVERED') {
           // Permanently deduct inventory & credit seller & increment sold count
-          for (const item of so.items) {
-            if (!item.variantId) {
-              await tx.inventory.update({
-                where: { productId: item.productId },
-                data: {
-                  quantity: { decrement: item.quantity },
-                  reserved: { decrement: item.quantity },
-                },
-              });
-            }
-            if (item.productId) {
-              await tx.product.update({
-                where: { id: item.productId },
-                data: {
-                  soldCount: { increment: item.quantity },
-                },
-              });
+          // IDEMPOTENCY GUARD: Only increment if this child seller order was NOT already DELIVERED
+          if (!soWasDelivered) {
+            for (const item of so.items) {
+              if (!item.variantId) {
+                await tx.inventory.update({
+                  where: { productId: item.productId },
+                  data: {
+                    quantity: { decrement: item.quantity },
+                    reserved: { decrement: item.quantity },
+                  },
+                });
+              }
+              if (item.productId) {
+                const updatedProduct = await tx.product.update({
+                  where: { id: item.productId },
+                  data: {
+                    soldCount: { increment: item.quantity },
+                  },
+                  select: { id: true, soldCount: true },
+                });
+                soldCountUpdates.push({
+                  productId: updatedProduct.id,
+                  soldCount: updatedProduct.soldCount,
+                  delta: item.quantity,
+                });
+              }
             }
           }
 
@@ -852,7 +904,10 @@ export class OrderStateMachine {
         },
       });
 
-      return updatedOrder;
+      return {
+        updatedOrder,
+        soldCountUpdates,
+      };
     });
 
     // 6. Broadcast via Socket
@@ -868,7 +923,7 @@ export class OrderStateMachine {
           orderNumber: order.orderNumber,
           status: targetStatusStr,
           parentStatus: targetStatusStr,
-          version: (result as any)?.updatedAt ? new Date((result as any).updatedAt).getTime() : Date.now(),
+          version: (result.updatedOrder as any)?.updatedAt ? new Date((result.updatedOrder as any).updatedAt).getTime() : Date.now(),
           timestamp: new Date().toISOString(),
           changedByRole,
           customerUserId: order.userId,
@@ -877,6 +932,18 @@ export class OrderStateMachine {
             customerConfirmed: targetStatusStr === 'DELIVERED' && changedByRole === 'CUSTOMER',
           },
         });
+
+        // Broadcast product sold count updates to all connected clients
+        if (result.soldCountUpdates && result.soldCountUpdates.length > 0) {
+          for (const upd of result.soldCountUpdates) {
+            socket.emitGlobal('product:sold_count_updated', {
+              productId: upd.productId,
+              soldCount: upd.soldCount,
+              delta: upd.delta,
+              timestamp: new Date().toISOString(),
+            });
+          }
+        }
       }
     } catch (_) {}
 
@@ -1001,6 +1068,6 @@ export class OrderStateMachine {
       }
     }
 
-    return result;
+    return result.updatedOrder;
   }
 }

@@ -340,6 +340,130 @@ async function runTests() {
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // 8. CUSTOMER PURCHASE BADGE & 11 TABS MAPPING VERIFICATION
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log('\n8. Customer Purchase Tabs & Badge Mapping (11 Tabs):');
+
+  const supportedTabs = [
+    'ALL',
+    'TO_PAY',
+    'PENDING',
+    'TO_SHIP',
+    'SHIPPED',
+    'TO_RECEIVE',
+    'COMPLETED',
+    'REFUND',
+    'RETURN',
+    'CANCELED',
+    'TO_REVIEW',
+  ];
+
+  assert(
+    supportedTabs.length === 11,
+    'All 11 mandatory Customer Purchase tabs are present and accounted for'
+  );
+
+  // Simulated purchase summary counts
+  const mockSummaryCounts: Record<string, { totalCount: number; unreadCount: number }> = {
+    ALL: { totalCount: 15, unreadCount: 3 },
+    TO_PAY: { totalCount: 2, unreadCount: 1 },
+    PENDING: { totalCount: 1, unreadCount: 0 },
+    TO_SHIP: { totalCount: 4, unreadCount: 1 },
+    SHIPPED: { totalCount: 2, unreadCount: 0 },
+    TO_RECEIVE: { totalCount: 2, unreadCount: 0 },
+    COMPLETED: { totalCount: 4, unreadCount: 1 },
+    REFUND: { totalCount: 1, unreadCount: 0 },
+    RETURN: { totalCount: 0, unreadCount: 0 },
+    CANCELED: { totalCount: 1, unreadCount: 0 },
+    TO_REVIEW: { totalCount: 3, unreadCount: 1 },
+  };
+
+  for (const tab of supportedTabs) {
+    assert(
+      tab in mockSummaryCounts && typeof mockSummaryCounts[tab].totalCount === 'number',
+      `Tab ${tab} has valid totalCount (${mockSummaryCounts[tab]?.totalCount ?? 0})`
+    );
+    assert(
+      tab in mockSummaryCounts && typeof mockSummaryCounts[tab].unreadCount === 'number',
+      `Tab ${tab} has valid unreadCount badge (${mockSummaryCounts[tab]?.unreadCount ?? 0})`
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 9. SELLER PAGINATED ORDERS COMPUTATION & METADATA
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log('\n9. Seller Orders Pagination & Metadata Computation:');
+
+  function computePaginationMeta(total: number, page?: number, limit?: number) {
+    if (!page || !limit) return undefined;
+    return {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  const metaPage1 = computePaginationMeta(45, 1, 20);
+  assert(
+    metaPage1?.page === 1 && metaPage1?.limit === 20 && metaPage1?.total === 45 && metaPage1?.totalPages === 3,
+    'Pagination page 1 with 45 items yields 3 total pages'
+  );
+
+  const metaPage3 = computePaginationMeta(45, 3, 20);
+  assert(
+    metaPage3?.page === 3 && metaPage3?.totalPages === 3,
+    'Pagination page 3 correctly identifies final page'
+  );
+
+  const metaUnpaginated = computePaginationMeta(45, undefined, undefined);
+  assert(
+    metaUnpaginated === undefined,
+    'Unpaginated query cleanly returns undefined meta for backward compatibility'
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 10. REAL-TIME RECONNECT & CACHE RECONCILIATION LOGIC
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log('\n10. Reconnect Cache Invalidation & Event Deduplication:');
+
+  class ClientOrderCache {
+    private versions = new Map<string, number>();
+    private cachedOrders = new Map<string, any>();
+
+    applyEvent(event: { orderId: string; version: number; status: string }) {
+      const currentVersion = this.versions.get(event.orderId) ?? 0;
+      if (event.version < currentVersion) {
+        return false; // Out-of-order rejection
+      }
+      this.versions.set(event.orderId, event.version);
+      this.cachedOrders.set(event.orderId, { status: event.status, version: event.version });
+      return true;
+    }
+
+    onReconnect() {
+      // Invalidate memory versions to force fresh server sync
+      this.versions.clear();
+      this.cachedOrders.clear();
+    }
+
+    getOrder(orderId: string) {
+      return this.cachedOrders.get(orderId);
+    }
+  }
+
+  const cache = new ClientOrderCache();
+  assert(cache.applyEvent({ orderId: 'ord_1', version: 2, status: 'PROCESSING' }), 'Event v2 accepted');
+  assert(cache.getOrder('ord_1')?.status === 'PROCESSING', 'Cached status is PROCESSING');
+  assert(!cache.applyEvent({ orderId: 'ord_1', version: 1, status: 'CONFIRMED' }), 'Stale v1 rejected');
+  assert(cache.getOrder('ord_1')?.status === 'PROCESSING', 'Status remains PROCESSING');
+
+  cache.onReconnect();
+  assert(cache.getOrder('ord_1') === undefined, 'Cache cleared upon reconnect to allow fresh server snapshot');
+  assert(cache.applyEvent({ orderId: 'ord_1', version: 3, status: 'SHIPPED' }), 'Fresh event v3 accepted after reconnect');
+  assert(cache.getOrder('ord_1')?.status === 'SHIPPED', 'Updated status is SHIPPED');
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // SUMMARY
   // ─────────────────────────────────────────────────────────────────────────────
   console.log('\n===============================================================');

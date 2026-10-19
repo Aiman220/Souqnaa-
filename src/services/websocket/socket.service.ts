@@ -730,6 +730,26 @@ export class SocketService {
           this.io.to(`conversation:${conversationId}`).emit('message:new', norm);
           this.io.to(`conversation:${conversationId}`).emit('new:message', norm);
 
+          try {
+            const supConv = await prisma.supportConversation.findFirst({
+              where: { OR: [{ id: conversationId }, { conversationId }] },
+            });
+            if (supConv) {
+              if (supConv.id !== conversationId) {
+                this.io.to(`conversation:${supConv.id}`).emit('message:new', norm);
+                this.io.to(`conversation:${supConv.id}`).emit('new:message', norm);
+              }
+              if (supConv.conversationId !== conversationId) {
+                this.io.to(`conversation:${supConv.conversationId}`).emit('message:new', norm);
+                this.io.to(`conversation:${supConv.conversationId}`).emit('new:message', norm);
+              }
+              if (supConv.requesterId) {
+                this.io.to(`user:${supConv.requesterId}`).emit('message:new', norm);
+                this.io.to(`user:${supConv.requesterId}`).emit('new:message', norm);
+              }
+            }
+          } catch (_) {}
+
           const allMembers = await prisma.conversationMember.findMany({
             where: { conversationId },
             select: { userId: true },
@@ -875,6 +895,18 @@ export class SocketService {
   emitToConversation(conversationId: string, event: string, data: any): void {
     if (this.io) {
       this.io.to(`conversation:${conversationId}`).emit(event, data);
+      const extraId1 = data?.baseConversationId || data?.message?.baseConversationId;
+      if (extraId1 && extraId1 !== conversationId) {
+        this.io.to(`conversation:${extraId1}`).emit(event, data);
+      }
+      const extraId2 = data?.conversationId || data?.message?.conversationId;
+      if (extraId2 && extraId2 !== conversationId && extraId2 !== extraId1) {
+        this.io.to(`conversation:${extraId2}`).emit(event, data);
+      }
+      const extraId3 = data?.supportConversationId || data?.message?.supportConversationId;
+      if (extraId3 && extraId3 !== conversationId && extraId3 !== extraId1 && extraId3 !== extraId2) {
+        this.io.to(`conversation:${extraId3}`).emit(event, data);
+      }
     }
   }
 

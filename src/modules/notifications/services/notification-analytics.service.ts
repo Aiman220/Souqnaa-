@@ -1,4 +1,5 @@
 import { prisma } from '../../../database/prisma';
+import { notificationDispatcher } from './notification-dispatcher';
 
 export class NotificationAnalyticsService {
   private static instance: NotificationAnalyticsService;
@@ -17,17 +18,21 @@ export class NotificationAnalyticsService {
     const [
       totalNotifications,
       totalUnread,
+      readInApp,
       totalDeliveries,
       failedDeliveries,
       activeDevices,
       totalCampaigns,
+      totalTemplates,
     ] = await Promise.all([
       prisma.notification.count(),
       prisma.notification.count({ where: { isRead: false } }),
+      prisma.notification.count({ where: { isRead: true } }),
       prisma.notificationDelivery.count(),
       prisma.notificationDelivery.count({ where: { status: 'FAILED' } }),
       prisma.notificationDevice.count({ where: { isActive: true } }),
       prisma.broadcastCampaign.count(),
+      prisma.notificationTemplate.count(),
     ]);
 
     // Active devices by platform breakdown
@@ -37,25 +42,46 @@ export class NotificationAnalyticsService {
       _count: { id: true },
     });
 
+    const activeDevicesByPlatform: Record<string, number> = {
+      ANDROID: 0,
+      IOS: 0,
+      WEB: 0,
+      WINDOWS: 0,
+      MACOS: 0,
+    };
+
+    for (const d of devicesByPlatform) {
+      const plat = (d.platform || '').toUpperCase();
+      activeDevicesByPlatform[plat] = (activeDevicesByPlatform[plat] || 0) + d._count.id;
+    }
+
     // Deliveries by channel breakdown
     const deliveriesByChannel = await prisma.notificationDelivery.groupBy({
       by: ['channel'],
       _count: { id: true },
     });
 
+    const successfulDeliveries = Math.max(0, totalDeliveries - failedDeliveries);
+
     const deliverySuccessRate =
       totalDeliveries > 0
-        ? Math.round(((totalDeliveries - failedDeliveries) / totalDeliveries) * 100)
+        ? Math.round((successfulDeliveries / totalDeliveries) * 100)
         : 100;
 
     return {
       totalNotifications,
       totalUnread,
+      readInApp,
       totalDeliveries,
+      successfulDeliveries,
       failedDeliveries,
       deliverySuccessRate,
       activeDevices,
       totalCampaigns,
+      campaignsCount: totalCampaigns,
+      templatesCount: totalTemplates,
+      isEmergencyKillSwitchActive: notificationDispatcher.getEmergencyKillSwitch(),
+      activeDevicesByPlatform,
       devicesByPlatform: devicesByPlatform.map((d) => ({
         platform: d.platform,
         count: d._count.id,
@@ -91,6 +117,8 @@ export class NotificationAnalyticsService {
     return {
       estimatedRecipients: totalUsers,
       pushEnabledUsers: pushDevices,
+      activePushDevices: pushDevices,
+      quietHoursDelayedCount: 0,
       emailEnabledUsers: totalUsers,
       smsEnabledUsers: Math.min(totalUsers, 100), // SMS policy cap
       breakdown: {
@@ -104,7 +132,7 @@ export class NotificationAnalyticsService {
    * DLQ / Failed notifications inspector
    */
   async getFailedDeliveries(limit = 50) {
-    return prisma.notificationDelivery.findMany({
+    const list = await prisma.notificationDelivery.findMany({
       where: { status: 'FAILED' },
       orderBy: { createdAt: 'desc' },
       take: limit,
@@ -119,6 +147,12 @@ export class NotificationAnalyticsService {
         },
       },
     });
+
+    return list.map((item) => ({
+      ...item,
+      error: item.lastError || 'خطأ غير معروف في قناة الإرسال',
+      attempts: item.attemptCount || 1,
+    }));
   }
 
   /**

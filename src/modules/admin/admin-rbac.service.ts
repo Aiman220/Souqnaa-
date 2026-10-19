@@ -371,4 +371,60 @@ export class AdminRbacService {
       }
     }
   }
+
+  /**
+   * Retrieves user IDs of all active administrators who possess the specified action permission.
+   * Note: SUPER_ADMIN users possess all permissions implicitly.
+   */
+  public static async getAdminUserIdsWithPermission(action: string): Promise<string[]> {
+    const activeAdmins = await prisma.user.findMany({
+      where: {
+        role: 'ADMIN',
+        isActive: true,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    const matchingAdminIds: string[] = [];
+    for (const admin of activeAdmins) {
+      const perms = await this.getUserPermissions(admin.id);
+      if (perms.has(action)) {
+        matchingAdminIds.push(admin.id);
+      }
+    }
+
+    if (matchingAdminIds.length === 0) {
+      const superAdmins = await this.getAdminUserIdsWithRole(SystemRole.SUPER_ADMIN);
+      if (superAdmins.length > 0) return superAdmins;
+      return activeAdmins.map((a) => a.id);
+    }
+
+    return matchingAdminIds;
+  }
+
+  /**
+   * Retrieves user IDs of all active administrators who hold a specific role.
+   */
+  public static async getAdminUserIdsWithRole(roleName: SystemRole | string): Promise<string[]> {
+    const role = await prisma.role.findUnique({
+      where: { name: roleName },
+    });
+    if (!role) {
+      return [];
+    }
+
+    const assignments = await prisma.userRole.findMany({
+      where: {
+        roleId: role.id,
+        user: {
+          role: 'ADMIN',
+          isActive: true,
+        },
+      },
+      select: { userId: true },
+    });
+    return assignments.map((a) => a.userId);
+  }
 }

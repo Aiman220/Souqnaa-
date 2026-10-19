@@ -8,6 +8,8 @@ import {
 import { notificationDispatcher } from './notification-dispatcher';
 import { randomUUID } from 'crypto';
 
+import { notificationDigestService } from './notification-digest.service';
+
 export class NotificationScheduler {
   private static instance: NotificationScheduler;
   private intervalTimer: NodeJS.Timeout | null = null;
@@ -25,6 +27,10 @@ export class NotificationScheduler {
     this.intervalTimer = setInterval(() => {
       this.processScheduledCampaigns().catch((err) => {
         console.error('[NotificationScheduler] Worker execution error:', err);
+      });
+      // Routine P2 admin digest aggregation (§3, §5, §6)
+      notificationDigestService.processRoutineDigests().catch((err) => {
+        console.error('[NotificationScheduler] Digest processing error:', err);
       });
     }, intervalMs);
     console.log('[NotificationScheduler] Started scheduled notification worker cycle.');
