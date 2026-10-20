@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
+import compression from 'compression';
 import path from 'path';
 
 import { config } from './config';
@@ -53,6 +54,7 @@ import { adminSellerPromotionRoutes } from './modules/promotions/routes/admin-se
 import { followRoutes } from './modules/follows/follow.routes';
 import { adminPromotionRoutes } from './modules/promotions/promotion.routes';
 import { customerRefundRoutes } from './modules/refunds/routes/customer-refund.routes';
+import { disputeRoutes } from './modules/disputes/dispute.routes';
 import { sellerRefundRoutes } from './modules/refunds/routes/seller-refund.routes';
 import { adminRefundRoutes } from './modules/refunds/routes/admin-refund.routes';
 import { customerWalletRoutes } from './modules/wallet/customer-wallet.routes';
@@ -211,10 +213,41 @@ export const createApp = (): Application => {
   app.use(cors(corsOptions));
   app.options('*', cors(corsOptions));
   app.use(requestIdMiddleware);
+  app.use(
+    compression({
+      threshold: 1024,
+      filter: (req, res) => {
+        if (req.headers['x-no-compression']) {
+          return false;
+        }
+        return compression.filter(req, res);
+      },
+    })
+  );
 
-  // Prevent browser caching on dynamic API routes so Flutter Web always receives full 200 OK payloads
+  // Cache-Control headers: public static catalog routes can cache briefly; all user/order/mutation routes must not cache
   app.use((req: Request, res: Response, next) => {
-    if (req.path.startsWith('/api') || req.path.startsWith(config.apiPrefix)) {
+    const isApi = req.path.startsWith('/api') || req.path.startsWith(config.apiPrefix);
+    if (!isApi) {
+      return next();
+    }
+
+    const publicCacheablePaths = [
+      '/categories',
+      '/locations',
+      '/tax',
+      '/config/remote',
+      '/remote-config',
+      '/app-lifecycle/public',
+    ];
+
+    const isPublicGet =
+      req.method === 'GET' &&
+      publicCacheablePaths.some((p) => req.path.includes(p));
+
+    if (isPublicGet) {
+      res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
+    } else {
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
       res.setHeader('Pragma', 'no-cache');
       res.setHeader('Expires', '0');
@@ -378,6 +411,7 @@ export const createApp = (): Application => {
   app.use(`${p}/seller/refunds`, sellerRefundRoutes);
   app.use(`${p}/admin/refunds`, adminRefundRoutes);
   app.use(`${p}/wallet`, customerWalletRoutes);
+  app.use(`${p}/disputes`, disputeRoutes);
 
   app.use(`${p}/admin`, adminRoutes);
   app.use('/admin', adminRoutes);

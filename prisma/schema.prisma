@@ -1198,6 +1198,11 @@ model Product {
   @@index([slug])
   @@index([isFeatured])
   @@index([isActive])
+  @@index([brandId])
+  @@index([price])
+  @@index([soldCount(sort: Desc)])
+  @@index([isActive, soldCount(sort: Desc)])
+  @@index([isActive, createdAt(sort: Desc)])
   @@index([categoryId, isActive, createdAt(sort: Desc)])
   @@index([storeId, isActive, createdAt(sort: Desc)])
   @@index([isActive, isFeatured, soldCount(sort: Desc)])
@@ -1238,6 +1243,7 @@ model ProductImage {
   isPrimary Boolean  @default(false)
 
   @@index([productId])
+  @@index([productId, isPrimary])
 }
 
 model ProductAttribute {
@@ -1400,6 +1406,8 @@ model Order {
   @@index([idempotencyKey])
   @@index([status])
   @@index([deliveryTimeSlotId])
+  @@index([deliveryMethodId])
+  @@index([deliveredAt])
   @@index([userId, createdAt(sort: Desc)])
   @@index([status, createdAt(sort: Desc)])
   @@index([createdAt(sort: Desc)])
@@ -1459,6 +1467,7 @@ model SellerOrder {
   @@index([sellerId])
   @@index([sellerOrderNumber])
   @@index([status])
+  @@index([deliveredAt])
   @@index([sellerId, createdAt(sort: Desc)])
   @@index([sellerId, status])
   @@index([status, createdAt(sort: Desc)])
@@ -1519,6 +1528,7 @@ model OrderItem {
 
   @@index([sellerOrderId])
   @@index([productId])
+  @@index([variantId])
   @@index([flashSaleItemId])
   @@index([productId, createdAt(sort: Desc)])
 }
@@ -2629,6 +2639,8 @@ model Notification {
   @@index([isRead])
   @@index([category])
   @@index([status])
+  @@index([recipientType])
+  @@index([recipientType, isRead])
   @@index([createdAt])
   @@index([eventId])
   @@index([idempotencyKey])
@@ -2981,6 +2993,8 @@ model Dispute {
   @@index([customerId])
   @@index([sellerId])
   @@index([status])
+  @@index([orderId])
+  @@index([createdAt(sort: Desc)])
 }
 
 model AuditLog {

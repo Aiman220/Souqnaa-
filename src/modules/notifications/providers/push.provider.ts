@@ -87,7 +87,10 @@ export class FcmPushProvider implements NotificationProvider {
   /**
    * Resolves Google Service Account credentials from environment or config.
    */
+  public credentialsOverride: GoogleCredentials | null | undefined = undefined;
+
   public getGoogleCredentials(): GoogleCredentials | null {
+    if (this.credentialsOverride !== undefined) return this.credentialsOverride;
     let projectId = process.env.FIREBASE_PROJECT_ID || process.env.FCM_PROJECT_ID;
     let clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
     let privateKey = process.env.FIREBASE_PRIVATE_KEY;
@@ -254,7 +257,7 @@ export class FcmPushProvider implements NotificationProvider {
         },
         data: dataEntries,
         android: {
-          priority: isP0 ? 'HIGH' : isP1 ? 'NORMAL' : 'NORMAL',
+          priority: isHigh ? 'HIGH' : 'NORMAL',
           notification: {
             channel_id: channelId,
             ...(playSound ? { sound: 'default' } : {}),
@@ -265,7 +268,7 @@ export class FcmPushProvider implements NotificationProvider {
         },
         apns: {
           headers: {
-            'apns-priority': isP0 ? '10' : '5',
+            'apns-priority': isHigh ? '10' : '5',
           },
           payload: {
             aps: {

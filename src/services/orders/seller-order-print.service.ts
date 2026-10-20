@@ -432,6 +432,9 @@ export class SellerOrderPrintService {
    * Generates production-ready, beautifully styled HTML for the chosen document & format.
    */
   public static renderHtmlDocument(data: PrintDocumentData, autoPrint = false): string {
+    if (data.totals) {
+      data.totals.currency = 'ر.ي';
+    }
     switch (data.documentType) {
       case 'PACKING_SLIP':
         if (data.format === '58MM') return this.renderPackingSlipThermal58mm(data, autoPrint);

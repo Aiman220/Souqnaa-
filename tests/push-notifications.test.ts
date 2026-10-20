@@ -122,7 +122,9 @@ async function runPushTests() {
   delete process.env.FIREBASE_PROJECT_ID;
   delete process.env.FCM_SERVER_KEY;
 
+  (fcmPushProvider as any).credentialsOverride = null;
   const noCredsRes = await fcmPushProvider.send(testParams);
+  (fcmPushProvider as any).credentialsOverride = undefined;
   assert(noCredsRes.success === false, 'Returns false when push credentials are not configured (no mock delivery)');
   assert(
     !!noCredsRes.error && noCredsRes.error.includes('credentials not configured'),

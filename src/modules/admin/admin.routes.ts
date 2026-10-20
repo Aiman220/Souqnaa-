@@ -2390,17 +2390,32 @@ router.post('/cancellations/:id/reject', async (req: Request, res: Response, nex
       },
     });
 
-    // Revert status to PROCESSING
+    // Revert status to PROCESSING via authoritative State Machine
     if (cancelReq.sellerOrderId) {
-      await prisma.sellerOrder.update({
-        where: { id: cancelReq.sellerOrderId },
-        data: { status: SellerOrderStatus.PROCESSING },
+      await OrderStateMachine.transitionSellerOrder({
+        sellerOrderId: cancelReq.sellerOrderId,
+        targetStatus: SellerOrderStatus.PROCESSING,
+        changedBy: req.user!.userId,
+        changedByRole: 'ADMIN',
+        reason: adminNote || 'رفض طلب الإلغاء من قبل الإدارة',
+        note: adminNote || 'رفض طلب الإلغاء من قبل الإدارة',
       });
+    } else {
+      const sOrders = await prisma.sellerOrder.findMany({
+        where: { orderId: cancelReq.orderId },
+        select: { id: true },
+      });
+      for (const so of sOrders) {
+        await OrderStateMachine.transitionSellerOrder({
+          sellerOrderId: so.id,
+          targetStatus: SellerOrderStatus.PROCESSING,
+          changedBy: req.user!.userId,
+          changedByRole: 'ADMIN',
+          reason: adminNote || 'رفض طلب الإلغاء من قبل الإدارة',
+          note: adminNote || 'رفض طلب الإلغاء من قبل الإدارة',
+        });
+      }
     }
-    await prisma.order.update({
-      where: { id: cancelReq.orderId },
-      data: { status: OrderStatus.PROCESSING },
-    });
 
     await logAdminAction(req.user?.userId, 'CANCELLATION_REJECTED', 'cancellation_requests', { id, orderId: cancelReq.orderId, note: adminNote }, req);
 
@@ -4510,6 +4525,7 @@ router.post('/promotions/banners', async (req: Request, res: Response, next: Nex
     });
 
     await logAdminAction(req.user?.userId, 'BANNER_CREATED', 'promotions', { id: banner.id, imageUrl: cleanImageUrl }, req);
+    redis.del('cache:home:feed').catch(() => {});
     ResponseUtil.created(res, { ...banner, imageUrl: storageService.normalizeUrl(banner.imageUrl) }, 'تم إنشاء البانر بنجاح');
   } catch (error) {
     next(error);
@@ -4525,17 +4541,18 @@ router.put('/promotions/banners/:id', async (req: Request, res: Response, next: 
     const banner = await prisma.banner.update({
       where: { id },
       data: {
-        titleAr: titleAr !== undefined ? titleAr : undefined,
-        titleEn: titleEn !== undefined ? titleEn : undefined,
-        imageUrl: cleanImageUrl,
-        targetType: targetType || undefined,
-        targetId: targetId !== undefined ? targetId : undefined,
-        sortOrder: sortOrder !== undefined ? parseInt(sortOrder) : undefined,
-        isActive: isActive !== undefined ? Boolean(isActive) : undefined,
+        ...(titleAr !== undefined ? { titleAr } : {}),
+        ...(titleEn !== undefined ? { titleEn } : {}),
+        ...(cleanImageUrl !== undefined ? { imageUrl: cleanImageUrl } : {}),
+        ...(targetType !== undefined ? { targetType } : {}),
+        ...(targetId !== undefined ? { targetId } : {}),
+        ...(sortOrder !== undefined ? { sortOrder: parseInt(sortOrder) } : {}),
+        ...(isActive !== undefined ? { isActive: Boolean(isActive) } : {}),
       },
     });
 
     await logAdminAction(req.user?.userId, 'BANNER_UPDATED', 'promotions', { id }, req);
+    redis.del('cache:home:feed').catch(() => {});
     ResponseUtil.success(res, { ...banner, imageUrl: storageService.normalizeUrl(banner.imageUrl) }, 'تم تحديث البانر بنجاح');
   } catch (error) {
     next(error);
@@ -4547,6 +4564,7 @@ router.delete('/promotions/banners/:id', async (req: Request, res: Response, nex
     const id = String(req.params.id);
     await prisma.banner.delete({ where: { id } });
     await logAdminAction(req.user?.userId, 'BANNER_DELETED', 'promotions', { id }, req);
+    redis.del('cache:home:feed').catch(() => {});
     ResponseUtil.success(res, null, 'تم حذف البانر بنجاح');
   } catch (error) {
     next(error);

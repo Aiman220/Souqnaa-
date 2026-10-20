@@ -1,4 +1,5 @@
 import { prisma } from '../../database/prisma';
+import { redis } from '../../database/redis';
 import { AppError } from '../../middleware/error.middleware';
 import {
   OrderStatus,
@@ -8,6 +9,7 @@ import {
   CancellationRequestStatus,
   ReturnRequestStatus,
   NotificationType,
+  WalletTxType,
 } from '@prisma/client';
 import { SocketService } from '../../services/websocket/socket.service';
 import { CustomerWalletService } from '../wallet/customer-wallet.service';
@@ -242,25 +244,99 @@ export class OrderStateMachine {
           data: { pendingBalance: { decrement: sellerOrder.sellerPayout } },
         });
 
-        // If order was PAID -> directly credit back customer's local wallet
-        if (sellerOrder.order.payment && sellerOrder.order.payment.status === PaymentStatus.PAID) {
-          const refundAmount = sellerOrder.subtotal;
-          await CustomerWalletService.creditForOrderRefund(
-            {
-              customerId: sellerOrder.order.userId,
-              orderId: sellerOrder.orderId,
-              orderNumber: sellerOrder.order.orderNumber,
-              amount: refundAmount,
-              reason: reason || (targetStatusStr === 'REJECTED_BY_SELLER' ? 'رفض الطلب من قبل المتجر' : 'إلغاء الطلب من قبل المتجر'),
-              referenceType: `SELLER_ORDER_${sellerOrderId}`,
-            },
-            tx
-          );
+        // If order was PAID (via Card, Online, SOUQNApay Wallet, etc.) -> directly credit back customer's local wallet with full payment
+        const isPaid = Boolean(
+          sellerOrder.order.payment &&
+          (sellerOrder.order.payment.status === PaymentStatus.PAID ||
+            sellerOrder.order.payment.status === PaymentStatus.PARTIALLY_REFUNDED ||
+            sellerOrder.order.payment.method === 'WALLET' ||
+            sellerOrder.order.payment.paidAt !== null)
+        );
 
-          await tx.payment.update({
+        if (isPaid) {
+          // Query sibling seller orders for this parent order
+          const allSubOrders = await tx.sellerOrder.findMany({
             where: { orderId: sellerOrder.orderId },
-            data: { status: PaymentStatus.REFUNDED },
+            select: {
+              id: true,
+              status: true,
+              subtotal: true,
+              deliveryFee: true,
+              customerDeliveryCharge: true,
+              taxAmount: true,
+              voucherDiscountAmount: true,
+            },
           });
+
+          const isSingleSubOrder = allSubOrders.length <= 1;
+          const otherSubOrders = allSubOrders.filter((s) => s.id !== sellerOrder.id);
+          const allOthersTerminated = otherSubOrders.every((s) => {
+            const st = String(s.status);
+            return (
+              st.startsWith('CANCELLED_') ||
+              st === 'REJECTED_BY_SELLER' ||
+              st === 'CANCELLED' ||
+              st === 'RETURN_APPROVED' ||
+              st === 'RETURNED' ||
+              st === 'REFUNDED'
+            );
+          });
+
+          // Sum all previous wallet refunds for this parent order to avoid over-refunding
+          const priorRefundLedgers = await tx.walletLedgerEntry.findMany({
+            where: {
+              referenceId: sellerOrder.orderId,
+              type: WalletTxType.ORDER_REFUND,
+              direction: 'CREDIT',
+            },
+            select: { amount: true },
+          });
+          const priorRefundTotal = priorRefundLedgers.reduce((sum: number, l: any) => sum + (l.amount || 0), 0);
+          const fullOrderPayment = Number(sellerOrder.order.total || 0);
+          const maxRemainingToRefund = Math.max(0, parseFloat((fullOrderPayment - priorRefundTotal).toFixed(2)));
+
+          let refundAmount = 0;
+          if (isSingleSubOrder || allOthersTerminated) {
+            // Full remaining payment of the order returned to customer wallet
+            refundAmount = maxRemainingToRefund;
+          } else {
+            // Proportional full payment for this seller sub-order:
+            // subtotal + customer delivery charge + tax - voucher discount
+            const custDelivery = sellerOrder.customerDeliveryCharge ?? sellerOrder.deliveryFee ?? 0;
+            const custTax = sellerOrder.taxAmount ?? 0;
+            const custDiscount = sellerOrder.voucherDiscountAmount ?? 0;
+            const subOrderFullAmount = Math.max(
+              0,
+              parseFloat((sellerOrder.subtotal + custDelivery + custTax - custDiscount).toFixed(2))
+            );
+            refundAmount = Math.min(subOrderFullAmount, maxRemainingToRefund);
+          }
+
+          if (refundAmount > 0) {
+            await CustomerWalletService.creditForOrderRefund(
+              {
+                customerId: sellerOrder.order.userId,
+                orderId: sellerOrder.orderId,
+                orderNumber: sellerOrder.order.orderNumber,
+                amount: refundAmount,
+                reason:
+                  reason ||
+                  (targetStatusStr === 'REJECTED_BY_SELLER'
+                    ? 'رفض الطلب من قبل المتجر واسترداد كامل المبلغ للمحفظة'
+                    : 'إلغاء الطلب واسترداد كامل المبلغ للمحفظة'),
+                referenceType: `SELLER_ORDER_${sellerOrderId}`,
+              },
+              tx
+            );
+
+            const isOrderFullyRefunded = (maxRemainingToRefund - refundAmount) <= 0.01;
+            await tx.payment.update({
+              where: { orderId: sellerOrder.orderId },
+              data: {
+                status: isOrderFullyRefunded ? PaymentStatus.REFUNDED : PaymentStatus.PARTIALLY_REFUNDED,
+              },
+            });
+          }
         }
       } else if (targetStatusStr === 'DELIVERED') {
         const wasDelivered = currentStatus === 'DELIVERED';
@@ -442,6 +518,107 @@ export class OrderStateMachine {
             }
           }
         }
+
+        // Refund full payment to customer wallet upon return approval if order was paid
+        const isPaid = Boolean(
+          sellerOrder.order.payment &&
+          (sellerOrder.order.payment.status === PaymentStatus.PAID ||
+            sellerOrder.order.payment.status === PaymentStatus.PARTIALLY_REFUNDED ||
+            sellerOrder.order.payment.method === 'WALLET' ||
+            sellerOrder.order.payment.paidAt !== null)
+        );
+
+        if (isPaid) {
+          const account = await tx.walletAccount.findUnique({
+            where: { userId: sellerOrder.order.userId },
+          });
+
+          const existingReturnRefund = account ? await tx.walletLedgerEntry.findFirst({
+            where: {
+              walletAccountId: account.id,
+              referenceId: sellerOrder.orderId,
+              referenceType: { in: [`SELLER_ORDER_${sellerOrderId}`, `RETURN_${sellerOrderId}`, 'ORDER_CANCEL_REFUND'] },
+              type: WalletTxType.ORDER_REFUND,
+            },
+          }) : null;
+
+          if (!existingReturnRefund) {
+            const allSubOrders = await tx.sellerOrder.findMany({
+              where: { orderId: sellerOrder.orderId },
+              select: {
+                id: true,
+                status: true,
+                subtotal: true,
+                deliveryFee: true,
+                customerDeliveryCharge: true,
+                taxAmount: true,
+                voucherDiscountAmount: true,
+              },
+            });
+
+            const isSingleSubOrder = allSubOrders.length <= 1;
+            const otherSubOrders = allSubOrders.filter((s) => s.id !== sellerOrder.id);
+            const allOthersTerminated = otherSubOrders.every((s) => {
+              const st = String(s.status);
+              return (
+                st.startsWith('CANCELLED_') ||
+                st === 'REJECTED_BY_SELLER' ||
+                st === 'CANCELLED' ||
+                st === 'RETURN_APPROVED' ||
+                st === 'RETURNED' ||
+                st === 'REFUNDED'
+              );
+            });
+
+            const priorRefundLedgers = await tx.walletLedgerEntry.findMany({
+              where: {
+                referenceId: sellerOrder.orderId,
+                type: WalletTxType.ORDER_REFUND,
+                direction: 'CREDIT',
+              },
+              select: { amount: true },
+            });
+            const priorRefundTotal = priorRefundLedgers.reduce((sum: number, l: any) => sum + (l.amount || 0), 0);
+            const fullOrderPayment = Number(sellerOrder.order.total || 0);
+            const maxRemainingToRefund = Math.max(0, parseFloat((fullOrderPayment - priorRefundTotal).toFixed(2)));
+
+            let retRefundAmt = 0;
+            if (isSingleSubOrder || allOthersTerminated) {
+              retRefundAmt = maxRemainingToRefund;
+            } else {
+              const custDelivery = sellerOrder.customerDeliveryCharge ?? sellerOrder.deliveryFee ?? 0;
+              const custTax = sellerOrder.taxAmount ?? 0;
+              const custDiscount = sellerOrder.voucherDiscountAmount ?? 0;
+              const subOrderFullAmount = Math.max(
+                0,
+                parseFloat((sellerOrder.subtotal + custDelivery + custTax - custDiscount).toFixed(2))
+              );
+              retRefundAmt = Math.min(subOrderFullAmount, maxRemainingToRefund);
+            }
+
+            if (retRefundAmt > 0) {
+              await CustomerWalletService.creditForOrderRefund(
+                {
+                  customerId: sellerOrder.order.userId,
+                  orderId: sellerOrder.orderId,
+                  orderNumber: sellerOrder.order.orderNumber,
+                  amount: retRefundAmt,
+                  reason: reason || 'موافقة المتجر على طلب الإرجاع واسترداد كامل المبلغ للمحفظة',
+                  referenceType: `SELLER_ORDER_${sellerOrderId}`,
+                },
+                tx
+              );
+
+              const isOrderFullyRefunded = (maxRemainingToRefund - retRefundAmt) <= 0.01;
+              await tx.payment.update({
+                where: { orderId: sellerOrder.orderId },
+                data: {
+                  status: isOrderFullyRefunded ? PaymentStatus.REFUNDED : PaymentStatus.PARTIALLY_REFUNDED,
+                },
+              });
+            }
+          }
+        }
       }
 
       // 3. Record Order Status History
@@ -497,6 +674,9 @@ export class OrderStateMachine {
         parentStatus,
         soldCountUpdates,
       };
+    }, {
+      maxWait: 10000,
+      timeout: 30000,
     });
 
     // 6. Realtime WebSocket Broadcast
@@ -506,9 +686,11 @@ export class OrderStateMachine {
         socket.emitOrderStatusUpdate({
           orderId: sellerOrder.orderId,
           orderNumber: sellerOrder.order?.orderNumber || '',
+          displayOrderNumber: sellerOrder.order?.displayOrderNumber || undefined,
           sellerOrderId: sellerOrder.id,
+          sellerOrderNumber: sellerOrder.sellerOrderNumber || undefined,
           status: targetStatusStr,
-          parentStatus: result.parentStatus,
+          parentStatus: result.parentStatus || undefined,
           version: (result.sellerOrder as any)?.updatedAt ? new Date((result.sellerOrder as any).updatedAt).getTime() : Date.now(),
           timestamp: new Date().toISOString(),
           changedByRole,
@@ -526,6 +708,25 @@ export class OrderStateMachine {
               timestamp: new Date().toISOString(),
             });
           }
+        }
+
+        // Invalidate Redis caches for updated products and store
+        if (result.soldCountUpdates && result.soldCountUpdates.length > 0) {
+          try {
+            if (sellerOrder.sellerId) {
+              const store = await prisma.store.findFirst({
+                where: { sellerId: sellerOrder.sellerId },
+                select: { id: true, slug: true },
+              });
+              if (store) {
+                await redis.del(`storefront:${store.slug}`);
+                await redis.del(`storefront:${store.id}`);
+              }
+            }
+            for (const upd of result.soldCountUpdates) {
+              await redis.del(`product:${upd.productId}`);
+            }
+          } catch (_) {}
         }
       }
     } catch (_) {}
@@ -846,18 +1047,39 @@ export class OrderStateMachine {
 
       // 3. Handle Payment & Direct Wallet Refund
       if (isCancellationOrRejection) {
-        if (order.payment && order.payment.status === PaymentStatus.PAID) {
-          await CustomerWalletService.creditForOrderRefund(
-            {
-              customerId: order.userId,
-              orderId: order.id,
-              orderNumber: order.orderNumber,
-              amount: order.total,
-              reason: reason || (targetStatusStr === 'CANCELLED_BY_CUSTOMER' ? 'إلغاء الطلب من قبل العميل' : 'إلغاء الطلب واسترداد القيمة للمحفظة'),
-              referenceType: 'ORDER_CANCEL_REFUND',
+        const isPaid = Boolean(
+          order.payment &&
+          (order.payment.status === PaymentStatus.PAID ||
+            order.payment.status === PaymentStatus.PARTIALLY_REFUNDED ||
+            order.payment.method === 'WALLET' ||
+            order.payment.paidAt !== null)
+        );
+        if (isPaid) {
+          const priorRefundLedgers = await tx.walletLedgerEntry.findMany({
+            where: {
+              referenceId: order.id,
+              type: WalletTxType.ORDER_REFUND,
+              direction: 'CREDIT',
             },
-            tx
-          );
+            select: { amount: true },
+          });
+          const priorRefundTotal = priorRefundLedgers.reduce((sum: number, l: any) => sum + (l.amount || 0), 0);
+          const fullOrderPayment = Number(order.total || 0);
+          const remainingToRefund = Math.max(0, parseFloat((fullOrderPayment - priorRefundTotal).toFixed(2)));
+
+          if (remainingToRefund > 0) {
+            await CustomerWalletService.creditForOrderRefund(
+              {
+                customerId: order.userId,
+                orderId: order.id,
+                orderNumber: order.orderNumber,
+                amount: remainingToRefund,
+                reason: reason || (targetStatusStr === 'CANCELLED_BY_CUSTOMER' ? 'إلغاء الطلب من قبل العميل واسترداد كامل المبلغ للمحفظة' : 'إلغاء الطلب واسترداد كامل المبلغ للمحفظة'),
+                referenceType: 'ORDER_CANCEL_REFUND',
+              },
+              tx
+            );
+          }
 
           await tx.payment.update({
             where: { orderId: order.id },
@@ -908,6 +1130,9 @@ export class OrderStateMachine {
         updatedOrder,
         soldCountUpdates,
       };
+    }, {
+      maxWait: 10000,
+      timeout: 30000,
     });
 
     // 6. Broadcast via Socket
@@ -921,6 +1146,7 @@ export class OrderStateMachine {
         socket.emitOrderStatusUpdate({
           orderId: order.id,
           orderNumber: order.orderNumber,
+          displayOrderNumber: order.displayOrderNumber || undefined,
           status: targetStatusStr,
           parentStatus: targetStatusStr,
           version: (result.updatedOrder as any)?.updatedAt ? new Date((result.updatedOrder as any).updatedAt).getTime() : Date.now(),

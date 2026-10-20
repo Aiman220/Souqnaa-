@@ -1,14 +1,31 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../../database/prisma';
+import { redis } from '../../database/redis';
 import { ResponseUtil } from '../../utils/response.util';
 import { formatProductForClient, formatProductsForClient } from '../../utils/product-formatter.util';
 import { storageService } from '../../services/storage/storage.service';
 
 const router = Router();
+const HOME_CACHE_KEY = 'cache:home:feed';
+const HOME_CACHE_TTL_SECONDS = 60;
+
+export async function invalidateHomeFeedCache(): Promise<void> {
+  try {
+    await redis.del(HOME_CACHE_KEY);
+  } catch (_) {}
+}
 
 // GET /api/v1/home — Combined payload for the customer home screen
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const bypassCache = req.query.nocache === 'true';
+    if (!bypassCache) {
+      const cached = await redis.getJson<any>(HOME_CACHE_KEY);
+      if (cached) {
+        return ResponseUtil.success(res, cached);
+      }
+    }
+
     const [banners, categories, flashSales, rawFeaturedProducts, rawBestSellers, featuredStores, promotions] =
       await Promise.all([
         prisma.banner.findMany({
@@ -135,7 +152,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       cover: s.cover ? storageService.normalizeUrl(s.cover) : null,
     }));
 
-    ResponseUtil.success(res, {
+    const payload = {
       banners: normalizedBanners,
       categories,
       flashSales: formattedFlashSales,
@@ -143,7 +160,12 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       bestSellers,
       featuredStores: normalizedStores,
       promotions,
-    });
+    };
+
+    // Cache the assembled payload asynchronously
+    redis.setJson(HOME_CACHE_KEY, payload, HOME_CACHE_TTL_SECONDS).catch(() => {});
+
+    ResponseUtil.success(res, payload);
   } catch (error) {
     next(error);
   }

@@ -1,4 +1,5 @@
 import { prisma } from '../../../database/prisma';
+import { redis } from '../../../database/redis';
 import { AppError } from '../../../middleware/error.middleware';
 import {
   RefundStatus,
@@ -418,6 +419,8 @@ export class RefundService {
       })
     ).catch(() => {});
 
+    await RefundService.emitAdjustedProductSales((updated as any)?.__adjustedProducts);
+
     try {
       SocketService.get()?.emitGlobal('refund:seller_accepted', {
         refundId: updated.id,
@@ -686,6 +689,8 @@ export class RefundService {
 
       return res;
     });
+
+    await RefundService.emitAdjustedProductSales((updated as any)?.__adjustedProducts);
 
     try {
       SocketService.get()?.emitGlobal('refund:customer_accepted', {
@@ -1055,6 +1060,8 @@ export class RefundService {
       return res;
     });
 
+    await RefundService.emitAdjustedProductSales((updated as any)?.__adjustedProducts);
+
     try {
       SocketService.get()?.emitGlobal('dispute:resolved', {
         refundId: updated.id,
@@ -1196,32 +1203,6 @@ export class RefundService {
         }
       }
 
-      // 2.2 Revert Product Sold Count for Refunded Items (§4)
-      if (refund.id) {
-        try {
-          const refundItems = await tx.refundRequestItem.findMany({
-            where: { refundRequestId: refund.id },
-            select: { productId: true, quantity: true },
-          });
-          for (const item of refundItems) {
-            if (item.productId && item.quantity > 0) {
-              const currentProd = await tx.product.findUnique({
-                where: { id: item.productId },
-                select: { soldCount: true },
-              });
-              if (currentProd && currentProd.soldCount > 0) {
-                const newSoldCount = Math.max(0, currentProd.soldCount - item.quantity);
-                await tx.product.update({
-                  where: { id: item.productId },
-                  data: { soldCount: newSoldCount },
-                });
-              }
-            }
-          }
-        } catch (soldErr) {
-          console.error('[Refund] Failed to adjust product soldCount on refund:', soldErr);
-        }
-      }
 
       // 3. Mark Refund as REFUND_COMPLETED
       await tx.refundRequest.update({
@@ -1316,6 +1297,78 @@ export class RefundService {
           data: { status: PaymentStatus.REFUNDED },
         });
       }
+    }
+
+    // Revert Product Sold Count for Refunded Items across ALL destinations (§4)
+    const adjustedProducts: Array<{ productId: string; newSoldCount: number; delta: number; storeId?: string }> = [];
+    if (refund.id) {
+      try {
+        const refundItems = await tx.refundRequestItem.findMany({
+          where: { refundRequestId: refund.id },
+          select: { productId: true, quantity: true },
+        });
+        for (const item of refundItems) {
+          if (item.productId && item.quantity > 0) {
+            const currentProd = await tx.product.findUnique({
+              where: { id: item.productId },
+              select: { soldCount: true, storeId: true },
+            });
+            if (currentProd && currentProd.soldCount > 0) {
+              const newSoldCount = Math.max(0, currentProd.soldCount - item.quantity);
+              await tx.product.update({
+                where: { id: item.productId },
+                data: { soldCount: newSoldCount },
+              });
+              adjustedProducts.push({
+                productId: item.productId,
+                newSoldCount,
+                delta: -item.quantity,
+                storeId: currentProd.storeId,
+              });
+            }
+          }
+        }
+      } catch (soldErr) {
+        console.error('[Refund] Failed to adjust product soldCount on refund:', soldErr);
+      }
+    }
+    (refund as any).__adjustedProducts = adjustedProducts;
+  }
+
+  /**
+   * Broadcasts product sold-count changes and invalidates Redis caches post-commit.
+   */
+  public static async emitAdjustedProductSales(
+    adjustedProducts?: Array<{ productId: string; newSoldCount: number; delta: number; storeId?: string }>
+  ) {
+    if (!adjustedProducts || adjustedProducts.length === 0) return;
+    try {
+      const socket = SocketService.get();
+      for (const item of adjustedProducts) {
+        if (socket) {
+          socket.emitGlobal('product:sold_count_updated', {
+            productId: item.productId,
+            soldCount: item.newSoldCount,
+            delta: item.delta,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        try {
+          await redis.del(`product:${item.productId}`);
+          if (item.storeId) {
+            const store = await prisma.store.findUnique({
+              where: { id: item.storeId },
+              select: { slug: true },
+            });
+            await redis.del(`storefront:${item.storeId}`);
+            if (store?.slug) {
+              await redis.del(`storefront:${store.slug}`);
+            }
+          }
+        } catch (_) {}
+      }
+    } catch (err) {
+      console.error('[Refund] Failed to emit adjusted product sales:', err);
     }
   }
 

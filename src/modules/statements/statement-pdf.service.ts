@@ -42,7 +42,7 @@ export class StatementPdfService {
   /**
    * Formats numbers to currency string with 2 decimals
    */
-  public static formatAmount(val: number | undefined | null, currency: string = 'YER'): string {
+  public static formatAmount(val: number | undefined | null, currency: string = 'ر.ي'): string {
     const num = Number(val || 0);
     return `${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
   }
@@ -54,6 +54,7 @@ export class StatementPdfService {
     snapshot: StatementSnapshotDto,
     options?: StatementRenderOptions
   ): Promise<string> {
+    snapshot = { ...snapshot, currency: 'ر.ي' };
     const autoPrint = options?.autoPrint ?? false;
     const exportUrl = options?.exportUrl ?? '';
     const qrPayload = snapshot.metadata?.qrPayload || `SOUQNAA-STMT|${snapshot.statementNumber}|${snapshot.statementType}`;
@@ -840,7 +841,7 @@ export class StatementPdfService {
         </div>
         <div class="info-row">
           <span class="info-label">العملة المعتمدة (Currency):</span>
-          <span class="info-val">${snapshot.currency}</span>
+          <span class="info-val">ر.ي</span>
         </div>
         <div class="info-row">
           <span class="info-label">الولاية الضريبية (Jurisdiction):</span>

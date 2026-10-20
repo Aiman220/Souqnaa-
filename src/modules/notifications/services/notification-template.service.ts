@@ -151,6 +151,70 @@ export class NotificationTemplateService {
       deepLinkPattern: 'souqnaa://wallet',
     },
 
+    // ── Universal Disputes ──────────────────────────────────────────────────
+    DISPUTE_CREATED: {
+      titleAr: 'تم تسجيل النزاع بنجاح ⚖️',
+      titleEn: 'Dispute submitted successfully ⚖️',
+      bodyAr: 'تم تسجيل نزاعك على الطلب #{{orderNumber}} بنجاح وهو قيد التحكيم لدى المنصة.',
+      bodyEn: 'Your dispute for order #{{orderNumber}} has been submitted and is under arbitration.',
+      deepLinkPattern: 'souqnaa://disputes/{{disputeId}}',
+    },
+    DISPUTE_SELLER_NOTIFIED: {
+      titleAr: 'نزاع جديد يتطلب ردك ⚠️',
+      titleEn: 'New dispute requires your response ⚠️',
+      bodyAr: 'فتح العميل نزاعاً على الطلب #{{orderNumber}}. يرجى مراجعة التفاصيل والرد خلال 48 ساعة.',
+      bodyEn: 'Customer opened a dispute on order #{{orderNumber}}. Please review and respond within 48 hours.',
+      deepLinkPattern: 'souqnaa://seller/refunds/{{disputeId}}',
+    },
+    DISPUTE_SELLER_RESPONDED: {
+      titleAr: 'رد المتجر على النزاع 📝',
+      titleEn: 'Seller responded to dispute 📝',
+      bodyAr: 'قدم المتجر رده بخصوص النزاع على الطلب #{{orderNumber}} وجارٍ مراجعته.',
+      bodyEn: 'Seller submitted a response regarding the dispute for order #{{orderNumber}}.',
+      deepLinkPattern: 'souqnaa://disputes/{{disputeId}}',
+    },
+    DISPUTE_EVIDENCE_SUBMITTED: {
+      titleAr: 'تم تقديم أدلة جديدة في النزاع 📎',
+      titleEn: 'New evidence submitted 📎',
+      bodyAr: 'تم إرفاق مستندات أو صور إضافية بخصوص النزاع على الطلب #{{orderNumber}}.',
+      bodyEn: 'New evidence has been attached to the dispute for order #{{orderNumber}}.',
+      deepLinkPattern: 'souqnaa://disputes/{{disputeId}}',
+    },
+    DISPUTE_INFO_REQUESTED: {
+      titleAr: 'طلب معلومات إضافية للنزاع ℹ️',
+      titleEn: 'Additional information requested ℹ️',
+      bodyAr: 'طلبت إدارة المنصة توضيحات إضافية حول النزاع: {{note}}',
+      bodyEn: 'Platform administration requested additional info regarding the dispute: {{note}}',
+      deepLinkPattern: 'souqnaa://disputes/{{disputeId}}',
+    },
+    DISPUTE_ESCALATED: {
+      titleAr: 'تم تصعيد النزاع للإدارة 🚨',
+      titleEn: 'Dispute escalated to admin 🚨',
+      bodyAr: 'تم تصعيد النزاع للتحكيم الإداري النهائي على الطلب #{{orderNumber}}.',
+      bodyEn: 'Dispute for order #{{orderNumber}} has been escalated to senior arbitration.',
+      deepLinkPattern: 'souqnaa://disputes/{{disputeId}}',
+    },
+    DISPUTE_RESOLVED: {
+      titleAr: 'تم البت في النزاع وإصدار القرار ⚖️',
+      titleEn: 'Dispute decision issued ⚖️',
+      bodyAr: 'أصدرت الإدارة قرارها النهائي: {{resolution}}',
+      bodyEn: 'Dispute decision has been finalized: {{resolution}}',
+      deepLinkPattern: 'souqnaa://disputes/{{disputeId}}',
+    },
+    DISPUTE_APPEALED: {
+      titleAr: 'تم تقديم طلب استئناف على النزاع 🔄',
+      titleEn: 'Dispute decision appealed 🔄',
+      bodyAr: 'تم تسجيل طلب استئناف بخصوص قرار النزاع على الطلب #{{orderNumber}}.',
+      bodyEn: 'An appeal has been submitted for the dispute on order #{{orderNumber}}.',
+      deepLinkPattern: 'souqnaa://disputes/{{disputeId}}',
+    },
+    DISPUTE_DEADLINE_APPROACHING: {
+      titleAr: 'تذكير: اقتراب الموعد النهائي للرد ⏳',
+      titleEn: 'Deadline approaching for dispute response ⏳',
+      bodyAr: 'يرجى تقديم ردك على النزاع للطلب #{{orderNumber}} قبل انتهاء المهلة المحددة.',
+      bodyEn: 'Please submit your response to dispute for order #{{orderNumber}} before deadline.',
+      deepLinkPattern: 'souqnaa://disputes/{{disputeId}}',
+    },
     // ── Wallet ──────────────────────────────────────────────────────────────
     WALLET_CREDITED: {
       titleAr: 'تم شحن المحفظة 💰',
@@ -464,7 +528,7 @@ export class NotificationTemplateService {
     if (code.startsWith('CART_ABANDONMENT_') || code.startsWith('CART_REMINDER')) return NotificationCategory.CART_ABANDONMENT;
     if (code.startsWith('ORDER_') || code.startsWith('SELLER_ORDER') || code.startsWith('SELLER_NEW_ORDER')) return NotificationCategory.ORDER;
     if (code.startsWith('PAYMENT_')) return NotificationCategory.PAYMENT;
-    if (code.startsWith('REFUND_') || code.startsWith('SELLER_REFUND_')) return NotificationCategory.REFUND;
+    if (code.startsWith('REFUND_') || code.startsWith('SELLER_REFUND_') || code.startsWith('DISPUTE_')) return NotificationCategory.REFUND;
     if (code.startsWith('WALLET_') || code.startsWith('WITHDRAWAL_') || code.startsWith('SELLER_PAYMENT_')) return NotificationCategory.WALLET;
     if (code.startsWith('COIN') || code.startsWith('REWARD')) return NotificationCategory.REWARDS;
     if (code.startsWith('COUPON_')) return NotificationCategory.COUPON;

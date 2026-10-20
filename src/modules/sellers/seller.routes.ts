@@ -16,6 +16,7 @@ import {
   PaymentStatus,
   PaymentMethodType,
   SellerStatus,
+  RefundDestination,
 } from '@prisma/client';
 import { SocketService } from '../../services/websocket/socket.service';
 import { OrderStateMachine } from '../orders/order.state-machine';
@@ -2086,7 +2087,10 @@ router.get('/me/cancellations', async (req: Request, res: Response, next: NextFu
 
     const requests = await prisma.cancellationRequest.findMany({
       where: {
-        sellerOrder: { sellerId: seller.id },
+        OR: [
+          { sellerOrder: { sellerId: seller.id } },
+          { order: { sellerOrders: { some: { sellerId: seller.id } } } },
+        ],
       },
       include: {
         order: { select: { orderNumber: true, total: true, user: { select: { firstName: true, lastName: true, phone: true } } } },
@@ -2110,17 +2114,31 @@ router.post('/me/cancellations/:id/approve', async (req: Request, res: Response,
     const cancelReq = await prisma.cancellationRequest.findFirst({
       where: {
         id,
-        sellerOrder: { sellerId: seller.id },
+        OR: [
+          { sellerOrder: { sellerId: seller.id } },
+          { order: { sellerOrders: { some: { sellerId: seller.id } } } },
+        ],
       },
-      include: { sellerOrder: true },
+      include: {
+        sellerOrder: true,
+        order: { include: { sellerOrders: true } },
+      },
     });
 
-    if (!cancelReq || !cancelReq.sellerOrderId) {
+    if (!cancelReq) {
       throw new AppError('طلب الإلغاء غير موجود أو لا يخص هذا المتجر', 404);
     }
 
+    const targetSellerOrderId =
+      cancelReq.sellerOrderId ||
+      cancelReq.order.sellerOrders.find((s) => s.sellerId === seller.id)?.id;
+
+    if (!targetSellerOrderId) {
+      throw new AppError('طلب المتجر المرتبط بطلب الإلغاء غير موجود', 404);
+    }
+
     await prisma.cancellationRequest.update({
-      where: { id },
+      where: { id: cancelReq.id },
       data: {
         status: CancellationRequestStatus.APPROVED,
         resolvedBy: req.user!.userId,
@@ -2129,15 +2147,15 @@ router.post('/me/cancellations/:id/approve', async (req: Request, res: Response,
     });
 
     const result = await OrderStateMachine.transitionSellerOrder({
-      sellerOrderId: cancelReq.sellerOrderId,
+      sellerOrderId: targetSellerOrderId,
       targetStatus: SellerOrderStatus.CANCELLED_BY_CUSTOMER,
       changedBy: req.user!.userId,
       changedByRole: 'SELLER',
       reason: cancelReq.reason,
-      note: 'موافقة المتجر على طلب إلغاء العميل',
+      note: 'موافقة المتجر على طلب إلغاء العميل وإرجاع كامل المبلغ لمحفظة العميل',
     });
 
-    ResponseUtil.success(res, result.sellerOrder, 'تمت الموافقة على طلب الإلغاء وتحرير المخزون');
+    ResponseUtil.success(res, result.sellerOrder, 'تمت الموافقة على طلب الإلغاء وإرجاع كامل المبلغ لمحفظة العميل وتحرير المخزون');
   } catch (error) {
     next(error);
   }
@@ -2153,17 +2171,31 @@ router.post('/me/cancellations/:id/reject', async (req: Request, res: Response, 
     const cancelReq = await prisma.cancellationRequest.findFirst({
       where: {
         id,
-        sellerOrder: { sellerId: seller.id },
+        OR: [
+          { sellerOrder: { sellerId: seller.id } },
+          { order: { sellerOrders: { some: { sellerId: seller.id } } } },
+        ],
       },
-      include: { sellerOrder: true },
+      include: {
+        sellerOrder: true,
+        order: { include: { sellerOrders: true } },
+      },
     });
 
-    if (!cancelReq || !cancelReq.sellerOrderId) {
+    if (!cancelReq) {
       throw new AppError('طلب الإلغاء غير موجود أو لا يخص هذا المتجر', 404);
     }
 
+    const targetSellerOrderId =
+      cancelReq.sellerOrderId ||
+      cancelReq.order.sellerOrders.find((s) => s.sellerId === seller.id)?.id;
+
+    if (!targetSellerOrderId) {
+      throw new AppError('طلب المتجر المرتبط بطلب الإلغاء غير موجود', 404);
+    }
+
     await prisma.cancellationRequest.update({
-      where: { id },
+      where: { id: cancelReq.id },
       data: {
         status: CancellationRequestStatus.REJECTED,
         resolvedBy: req.user!.userId,
@@ -2174,10 +2206,28 @@ router.post('/me/cancellations/:id/reject', async (req: Request, res: Response, 
 
     // Restore seller order status back to PROCESSING
     await prisma.sellerOrder.update({
-      where: { id: cancelReq.sellerOrderId },
+      where: { id: targetSellerOrderId },
       data: { status: SellerOrderStatus.PROCESSING },
     });
-    await OrderStateMachine.syncParentOrderStatus(cancelReq.orderId);
+    const parentStatus = await OrderStateMachine.syncParentOrderStatus(cancelReq.orderId);
+
+    try {
+      const orderData = await prisma.order.findUnique({
+        where: { id: cancelReq.orderId },
+        select: { orderNumber: true, displayOrderNumber: true, userId: true },
+      });
+      SocketService.get()?.emitOrderStatusUpdate({
+        orderId: cancelReq.orderId,
+        orderNumber: orderData?.orderNumber || '',
+        displayOrderNumber: orderData?.displayOrderNumber || undefined,
+        sellerOrderId: targetSellerOrderId,
+        customerUserId: orderData?.userId,
+        sellerUserIds: [seller.userId],
+        status: parentStatus,
+        changedByRole: 'SELLER',
+        extra: { previousStatus: OrderStatus.CANCELLATION_REQUESTED },
+      });
+    } catch (_) {}
 
     ResponseUtil.success(res, null, 'تم رفض طلب الإلغاء واستئناف تجهيز الطلب');
   } catch (error) {
@@ -2192,7 +2242,10 @@ router.get('/me/returns', async (req: Request, res: Response, next: NextFunction
 
     const returns = await prisma.returnRequest.findMany({
       where: {
-        sellerOrder: { sellerId: seller.id },
+        OR: [
+          { sellerOrder: { sellerId: seller.id } },
+          { order: { sellerOrders: { some: { sellerId: seller.id } } } },
+        ],
       },
       include: {
         order: { select: { orderNumber: true, total: true, user: { select: { firstName: true, lastName: true, phone: true } } } },
@@ -2218,13 +2271,16 @@ router.post(['/me/returns/:id/approve', '/me/orders/:id/approve-return'], async 
         OR: [{ id }, { sellerOrderId: id }, { orderId: id }],
         sellerOrder: { sellerId: seller.id },
       },
-      include: { sellerOrder: true },
+      include: { sellerOrder: true, order: { include: { sellerOrders: true } } },
     });
 
     if (!returnReq && id) {
       returnReq = await prisma.returnRequest.findFirst({
-        where: { sellerOrderId: id },
-        include: { sellerOrder: true },
+        where: {
+          OR: [{ id }, { sellerOrderId: id }, { orderId: id }],
+          order: { sellerOrders: { some: { sellerId: seller.id } } },
+        },
+        include: { sellerOrder: true, order: { include: { sellerOrders: true } } },
       });
     }
 
@@ -2239,17 +2295,21 @@ router.post(['/me/returns/:id/approve', '/me/orders/:id/approve-return'], async 
       });
     }
 
-    const sellerOrderId = returnReq?.sellerOrderId || id;
+    const sellerOrderId =
+      returnReq?.sellerOrderId ||
+      returnReq?.order?.sellerOrders?.find((s) => s.sellerId === seller.id)?.id ||
+      id;
+
     const result = await OrderStateMachine.transitionSellerOrder({
       sellerOrderId,
       targetStatus: SellerOrderStatus.RETURN_APPROVED,
       changedBy: req.user!.userId,
       changedByRole: 'SELLER',
       reason: returnReq?.reason || 'موافقة المتجر على طلب الإرجاع',
-      note: 'تمت الموافقة على طلب الإرجاع من قبل المتجر',
+      note: 'تمت الموافقة على طلب الإرجاع وإرجاع كامل المبلغ لمحفظة العميل',
     });
 
-    // Check if there is an associated RefundRequest to accept and settle financially
+    // Synchronize associated RefundRequest if present
     try {
       const activeRefund = await prisma.refundRequest.findFirst({
         where: {
@@ -2262,11 +2322,28 @@ router.post(['/me/returns/:id/approve', '/me/orders/:id/approve-return'], async 
       });
 
       if (activeRefund) {
-        await RefundService.sellerAccept(
-          activeRefund.id,
-          req.user!.userId,
-          returnReq?.reason || 'موافقة المتجر على طلب الإرجاع'
-        );
+        await prisma.refundRequest.update({
+          where: { id: activeRefund.id },
+          data: {
+            status: RefundStatus.SELLER_ACCEPTED,
+            approvedAmount: activeRefund.requestedAmount,
+            sellerResponse: returnReq?.reason || 'موافقة المتجر على طلب الإرجاع',
+          },
+        });
+
+        await prisma.refundExecutionLock.upsert({
+          where: { refundId: activeRefund.id },
+          create: {
+            refundId: activeRefund.id,
+            destination: RefundDestination.CUSTOMER_WALLET,
+            status: 'COMPLETED',
+            completedAt: new Date(),
+          },
+          update: {
+            status: 'COMPLETED',
+            completedAt: new Date(),
+          },
+        });
       }
     } catch (refErr) {
       console.error('[SellerReturnAccept] Error auto-processing refund request:', refErr);
@@ -2283,7 +2360,7 @@ router.post(['/me/returns/:id/approve', '/me/orders/:id/approve-return'], async 
       });
     } catch (_) {}
 
-    ResponseUtil.success(res, result.sellerOrder, 'تمت الموافقة على طلب الإرجاع بنجاح');
+    ResponseUtil.success(res, result.sellerOrder, 'تمت الموافقة على طلب الإرجاع واسترداد كامل المبلغ لمحفظة العميل بنجاح');
   } catch (error) {
     next(error);
   }
@@ -2316,24 +2393,17 @@ router.post(['/me/returns/:id/reject', '/me/orders/:id/reject-return'], async (r
     }
 
     const sellerOrderId = returnReq?.sellerOrderId || id;
-    await prisma.sellerOrder.update({
-      where: { id: sellerOrderId },
-      data: { status: SellerOrderStatus.DELIVERED },
+    await OrderStateMachine.transitionSellerOrder({
+      sellerOrderId,
+      targetStatus: SellerOrderStatus.DELIVERED,
+      changedBy: req.user!.userId,
+      changedByRole: 'SELLER',
+      reason: note || 'تم رفض طلب الإرجاع من قبل التاجر',
+      note: note || 'تم رفض طلب الإرجاع من قبل التاجر',
     });
 
     const targetOrderId = returnReq?.orderId || (await prisma.sellerOrder.findUnique({ where: { id: sellerOrderId }, select: { orderId: true } }))?.orderId;
     if (targetOrderId) {
-      await prisma.orderStatusHistory.create({
-        data: {
-          orderId: targetOrderId,
-          fromStatus: 'RETURN_REQUESTED',
-          toStatus: 'DELIVERED',
-          changedBy: req.user!.userId,
-          reason: note || 'تم رفض طلب الإرجاع من قبل التاجر',
-          note: note || 'تم رفض طلب الإرجاع من قبل التاجر',
-        },
-      });
-      await OrderStateMachine.syncParentOrderStatus(targetOrderId);
 
       // Also update any related RefundRequest to REJECTED so customer can dispute
       await prisma.refundRequest.updateMany({
@@ -2359,9 +2429,20 @@ router.post(['/me/returns/:id/reject', '/me/orders/:id/reject-return'], async (r
         reason: note,
       });
       if (targetOrderId) {
-        SocketService.get()?.emitGlobal('order:status', {
+        const orderData = await prisma.order.findUnique({
+          where: { id: targetOrderId },
+          select: { orderNumber: true, displayOrderNumber: true, userId: true },
+        });
+        SocketService.get()?.emitOrderStatusUpdate({
           orderId: targetOrderId,
-          status: 'DELIVERED',
+          orderNumber: orderData?.orderNumber || '',
+          displayOrderNumber: orderData?.displayOrderNumber || undefined,
+          sellerOrderId,
+          customerUserId: orderData?.userId,
+          sellerUserIds: [seller.userId],
+          status: OrderStatus.DELIVERED,
+          changedByRole: 'SELLER',
+          extra: { previousStatus: OrderStatus.RETURN_REQUESTED },
         });
       }
     } catch (_) {}

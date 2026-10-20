@@ -1,3 +1,4 @@
+import { SocketService } from '../../services/websocket/socket.service';
 import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../../database/prisma';
 import { authenticate } from '../../middleware/auth.middleware';
@@ -177,6 +178,10 @@ router.all('/read-all', async (req: Request, res: Response, next: NextFunction) 
       where: { ...userFilter, isRead: false },
       data: { isRead: true, readAt: new Date() },
     });
+    try {
+      SocketService.get()?.emitNotificationBadge(req.user!.userId, 0);
+      SocketService.get()?.emitToUser(req.user!.userId, 'notification:read_all', {});
+    } catch (_) {}
     ResponseUtil.success(res, null, 'All notifications marked as read');
   } catch (error) {
     next(error);
@@ -200,6 +205,13 @@ router.all('/:id/read', async (req: Request, res: Response, next: NextFunction) 
       return ResponseUtil.notFound(res, 'Notification not found');
     }
 
+    try {
+      const remainingUnread = await prisma.notification.count({
+        where: { ...userFilter, isRead: false },
+      });
+      SocketService.get()?.emitNotificationBadge(req.user!.userId, remainingUnread);
+      SocketService.get()?.emitToUser(req.user!.userId, 'notification:read', { id, unreadCount: remainingUnread });
+    } catch (_) {}
     ResponseUtil.success(res, { id, isRead: true });
   } catch (error) {
     next(error);

@@ -141,12 +141,12 @@ export class StatementExportService {
    * Formats currency representation to official Yemeni Rial standard
    */
   public static formatCurrency(curr?: string): string {
-    if (!curr) return 'ريال يمني (ر.ي)';
+    if (!curr) return 'ر.ي';
     const c = curr.trim().toUpperCase();
     if (c === 'YER' || c === 'ر.ي' || c === 'ريال يمني') {
-      return 'ريال يمني (ر.ي)';
+      return 'ر.ي';
     }
-    return curr;
+    return 'ر.ي';
   }
 
   /**

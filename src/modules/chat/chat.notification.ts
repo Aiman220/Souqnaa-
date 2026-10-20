@@ -29,50 +29,148 @@ export async function sendChatNotification({
   try {
     const socketSvc = SocketService.get();
 
-    // 1. Find conversation members excluding the sender
-    const recipients = await prisma.conversationMember.findMany({
-      where: {
-        conversationId,
-        userId: { not: senderId },
-      },
+    // Check if this conversation is a Support Conversation
+    const supConv = await prisma.supportConversation.findFirst({
+      where: { OR: [{ id: conversationId }, { conversationId }] },
       include: {
-        user: {
+        assignedAgent: true,
+        ticket: true,
+      },
+    });
+
+    // 1. Resolve recipients
+    const recipientTargets: Array<{
+      userId: string;
+      role?: string;
+      muted?: boolean;
+      recipientType: AppType;
+    }> = [];
+
+    let senderNameAr = 'مستخدم';
+    let senderNameEn = 'User';
+
+    if (supConv) {
+      const requesterUser = supConv.requesterId ? await prisma.user.findUnique({
+        where: { id: supConv.requesterId },
+        select: { id: true, firstName: true, lastName: true, role: true },
+      }) : null;
+
+      const adminUser = await prisma.user.findFirst({
+        where: { id: senderId, role: 'ADMIN' },
+      });
+
+      const isAgentSender =
+        (supConv.assignedAgent?.adminUserId === senderId) || adminUser !== null;
+
+      if (isAgentSender) {
+        // Support agent sends message -> recipient is requester (customer or seller)
+        const agentName = supConv.assignedAgent?.displayName || 'موظف الدعم';
+        senderNameAr = `الدعم الفني (${agentName})`;
+        senderNameEn = `Customer Support (${agentName})`;
+
+        if (supConv.requesterId && supConv.requesterId !== senderId) {
+          const reqType =
+            supConv.requesterType === 'SELLER'
+              ? AppType.SELLER
+              : AppType.CUSTOMER;
+          recipientTargets.push({
+            userId: supConv.requesterId,
+            role: requesterUser?.role,
+            muted: false,
+            recipientType: reqType,
+          });
+        }
+      } else {
+        // Customer or seller sends message -> recipient is assigned agent
+        const sender = await prisma.user.findUnique({
+          where: { id: senderId },
           select: {
-            id: true,
             firstName: true,
             lastName: true,
-            role: true,
+            seller: { select: { stores: { select: { name: true } } } },
+          },
+        });
+        const store = sender?.seller?.stores?.[0];
+        senderNameAr =
+          store?.name ||
+          `${sender?.firstName || ''} ${sender?.lastName || ''}`.trim() ||
+          (supConv.requesterType === 'SELLER' ? 'التاجر' : 'العميل');
+        senderNameEn =
+          store?.name ||
+          `${sender?.firstName || ''} ${sender?.lastName || ''}`.trim() ||
+          (supConv.requesterType === 'SELLER' ? 'Seller' : 'Customer');
+
+        if (supConv.assignedAgent?.adminUserId && supConv.assignedAgent.adminUserId !== senderId) {
+          recipientTargets.push({
+            userId: supConv.assignedAgent.adminUserId,
+            role: 'ADMIN',
+            muted: false,
+            recipientType: AppType.ADMIN,
+          });
+        }
+      }
+    } else {
+      // Regular conversation
+      const members = await prisma.conversationMember.findMany({
+        where: {
+          conversationId,
+          userId: { not: senderId },
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              role: true,
+            },
           },
         },
-      },
-    });
+      });
 
-    if (recipients.length === 0) return;
+      for (const m of members) {
+        let recipientType = AppType.CUSTOMER;
+        const userRole = m.user?.role as string | undefined;
+        if (userRole === 'SELLER') {
+          recipientType = AppType.SELLER;
+        } else if (userRole === 'ADMIN' || userRole === 'SUPER_ADMIN') {
+          recipientType = AppType.ADMIN;
+        }
+        recipientTargets.push({
+          userId: m.userId,
+          role: m.user?.role,
+          muted: m.muted,
+          recipientType,
+        });
+      }
 
-    // 2. Resolve sender display name (Store name if seller, else User full name)
-    const sender = await prisma.user.findUnique({
-      where: { id: senderId },
-      select: {
-        firstName: true,
-        lastName: true,
-        seller: {
-          select: {
-            stores: { select: { name: true } },
+      // Resolve sender display name (Store name if seller, else User full name)
+      const sender = await prisma.user.findUnique({
+        where: { id: senderId },
+        select: {
+          firstName: true,
+          lastName: true,
+          seller: {
+            select: {
+              stores: { select: { name: true } },
+            },
           },
         },
-      },
-    });
+      });
 
-    const store = sender?.seller?.stores?.[0];
-    const senderNameAr =
-      store?.name ||
-      `${sender?.firstName || ''} ${sender?.lastName || ''}`.trim() ||
-      'مستخدم';
+      const store = sender?.seller?.stores?.[0];
+      senderNameAr =
+        store?.name ||
+        `${sender?.firstName || ''} ${sender?.lastName || ''}`.trim() ||
+        'مستخدم';
 
-    const senderNameEn =
-      store?.name ||
-      `${sender?.firstName || ''} ${sender?.lastName || ''}`.trim() ||
-      'User';
+      senderNameEn =
+        store?.name ||
+        `${sender?.firstName || ''} ${sender?.lastName || ''}`.trim() ||
+        'User';
+    }
+
+    if (recipientTargets.length === 0) return;
 
     // 3. Format safe, non-sensitive notification content
     let bodyAr = 'أرسل لك رسالة جديدة';
@@ -117,36 +215,40 @@ export async function sendChatNotification({
         break;
     }
 
-    const titleAr = `رسالة جديدة من ${senderNameAr}`;
-    const titleEn = `New message from ${senderNameEn}`;
+    const roomsToCheck = [conversationId];
+    if (supConv) {
+      if (supConv.id && !roomsToCheck.includes(supConv.id)) roomsToCheck.push(supConv.id);
+      if (supConv.conversationId && !roomsToCheck.includes(supConv.conversationId)) roomsToCheck.push(supConv.conversationId);
+    }
 
-    for (const recipient of recipients) {
+    for (const recipient of recipientTargets) {
       // Check if recipient has muted the conversation
       if (recipient.muted) {
         continue;
       }
 
       // If recipient is actively inside this specific conversation room right now, they see messages live
-      const isViewingConversation = socketSvc ? socketSvc.isUserInConversation(recipient.userId, conversationId) : false;
+      let isViewingConversation = false;
+      if (socketSvc) {
+        for (const room of roomsToCheck) {
+          if (socketSvc.isUserInConversation(recipient.userId, room)) {
+            isViewingConversation = true;
+            break;
+          }
+        }
+      }
+
       if (isViewingConversation) {
         continue;
       }
 
-      // Determine recipient appType dynamically from role
-      let recipientType = AppType.CUSTOMER;
-      const userRole = recipient.user?.role as string | undefined;
-      if (userRole === 'SELLER') {
-        recipientType = AppType.SELLER;
-      } else if (userRole === 'ADMIN' || userRole === 'SUPER_ADMIN') {
-        recipientType = AppType.ADMIN;
-      }
-
       // Dispatch through Centralized SOUQNAA Notification Platform
+      const effectiveConvId = supConv ? (supConv.id || supConv.conversationId) : conversationId;
       const chatEvent = NotificationEventFactory.chatEvent({
         eventType: 'CHAT_MESSAGE_RECEIVED',
         recipientId: recipient.userId,
-        recipientType,
-        conversationId,
+        recipientType: recipient.recipientType,
+        conversationId: effectiveConvId,
         messageId,
         senderId,
         senderName: senderNameAr,

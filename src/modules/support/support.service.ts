@@ -9,6 +9,7 @@ import {
 } from '@prisma/client';
 import { AppError } from '../../middleware/error.middleware';
 import { SocketService } from '../../services/websocket/socket.service';
+import { sendChatNotification } from '../chat/chat.notification';
 
 export interface CreateSupportConversationDto {
   requesterType: SupportRequesterType;
@@ -1330,6 +1331,18 @@ export class SupportService {
         }
       }
     } catch (_) {}
+
+    // Dispatch push notifications to recipients not currently viewing the chat room
+    if (!isInternalNote) {
+      sendChatNotification({
+        conversationId: conv.conversationId || conv.id,
+        senderId,
+        messageId: created.id,
+        type: type || 'text',
+        text,
+        metadata,
+      }).catch((err) => console.error('[Support Notification Error]:', err));
+    }
 
     return created;
   }

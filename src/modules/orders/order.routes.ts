@@ -1551,6 +1551,14 @@ function buildCustomerPurchaseFilterWhere(userId: string, filter: string): any {
         status: OrderStatus.DELIVERED,
         returnRequests: { none: {} },
         refundRequests: { none: {} },
+        sellerOrders: {
+          none: {
+            OR: [
+              { returnRequests: { some: {} } },
+              { refundRequests: { some: {} } },
+            ],
+          },
+        },
       };
 
     case 'REFUND':
@@ -1590,6 +1598,7 @@ function buildCustomerPurchaseFilterWhere(userId: string, filter: string): any {
             },
           },
           { cancellationRequests: { some: {} } },
+          { sellerOrders: { some: { cancellationRequests: { some: {} } } } },
         ],
       };
 
@@ -1684,7 +1693,15 @@ router.get('/summary', async (req: Request, res: Response, next: NextFunction) =
     }
 
     for (const o of orders) {
-      const isOrderUnread = unreadEntityIds.has(o.id) || unreadEntityIds.has(o.orderNumber);
+      const isOrderUnread =
+        unreadEntityIds.has(o.id) ||
+        (o.orderNumber && unreadEntityIds.has(o.orderNumber)) ||
+        (o.displayOrderNumber && unreadEntityIds.has(o.displayOrderNumber)) ||
+        o.sellerOrders.some(
+          (so: any) =>
+            unreadEntityIds.has(so.id) ||
+            (so.sellerOrderNumber && unreadEntityIds.has(so.sellerOrderNumber))
+        );
 
       const isTerminal = (
         [
@@ -1731,7 +1748,8 @@ router.get('/summary', async (req: Request, res: Response, next: NextFunction) =
             OrderStatus.CANCELLATION_REQUESTED,
           ] as OrderStatus[]
         ).includes(o.status) ||
-        (o.cancellationRequests && o.cancellationRequests.length > 0);
+        (o.cancellationRequests && o.cancellationRequests.length > 0) ||
+        o.sellerOrders.some((so: any) => so.cancellationRequests && so.cancellationRequests.length > 0);
 
       const isToReview =
         o.status === OrderStatus.DELIVERED &&
@@ -1804,7 +1822,7 @@ router.get('/summary', async (req: Request, res: Response, next: NextFunction) =
       // TO_REVIEW
       if (isToReview) {
         totals['TO_REVIEW']++;
-        unreads['TO_REVIEW']++;
+        if (isOrderUnread) unreads['TO_REVIEW']++;
         actionables['TO_REVIEW']++;
       }
     }
@@ -1841,11 +1859,23 @@ router.post('/mark-filter-read', async (req: Request, res: Response, next: NextF
     if (!filter || filter === 'ALL') {
       const orders = await prisma.order.findMany({
         where: { userId },
-        select: { id: true, orderNumber: true },
+        select: {
+          id: true,
+          orderNumber: true,
+          displayOrderNumber: true,
+          sellerOrders: { select: { id: true, sellerOrderNumber: true } },
+        },
       });
       for (const o of orders) {
         targetOrderIds.push(o.id);
         if (o.orderNumber) targetOrderIds.push(o.orderNumber);
+        if (o.displayOrderNumber) targetOrderIds.push(o.displayOrderNumber);
+        if (o.sellerOrders) {
+          for (const so of o.sellerOrders) {
+            if (so.id) targetOrderIds.push(so.id);
+            if (so.sellerOrderNumber) targetOrderIds.push(so.sellerOrderNumber);
+          }
+        }
       }
     } else {
       const orders = await prisma.order.findMany({
@@ -1859,6 +1889,7 @@ router.post('/mark-filter-read', async (req: Request, res: Response, next: NextF
             include: {
               returnRequests: { select: { id: true, status: true } },
               refundRequests: { select: { id: true, status: true } },
+              cancellationRequests: { select: { id: true, status: true } },
               items: {
                 include: {
                   productReviews: { select: { id: true } },
@@ -1913,7 +1944,8 @@ router.post('/mark-filter-read', async (req: Request, res: Response, next: NextF
               OrderStatus.CANCELLATION_REQUESTED,
             ] as OrderStatus[]
           ).includes(o.status) ||
-          (o.cancellationRequests && o.cancellationRequests.length > 0);
+          (o.cancellationRequests && o.cancellationRequests.length > 0) ||
+          o.sellerOrders.some((so: any) => so.cancellationRequests && so.cancellationRequests.length > 0);
 
         const isToReview =
           o.status === OrderStatus.DELIVERED &&
@@ -1938,12 +1970,20 @@ router.post('/mark-filter-read', async (req: Request, res: Response, next: NextF
         if (matches) {
           targetOrderIds.push(o.id);
           if (o.orderNumber) targetOrderIds.push(o.orderNumber);
+          if (o.displayOrderNumber) targetOrderIds.push(o.displayOrderNumber);
+          if (o.sellerOrders) {
+            for (const so of o.sellerOrders) {
+              if (so.id) targetOrderIds.push(so.id);
+              if (so.sellerOrderNumber) targetOrderIds.push(so.sellerOrderNumber);
+            }
+          }
         }
       }
     }
 
+    let markedCount = 0;
     if (targetOrderIds.length > 0) {
-      await prisma.notification.updateMany({
+      const updateRes = await prisma.notification.updateMany({
         where: {
           userId,
           isRead: false,
@@ -1954,9 +1994,19 @@ router.post('/mark-filter-read', async (req: Request, res: Response, next: NextF
           readAt: new Date(),
         },
       });
+      markedCount = updateRes.count;
     }
 
-    ResponseUtil.success(res, { markedCount: targetOrderIds.length }, 'تم تحديث حالة القراءة بنجاح');
+    try {
+      SocketService.get()?.emitToUser(userId, 'order:summary_updated', {
+        userId,
+        filter,
+        markedCount,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (_) {}
+
+    ResponseUtil.success(res, { markedCount }, 'تم تحديث حالة القراءة بنجاح');
   } catch (error) {
     next(error);
   }
@@ -1981,11 +2031,24 @@ router.post('/:id/read', async (req: Request, res: Response, next: NextFunction)
         ],
         userId,
       },
-      select: { id: true, orderNumber: true },
+      select: {
+        id: true,
+        orderNumber: true,
+        displayOrderNumber: true,
+        sellerOrders: { select: { id: true, sellerOrderNumber: true } },
+      },
     });
 
     if (!order) {
       return ResponseUtil.notFound(res, 'الطلب غير موجود أو غير مصرح بالوصول إليه');
+    }
+
+    const entityIds = [order.id];
+    if (order.orderNumber) entityIds.push(order.orderNumber);
+    if (order.displayOrderNumber) entityIds.push(order.displayOrderNumber);
+    for (const so of order.sellerOrders || []) {
+      if (so.id) entityIds.push(so.id);
+      if (so.sellerOrderNumber) entityIds.push(so.sellerOrderNumber);
     }
 
     // Idempotently mark unread notifications for this order as read
@@ -1993,10 +2056,7 @@ router.post('/:id/read', async (req: Request, res: Response, next: NextFunction)
       where: {
         userId,
         isRead: false,
-        OR: [
-          { entityId: order.id },
-          { entityId: order.orderNumber },
-        ],
+        entityId: { in: entityIds },
       },
       data: {
         isRead: true,
@@ -2008,6 +2068,11 @@ router.post('/:id/read', async (req: Request, res: Response, next: NextFunction)
       SocketService.get()?.emitToUser(userId, 'order:read', {
         orderId: order.id,
         readCount: updateRes.count,
+      });
+      SocketService.get()?.emitToUser(userId, 'order:summary_updated', {
+        userId,
+        orderId: order.id,
+        timestamp: new Date().toISOString(),
       });
     } catch (_) {}
 
@@ -2086,14 +2151,28 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 
     const orderIds = orders.map((o) => o.id);
     const orderNumbers = orders.map((o) => o.orderNumber);
+    const displayOrderNumbers = orders.map((o) => o.displayOrderNumber).filter(Boolean) as string[];
+    const sellerOrderIds: string[] = [];
+    const sellerOrderNumbers: string[] = [];
+    for (const o of orders) {
+      for (const so of o.sellerOrders || []) {
+        if (so.id) sellerOrderIds.push(so.id);
+        if (so.sellerOrderNumber) sellerOrderNumbers.push(so.sellerOrderNumber);
+      }
+    }
+
+    const allEntityIds = [
+      ...orderIds,
+      ...orderNumbers,
+      ...displayOrderNumbers,
+      ...sellerOrderIds,
+      ...sellerOrderNumbers,
+    ];
 
     const [disputes, unreadNotifs] = await Promise.all([
       prisma.dispute.findMany({
         where: {
-          OR: [
-            { orderId: { in: orderIds } },
-            { orderId: { in: orderNumbers } },
-          ],
+          orderId: { in: allEntityIds },
         },
         orderBy: { createdAt: 'desc' },
       }),
@@ -2101,7 +2180,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
         where: {
           userId: req.user!.userId,
           isRead: false,
-          entityId: { in: [...orderIds, ...orderNumbers] },
+          entityId: { in: allEntityIds },
         },
         select: { entityId: true },
       }),
@@ -2109,11 +2188,18 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 
     const unreadSet = new Set(unreadNotifs.map((n) => n.entityId).filter(Boolean) as string[]);
 
-    const enrichedOrders = orders.map((order) => ({
-      ...order,
-      disputes: disputes.filter((d) => d.orderId === order.id || d.orderId === order.orderNumber),
-      isUnread: unreadSet.has(order.id) || unreadSet.has(order.orderNumber),
-    }));
+    const enrichedOrders = orders.map((order) => {
+      const matchIds = [order.id, order.orderNumber, order.displayOrderNumber].filter(Boolean) as string[];
+      for (const so of order.sellerOrders || []) {
+        if (so.id) matchIds.push(so.id);
+        if (so.sellerOrderNumber) matchIds.push(so.sellerOrderNumber);
+      }
+      return {
+        ...order,
+        disputes: disputes.filter((d) => matchIds.includes(d.orderId)),
+        isUnread: matchIds.some((id) => unreadSet.has(id)),
+      };
+    });
 
     const meta = page && limit ? {
       page,
@@ -2173,12 +2259,28 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
 
     if (!order) throw new AppError('الطلب غير موجود', 404);
 
-    const disputes = await prisma.dispute.findMany({
-      where: {
-        OR: [{ orderId: order.id }, { orderId: order.orderNumber }],
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    const orderAliases = [order.id, order.orderNumber, order.displayOrderNumber].filter(Boolean) as string[];
+    for (const so of order.sellerOrders || []) {
+      if (so.id) orderAliases.push(so.id);
+      if (so.sellerOrderNumber) orderAliases.push(so.sellerOrderNumber);
+    }
+
+    const [disputes, unreadNotif] = await Promise.all([
+      prisma.dispute.findMany({
+        where: {
+          orderId: { in: orderAliases },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.notification.findFirst({
+        where: {
+          userId: req.user!.userId,
+          isRead: false,
+          entityId: { in: orderAliases },
+        },
+        select: { id: true },
+      }),
+    ]);
 
     const sellerOrdersWithDisputes = order.sellerOrders.map(so => ({
       ...so,
@@ -2189,6 +2291,7 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
       ...order,
       sellerOrders: sellerOrdersWithDisputes,
       disputes,
+      isUnread: Boolean(unreadNotif),
     });
   } catch (error) {
     next(error);
@@ -2360,10 +2463,11 @@ router.post('/:id/cancellation-request', async (req: Request, res: Response, nex
 
     const cancellationRequest = await prisma.$transaction(async (tx) => {
       // 1. Create cancellation request
+      const effectiveSellerOrderId = sellerOrderId || (order.sellerOrders.length === 1 ? order.sellerOrders[0].id : null);
       const reqRecord = await tx.cancellationRequest.create({
         data: {
           orderId: order.id,
-          sellerOrderId: sellerOrderId || null,
+          sellerOrderId: effectiveSellerOrderId,
           requestedBy: req.user!.userId,
           requestedByRole: 'CUSTOMER',
           reason,
@@ -2378,9 +2482,9 @@ router.post('/:id/cancellation-request', async (req: Request, res: Response, nex
         data: { status: OrderStatus.CANCELLATION_REQUESTED },
       });
 
-      if (sellerOrderId) {
+      if (effectiveSellerOrderId) {
         await tx.sellerOrder.update({
-          where: { id: sellerOrderId },
+          where: { id: effectiveSellerOrderId },
           data: { status: SellerOrderStatus.CANCELLATION_REQUESTED },
         });
       } else {
@@ -2408,13 +2512,23 @@ router.post('/:id/cancellation-request', async (req: Request, res: Response, nex
       return reqRecord;
     });
 
-    // Notify sellers via socket
+    // Notify sellers and customer via socket
     try {
       SocketService.get()?.emitGlobal('order:cancellation_requested', {
         orderId: order.id,
         orderNumber: order.orderNumber,
         requestId: cancellationRequest.id,
         reason,
+      });
+      SocketService.get()?.emitOrderStatusUpdate({
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        displayOrderNumber: order.displayOrderNumber || undefined,
+        sellerOrderId: sellerOrderId || undefined,
+        customerUserId: order.userId,
+        status: OrderStatus.CANCELLATION_REQUESTED,
+        changedByRole: 'CUSTOMER',
+        extra: { previousStatus: order.status },
       });
     } catch (_) {}
 
@@ -2605,14 +2719,26 @@ router.post(['/:id/return-request', '/:id/return'], async (req: Request, res: Re
     if (order.status !== OrderStatus.SHIPPED && order.status !== OrderStatus.DELIVERED) {
       throw new AppError('طلب الإرجاع متاح فقط للطلبات المشحونة أو المستلمة', 400);
     }
+    const targetSellerOrderId = sellerOrderId || (order.sellerOrders.length > 0 ? order.sellerOrders[0].id : null);
 
     const returnRequest = await prisma.$transaction(async (tx) => {
-      const targetSellerOrderId = sellerOrderId || (order.sellerOrders.length > 0 ? order.sellerOrders[0].id : null);
       const targetSellerOrder = targetSellerOrderId
         ? order.sellerOrders.find((s) => s.id === targetSellerOrderId)
         : order.sellerOrders[0];
       const targetSellerId = targetSellerOrder?.sellerId || order.sellerOrders[0]?.sellerId;
-      const requestedAmt = targetSellerOrder ? targetSellerOrder.subtotal : order.subtotal;
+      const requestedAmt = targetSellerOrder
+        ? Math.max(
+            0,
+            parseFloat(
+              (
+                targetSellerOrder.subtotal +
+                (targetSellerOrder.customerDeliveryCharge ?? targetSellerOrder.deliveryFee ?? 0) +
+                (targetSellerOrder.taxAmount ?? 0) -
+                (targetSellerOrder.voucherDiscountAmount ?? 0)
+              ).toFixed(2)
+            )
+          )
+        : Number(order.total || order.subtotal);
 
       // Create ReturnRequest with PENDING status for seller review
       const retRecord = await tx.returnRequest.create({
@@ -2734,9 +2860,15 @@ router.post(['/:id/return-request', '/:id/return'], async (req: Request, res: Re
         reason,
         description,
       });
-      SocketService.get()?.emitGlobal('order:status', {
+      SocketService.get()?.emitOrderStatusUpdate({
         orderId: order.id,
-        status: 'RETURN_REQUESTED',
+        orderNumber: order.orderNumber,
+        displayOrderNumber: order.displayOrderNumber || undefined,
+        sellerOrderId: targetSellerOrderId || undefined,
+        customerUserId: order.userId,
+        status: OrderStatus.RETURN_REQUESTED,
+        changedByRole: 'CUSTOMER',
+        extra: { previousStatus: order.status },
       });
       SocketService.get()?.emitGlobal('REFUND_CREATED', {
         orderId: order.id,

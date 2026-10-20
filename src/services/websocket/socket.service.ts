@@ -126,13 +126,9 @@ export class SocketService {
 
       // Join user room
       socket.join(`user:${userId}`);
-
-      // Broadcast user online only for real authenticated users
-      if (!isGuest) {
-        this.io.emit('user:online', {
-          userId,
-          isOnline: true,
-        });
+      if (socket.data.user?.role === 'ADMIN') {
+        socket.join('admin:disputes');
+        socket.join('admin:notifications');
       }
 
       // Join authorized order room
@@ -195,6 +191,75 @@ export class SocketService {
         }
       });
 
+      
+      // Join authorized dispute room (§ Phase 10)
+      socket.on('join:dispute', async (disputeId: string, ack?: (res: any) => void) => {
+        try {
+          if (!disputeId || isGuest) {
+            if (ack) ack({ success: false, error: 'Unauthorized to subscribe to dispute updates' });
+            return;
+          }
+          const cleanDisputeId = String(disputeId).trim();
+          const userRole = socket.data.user?.role;
+
+          let isAuthorized = false;
+          if (userRole === 'ADMIN') {
+            isAuthorized = true;
+          } else {
+            const dispute = await prisma.dispute.findFirst({
+              where: {
+                OR: [{ id: cleanDisputeId }, { orderId: cleanDisputeId }],
+              },
+              select: {
+                customerId: true,
+                seller: { select: { userId: true } },
+              },
+            });
+
+            if (dispute) {
+              if (dispute.customerId === userId || dispute.seller?.userId === userId) {
+                isAuthorized = true;
+              }
+            } else {
+              const refund = await prisma.refundRequest.findFirst({
+                where: {
+                  OR: [{ id: cleanDisputeId }, { refundNumber: cleanDisputeId }, { orderId: cleanDisputeId }],
+                },
+                select: {
+                  customerId: true,
+                  seller: { select: { userId: true } },
+                },
+              });
+              if (refund) {
+                if (refund.customerId === userId || refund.seller?.userId === userId) {
+                  isAuthorized = true;
+                }
+              }
+            }
+          }
+
+          if (isAuthorized) {
+            socket.join(`dispute:${cleanDisputeId}`);
+            console.log(`[Socket.IO] User ${userId} (${userRole}) joined authorized dispute room: dispute:${cleanDisputeId}`);
+            if (ack) ack({ success: true, room: `dispute:${cleanDisputeId}` });
+          } else {
+            console.warn(`[Socket.IO] Unauthorized dispute subscription rejected for user ${userId} on dispute ${cleanDisputeId}`);
+            if (ack) ack({ success: false, error: 'Unauthorized to subscribe to this dispute' });
+          }
+        } catch (err: any) {
+          console.error(`[Socket.IO] join:dispute error for ${userId}:`, err);
+          if (ack) ack({ success: false, error: 'Failed to join dispute room' });
+        }
+      });
+
+      socket.on('leave:dispute', (disputeId: string) => {
+        if (disputeId) {
+          const cleanDisputeId = String(disputeId).trim();
+          socket.leave(`dispute:${cleanDisputeId}`);
+          console.log(`[Socket.IO] User ${userId} left dispute room: dispute:${cleanDisputeId}`);
+        }
+      });
+
       socket.on('leave:order', (orderId: string) => {
         if (orderId) {
           const cleanOrderId = String(orderId).trim();
@@ -204,7 +269,9 @@ export class SocketService {
       });
 
       // Join conversation room
-      socket.on('join:conversation', async (conversationId: string) => {
+      socket.on('join:conversation', async (data: any) => {
+        const conversationId = typeof data === 'string' ? data.trim() : (data?.conversationId || data?.id)?.toString().trim();
+        if (!conversationId) return;
         console.log(`[Socket.IO] User ${userId} joined room conversation:${conversationId}`);
         socket.join(`conversation:${conversationId}`);
 
@@ -421,7 +488,9 @@ export class SocketService {
       });
 
       // Leave conversation room
-      socket.on('leave:conversation', async (conversationId: string) => {
+      socket.on('leave:conversation', async (data: any) => {
+        const conversationId = typeof data === 'string' ? data.trim() : (data?.conversationId || data?.id)?.toString().trim();
+        if (!conversationId) return;
         socket.leave(`conversation:${conversationId}`);
         try {
           const supConv = await prisma.supportConversation.findFirst({
@@ -437,12 +506,18 @@ export class SocketService {
       // Unified typing indicators (handles typing:start, typing:stop, support:typing:start, support:typing:stop)
       const handleTypingEvent = async (convId: string, isTyping: boolean) => {
         let altRoom: string | null = null;
+        let supportRequesterId: string | null = null;
+        let supportAgentUserId: string | null = null;
+
         try {
           const supConv = await prisma.supportConversation.findFirst({
             where: { OR: [{ id: convId }, { conversationId: convId }] },
+            include: { assignedAgent: true },
           });
           if (supConv) {
             altRoom = supConv.id === convId ? supConv.conversationId : supConv.id;
+            supportRequesterId = supConv.requesterId;
+            supportAgentUserId = supConv.assignedAgent?.adminUserId || null;
           }
         } catch (_) {}
 
@@ -464,25 +539,53 @@ export class SocketService {
           socket.to(`conversation:${r}`).emit('typing:status', payload);
           socket.to(`conversation:${r}`).emit('support:typing', payload);
         }
+
+        // Direct user-room delivery to conversation members (ensures delivery even if client room join lagged)
+        try {
+          const targetUserIds = new Set<string>();
+          if (supportRequesterId && supportRequesterId !== userId) {
+            targetUserIds.add(supportRequesterId);
+          }
+          if (supportAgentUserId && supportAgentUserId !== userId) {
+            targetUserIds.add(supportAgentUserId);
+          }
+
+          const members = await prisma.conversationMember.findMany({
+            where: {
+              conversationId: { in: rooms },
+              userId: { not: userId },
+            },
+            select: { userId: true },
+          });
+          for (const m of members) {
+            targetUserIds.add(m.userId);
+          }
+
+          for (const targetUid of targetUserIds) {
+            this.io.to(`user:${targetUid}`).emit(isTyping ? 'typing:start' : 'typing:stop', typingPayload);
+            this.io.to(`user:${targetUid}`).emit('typing:status', typingPayload);
+            this.io.to(`user:${targetUid}`).emit('support:typing', typingPayload);
+          }
+        } catch (_) {}
       };
 
       socket.on('typing:start', async (data: any) => {
-        const convId = typeof data === 'string' ? data : data?.conversationId;
+        const convId = typeof data === 'string' ? data.trim() : (data?.conversationId || data?.id)?.toString().trim();
         if (convId) await handleTypingEvent(convId, true);
       });
 
       socket.on('support:typing:start', async (data: any) => {
-        const convId = typeof data === 'string' ? data : data?.conversationId;
+        const convId = typeof data === 'string' ? data.trim() : (data?.conversationId || data?.id)?.toString().trim();
         if (convId) await handleTypingEvent(convId, true);
       });
 
       socket.on('typing:stop', async (data: any) => {
-        const convId = typeof data === 'string' ? data : data?.conversationId;
+        const convId = typeof data === 'string' ? data.trim() : (data?.conversationId || data?.id)?.toString().trim();
         if (convId) await handleTypingEvent(convId, false);
       });
 
       socket.on('support:typing:stop', async (data: any) => {
-        const convId = typeof data === 'string' ? data : data?.conversationId;
+        const convId = typeof data === 'string' ? data.trim() : (data?.conversationId || data?.id)?.toString().trim();
         if (convId) await handleTypingEvent(convId, false);
       });
 
@@ -726,9 +829,8 @@ export class SocketService {
             sender: created.sender || null,
           };
 
-          // Broadcast to conversation room and individual user rooms
+          // Broadcast to conversation room (single canonical event 'message:new')
           this.io.to(`conversation:${conversationId}`).emit('message:new', norm);
-          this.io.to(`conversation:${conversationId}`).emit('new:message', norm);
 
           try {
             const supConv = await prisma.supportConversation.findFirst({
@@ -737,26 +839,25 @@ export class SocketService {
             if (supConv) {
               if (supConv.id !== conversationId) {
                 this.io.to(`conversation:${supConv.id}`).emit('message:new', norm);
-                this.io.to(`conversation:${supConv.id}`).emit('new:message', norm);
               }
               if (supConv.conversationId !== conversationId) {
                 this.io.to(`conversation:${supConv.conversationId}`).emit('message:new', norm);
-                this.io.to(`conversation:${supConv.conversationId}`).emit('new:message', norm);
               }
-              if (supConv.requesterId) {
+              if (supConv.requesterId && !this.isUserInConversation(supConv.requesterId, conversationId)) {
                 this.io.to(`user:${supConv.requesterId}`).emit('message:new', norm);
-                this.io.to(`user:${supConv.requesterId}`).emit('new:message', norm);
               }
             }
           } catch (_) {}
 
+          // Notify members who are NOT currently in the active conversation room
           const allMembers = await prisma.conversationMember.findMany({
             where: { conversationId },
             select: { userId: true },
           });
           for (const m of allMembers) {
-            this.io.to(`user:${m.userId}`).emit('message:new', norm);
-            this.io.to(`user:${m.userId}`).emit('new:message', norm);
+            if (!this.isUserInConversation(m.userId, conversationId)) {
+              this.io.to(`user:${m.userId}`).emit('message:new', norm);
+            }
           }
 
           // Push notifications to offline recipients
@@ -840,6 +941,23 @@ export class SocketService {
         }
       });
 
+      socket.on('disconnecting', () => {
+        try {
+          const rooms = Array.from(socket.rooms);
+          const now = new Date();
+          for (const room of rooms) {
+            if (room.startsWith('conversation:')) {
+              socket.to(room).emit('user:offline', {
+                userId,
+                isOnline: false,
+                lastSeen: now.toISOString(),
+                conversationId: room.replace('conversation:', ''),
+              });
+            }
+          }
+        } catch (_) {}
+      });
+
       // Disconnect
       socket.on('disconnect', () => {
         const sockets = this.userSockets.get(userId) || [];
@@ -850,15 +968,6 @@ export class SocketService {
           this.userSockets.delete(userId);
           const now = new Date();
           this.userLastSeen.set(userId, now);
-          this.io.emit('user:offline', {
-            userId,
-            isOnline: false,
-            lastSeen: now.toISOString(),
-          });
-          this.io.emit('user:last_seen', {
-            userId,
-            lastSeen: now.toISOString(),
-          });
 
           // If user was a support agent, update agent offline status in background
           prisma.supportAgent.findUnique({ where: { adminUserId: userId } }).then((agent) => {
@@ -884,6 +993,37 @@ export class SocketService {
         }
       });
     });
+  }
+
+
+  async emitDisputeUpdate(disputeId: string, event: string, data: any, sellerUserId?: string): Promise<void> {
+    if (!this.io) return;
+    this.io.to(`dispute:${disputeId}`).emit(event, data);
+    this.io.to('admin:disputes').emit(event, data);
+
+    let sUserId = sellerUserId || data?.sellerUserId || data?.seller?.userId;
+    if (!sUserId && data?.sellerId) {
+      try {
+        const seller = await prisma.seller.findUnique({
+          where: { id: data.sellerId },
+          select: { userId: true },
+        });
+        if (seller) sUserId = seller.userId;
+      } catch (_) {}
+    }
+    if (sUserId) {
+      this.io.to(`user:${sUserId}`).emit(event, data);
+    }
+    if (data?.customerId) {
+      this.io.to(`user:${data.customerId}`).emit(event, data);
+    }
+  }
+
+  emitNotificationBadge(userId: string, unreadCount: number): void {
+    if (this.io) {
+      this.io.to(`user:${userId}`).emit('notification:badge', { unreadCount });
+      this.io.to(`user:${userId}`).emit('notification:unread_count', { unreadCount });
+    }
   }
 
   emitToUser(userId: string, event: string, data: any): void {
@@ -925,7 +1065,9 @@ export class SocketService {
   emitOrderStatusUpdate(params: {
     orderId: string;
     orderNumber: string;
+    displayOrderNumber?: string;
     sellerOrderId?: string;
+    sellerOrderNumber?: string;
     status: string;
     parentStatus?: string;
     version?: number;
@@ -939,7 +1081,9 @@ export class SocketService {
     const {
       orderId,
       orderNumber,
+      displayOrderNumber,
       sellerOrderId,
+      sellerOrderNumber,
       status,
       parentStatus,
       version = Date.now(),
@@ -954,7 +1098,9 @@ export class SocketService {
       eventId: randomUUID(),
       orderId,
       orderNumber,
+      displayOrderNumber: displayOrderNumber || orderNumber,
       sellerOrderId,
+      sellerOrderNumber,
       status,
       parentStatus: parentStatus || status,
       version,
@@ -965,22 +1111,36 @@ export class SocketService {
 
     const specificEvent = `order:${status.toLowerCase()}`;
 
-    // 1. Emit to order rooms (orderId, orderNumber, sellerOrderId)
+    // 1. Emit to order rooms (orderId, orderNumber, displayOrderNumber, sellerOrderId, sellerOrderNumber)
     this.io.to(`order:${orderId}`).emit('order:status', payload);
     this.io.to(`order:${orderId}`).emit(specificEvent, payload);
     if (orderNumber && orderNumber !== orderId) {
       this.io.to(`order:${orderNumber}`).emit('order:status', payload);
       this.io.to(`order:${orderNumber}`).emit(specificEvent, payload);
     }
+    if (displayOrderNumber && displayOrderNumber !== orderId && displayOrderNumber !== orderNumber) {
+      this.io.to(`order:${displayOrderNumber}`).emit('order:status', payload);
+      this.io.to(`order:${displayOrderNumber}`).emit(specificEvent, payload);
+    }
     if (sellerOrderId && sellerOrderId !== orderId) {
       this.io.to(`order:${sellerOrderId}`).emit('order:status', payload);
       this.io.to(`order:${sellerOrderId}`).emit(specificEvent, payload);
+    }
+    if (sellerOrderNumber && sellerOrderNumber !== sellerOrderId) {
+      this.io.to(`order:${sellerOrderNumber}`).emit('order:status', payload);
+      this.io.to(`order:${sellerOrderNumber}`).emit(specificEvent, payload);
     }
 
     // 2. Emit to Customer's private room
     if (customerUserId) {
       this.io.to(`user:${customerUserId}`).emit('order:status', payload);
       this.io.to(`user:${customerUserId}`).emit(specificEvent, payload);
+      this.io.to(`user:${customerUserId}`).emit('order:summary_updated', {
+        orderId,
+        orderNumber,
+        status: payload.parentStatus,
+        timestamp,
+      });
     }
 
     // 3. Emit to all associated Seller private rooms
@@ -994,10 +1154,6 @@ export class SocketService {
     // 4. Emit to Admin orders room
     this.io.to('admin:orders').emit('order:status', payload);
     this.io.to('admin:orders').emit(specificEvent, payload);
-
-    // 5. Global broadcast for backward compatibility
-    this.io.emit('order:status', payload);
-    this.io.emit(specificEvent, payload);
   }
 
   emitGlobal(event: string, data: any): void {

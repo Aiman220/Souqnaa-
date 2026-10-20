@@ -6,6 +6,7 @@ import { authenticate, authorize } from '../../middleware/auth.middleware';
 import { storageService } from '../../services/storage/storage.service';
 import firstOrderShippingRouter from './routes/first-order-shipping.routes';
 import universalShippingRouter from './routes/universal-shipping-promotion.routes';
+import { invalidateHomeFeedCache } from '../home/home.routes';
 
 const router = Router();
 
@@ -168,6 +169,7 @@ adminPromotionRouter.post('/banners', async (req: Request, res: Response, next: 
       },
     });
     ResponseUtil.created(res, { ...banner, imageUrl: storageService.normalizeUrl(banner.imageUrl) }, 'تم إنشاء البانر بنجاح');
+    invalidateHomeFeedCache();
   } catch (error) {
     next(error);
   }
@@ -191,6 +193,7 @@ adminPromotionRouter.put('/banners/:id', async (req: Request, res: Response, nex
       },
     });
     ResponseUtil.success(res, { ...banner, imageUrl: storageService.normalizeUrl(banner.imageUrl) }, 'تم تعديل البانر بنجاح');
+    invalidateHomeFeedCache();
   } catch (error) {
     next(error);
   }
@@ -203,6 +206,7 @@ adminPromotionRouter.delete('/banners/:id', async (req: Request, res: Response, 
       where: { id: String(req.params.id) },
     });
     ResponseUtil.success(res, null, 'تم حذف البانر بنجاح');
+    invalidateHomeFeedCache();
   } catch (error) {
     next(error);
   }

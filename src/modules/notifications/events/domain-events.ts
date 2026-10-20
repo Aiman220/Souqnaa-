@@ -230,6 +230,80 @@ export class NotificationEventFactory {
     };
   }
 
+  // ── Universal Disputes ──────────────────────────────────────────────────
+  static disputeEvent(params: {
+    eventType:
+      | 'DISPUTE_CREATED'
+      | 'DISPUTE_SELLER_NOTIFIED'
+      | 'DISPUTE_SELLER_RESPONDED'
+      | 'DISPUTE_EVIDENCE_SUBMITTED'
+      | 'DISPUTE_INFO_REQUESTED'
+      | 'DISPUTE_ESCALATED'
+      | 'DISPUTE_RESOLVED'
+      | 'DISPUTE_APPEALED'
+      | 'DISPUTE_DEADLINE_APPROACHING';
+    recipientId: string;
+    disputeId: string;
+    orderId?: string;
+    orderNumber?: string;
+    refundId?: string;
+    reason?: string;
+    decision?: string;
+    resolution?: string;
+    refundAmount?: number;
+    currency?: string;
+    recipientRole?: 'CUSTOMER' | 'SELLER' | 'ADMIN';
+    deadline?: string;
+    senderName?: string;
+    note?: string;
+  }): DomainNotificationEvent {
+    const isUrgent =
+      params.eventType === 'DISPUTE_DEADLINE_APPROACHING' ||
+      params.eventType === 'DISPUTE_ESCALATED';
+
+    const appType =
+      params.recipientRole === 'ADMIN'
+        ? AppType.ADMIN
+        : params.recipientRole === 'SELLER'
+        ? AppType.SELLER
+        : AppType.CUSTOMER;
+
+    return {
+      eventId: randomUUID(),
+      idempotencyKey: `dispute_${params.disputeId}_${params.recipientId}_${params.eventType}_${Date.now()}`,
+      eventType: params.eventType,
+      category: NotificationCategory.REFUND,
+      priority: isUrgent ? NotificationPriority.URGENT : NotificationPriority.HIGH,
+      recipientId: params.recipientId,
+      recipientType: appType,
+      entityType: 'dispute',
+      entityId: params.disputeId,
+      data: {
+        disputeId: params.disputeId,
+        orderId: params.orderId || '',
+        orderNumber: params.orderNumber || '',
+        refundId: params.refundId || '',
+        reason: params.reason || '',
+        decision: params.decision || '',
+        resolution: params.resolution || '',
+        refundAmount: params.refundAmount ? String(params.refundAmount) : '',
+        currency: params.currency || 'YER',
+        deadline: params.deadline || '',
+        senderName: params.senderName || '',
+        note: params.note || '',
+        deepLink:
+          appType === AppType.ADMIN
+            ? `souqnaa://admin/disputes/${params.disputeId}`
+            : appType === AppType.SELLER
+            ? `souqnaa://seller/refunds/${params.disputeId}`
+            : `souqnaa://disputes/${params.disputeId}`,
+      },
+      bypassQuietHours: true,
+      bypassRateLimit: true,
+      createdAt: new Date(),
+    };
+  }
+
   // ── Wallet ────────────────────────────────────────────────────────────────
   static walletEvent(params: {
     eventType:
