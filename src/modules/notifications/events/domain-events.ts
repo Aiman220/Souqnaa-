@@ -73,7 +73,8 @@ export class NotificationEventFactory {
       | 'SELLER_PAYMENT_RECEIVED'
       | 'SELLER_REFUND_REQUEST'
       | 'SELLER_ORDER_RECEIVED'
-      | 'SELLER_ORDER_CANCELLED';
+      | 'SELLER_ORDER_CANCELLED'
+      | 'SELLER_CANCELLATION_REQUESTED';
     recipientId: string;
     orderId: string;
     orderNumber: string;
@@ -82,10 +83,12 @@ export class NotificationEventFactory {
     refundId?: string;
     cancelReason?: string;
   }): DomainNotificationEvent {
-    const isUrgent = params.eventType === 'SELLER_ORDER_CANCELLED';
+    const isUrgent =
+      params.eventType === 'SELLER_ORDER_CANCELLED' ||
+      params.eventType === 'SELLER_CANCELLATION_REQUESTED';
     return {
       eventId: randomUUID(),
-      idempotencyKey: `seller_order_${params.orderId}_${params.recipientId}_${params.eventType}`,
+      idempotencyKey: `seller_order_${params.orderId}_${params.recipientId}_${params.eventType}_${Date.now()}`,
       eventType: params.eventType,
       category: NotificationCategory.ORDER,
       priority: isUrgent ? NotificationPriority.URGENT : NotificationPriority.HIGH,
@@ -100,6 +103,7 @@ export class NotificationEventFactory {
         sellerOrderId: params.sellerOrderId,
         refundId: params.refundId,
         cancelReason: params.cancelReason,
+        deepLink: `souqnaa://seller/orders/${params.orderId}`,
       },
       bypassQuietHours: isUrgent,
       bypassRateLimit: true,
@@ -133,6 +137,23 @@ export class NotificationEventFactory {
   }): DomainNotificationEvent {
     return this.sellerOrderEvent({
       eventType: 'SELLER_ORDER_CANCELLED',
+      recipientId: params.recipientId,
+      orderId: params.orderId,
+      orderNumber: params.orderNumber,
+      sellerOrderId: params.sellerOrderId,
+      cancelReason: params.reason,
+    });
+  }
+
+  static sellerCancellationRequestedEvent(params: {
+    recipientId: string;
+    orderId: string;
+    orderNumber: string;
+    sellerOrderId?: string;
+    reason?: string;
+  }): DomainNotificationEvent {
+    return this.sellerOrderEvent({
+      eventType: 'SELLER_CANCELLATION_REQUESTED',
       recipientId: params.recipientId,
       orderId: params.orderId,
       orderNumber: params.orderNumber,

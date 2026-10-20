@@ -17,6 +17,7 @@ import {
   PaymentMethodType,
   SellerStatus,
   RefundDestination,
+  NotificationType,
 } from '@prisma/client';
 import { SocketService } from '../../services/websocket/socket.service';
 import { OrderStateMachine } from '../orders/order.state-machine';
@@ -27,6 +28,8 @@ import { remoteConfigService } from '../remote-config/remote-config.service';
 import { AnalyticsCacheService } from '../analytics/services/analytics-cache.service';
 import { SellerFinancialRiskService } from '../commission/seller-financial-risk.service';
 import { RefundService } from '../refunds/services/refund.service';
+import { notificationDispatcher } from '../notifications/services/notification-dispatcher';
+import { NotificationEventFactory } from '../notifications/events/domain-events';
 
 const router = Router();
 router.use(authenticate, requireSeller);
@@ -2227,6 +2230,40 @@ router.post('/me/cancellations/:id/reject', async (req: Request, res: Response, 
         changedByRole: 'SELLER',
         extra: { previousStatus: OrderStatus.CANCELLATION_REQUESTED },
       });
+
+      if (orderData?.userId) {
+        await prisma.notification.create({
+          data: {
+            userId: orderData.userId,
+            recipientType: 'CUSTOMER',
+            category: 'ORDER',
+            priority: 'HIGH',
+            type: NotificationType.ORDER_STATUS,
+            titleAr: 'تم رفض طلب إلغاء الطلب ⚠️',
+            titleEn: 'Cancellation Request Rejected ⚠️',
+            bodyAr: `رفض المتجر طلب إلغاء طلبك #${orderData.displayOrderNumber || orderData.orderNumber}${note ? `: ${note}` : ''}. جارٍ استئناف تجهيز وشحن الطلب.`,
+            bodyEn: `The seller rejected your cancellation request for order #${orderData.displayOrderNumber || orderData.orderNumber}${note ? `: ${note}` : ''}. Order fulfillment resumed.`,
+            deepLink: `souqnaa://orders/${cancelReq.orderId}`,
+            data: JSON.stringify({
+              orderId: cancelReq.orderId,
+              orderNumber: orderData.orderNumber,
+              action: 'CANCELLATION_REJECTED',
+              sellerOrderId: targetSellerOrderId,
+              note: note || null,
+            }),
+            status: 'SENT',
+          },
+        }).catch(() => {});
+
+        notificationDispatcher.dispatch(
+          NotificationEventFactory.orderEvent({
+            eventType: 'ORDER_PROCESSING',
+            recipientId: orderData.userId,
+            orderId: cancelReq.orderId,
+            orderNumber: orderData.orderNumber,
+          })
+        ).catch(() => {});
+      }
     } catch (_) {}
 
     ResponseUtil.success(res, null, 'تم رفض طلب الإلغاء واستئناف تجهيز الطلب');
@@ -2310,8 +2347,9 @@ router.post(['/me/returns/:id/approve', '/me/orders/:id/approve-return'], async 
     });
 
     // Synchronize associated RefundRequest if present
+    let activeRefund: any = null;
     try {
-      const activeRefund = await prisma.refundRequest.findFirst({
+      activeRefund = await prisma.refundRequest.findFirst({
         where: {
           OR: [
             { sellerOrderId },
@@ -2358,6 +2396,24 @@ router.post(['/me/returns/:id/approve', '/me/orders/:id/approve-return'], async 
         orderId: result.sellerOrder.orderId,
         status: 'RETURN_APPROVED',
       });
+
+      const orderData = await prisma.order.findUnique({
+        where: { id: result.sellerOrder.orderId },
+        select: { orderNumber: true, displayOrderNumber: true, userId: true },
+      });
+      if (orderData?.userId) {
+        notificationDispatcher.dispatch(
+          NotificationEventFactory.refundEvent({
+            eventType: 'REFUND_ACCEPTED',
+            recipientId: orderData.userId,
+            refundId: activeRefund?.id || returnReq?.id || sellerOrderId,
+            refundNumber: activeRefund?.refundNumber || `RET-${sellerOrderId.slice(0, 8)}`,
+            orderId: result.sellerOrder.orderId,
+            orderNumber: orderData.orderNumber,
+            amount: activeRefund?.requestedAmount || result.sellerOrder.subtotal,
+          })
+        ).catch(() => {});
+      }
     } catch (_) {}
 
     ResponseUtil.success(res, result.sellerOrder, 'تمت الموافقة على طلب الإرجاع واسترداد كامل المبلغ لمحفظة العميل بنجاح');
@@ -2444,6 +2500,20 @@ router.post(['/me/returns/:id/reject', '/me/orders/:id/reject-return'], async (r
           changedByRole: 'SELLER',
           extra: { previousStatus: OrderStatus.RETURN_REQUESTED },
         });
+
+        if (orderData?.userId) {
+          notificationDispatcher.dispatch(
+            NotificationEventFactory.refundEvent({
+              eventType: 'REFUND_REJECTED',
+              recipientId: orderData.userId,
+              refundId: returnReq?.id || sellerOrderId,
+              refundNumber: `RET-${sellerOrderId.slice(0, 8)}`,
+              orderId: targetOrderId,
+              orderNumber: orderData.orderNumber,
+              reason: note || undefined,
+            })
+          ).catch(() => {});
+        }
       }
     } catch (_) {}
 

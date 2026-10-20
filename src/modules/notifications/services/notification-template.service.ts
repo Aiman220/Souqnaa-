@@ -83,6 +83,20 @@ export class NotificationTemplateService {
       bodyEn: 'Order #{{orderNumber}} was cancelled. Reason: {{cancelReason}}',
       deepLinkPattern: 'souqnaa://orders/{{orderId}}',
     },
+    SELLER_CANCELLATION_REQUESTED: {
+      titleAr: 'طلب إلغاء من العميل ⚠️',
+      titleEn: 'Customer Cancellation Request ⚠️',
+      bodyAr: 'طلب العميل إلغاء الطلب #{{orderNumber}}. السبب: {{cancelReason}}',
+      bodyEn: 'Customer requested cancellation for order #{{orderNumber}}. Reason: {{cancelReason}}',
+      deepLinkPattern: 'souqnaa://seller/orders/{{orderId}}',
+    },
+    SELLER_ORDER_CANCELLED: {
+      titleAr: 'تم إلغاء طلب المتجر ❌',
+      titleEn: 'Store order cancelled ❌',
+      bodyAr: 'تم إلغاء الطلب رقم #{{orderNumber}}. السبب: {{cancelReason}}',
+      bodyEn: 'Order #{{orderNumber}} was cancelled. Reason: {{cancelReason}}',
+      deepLinkPattern: 'souqnaa://seller/orders/{{orderId}}',
+    },
 
     // ── Payments ────────────────────────────────────────────────────────────
     PAYMENT_PENDING: {
@@ -394,13 +408,6 @@ export class NotificationTemplateService {
       titleEn: 'Customer confirmed order received',
       bodyAr: 'أكد العميل استلام الطلب رقم #{{orderNumber}}. افتح سوقنا لعرض تفاصيل الطلب.',
       bodyEn: 'The customer confirmed receipt of order #{{orderNumber}}. Open SOUQNA to view the order.',
-      deepLinkPattern: 'souqnaa://seller/orders/{{orderId}}',
-    },
-    SELLER_ORDER_CANCELLED: {
-      titleAr: 'تم إلغاء الطلب',
-      titleEn: 'Order cancelled',
-      bodyAr: 'تم إلغاء الطلب رقم #{{orderNumber}} من قبل العميل.',
-      bodyEn: 'Order #{{orderNumber}} was cancelled by the customer.',
       deepLinkPattern: 'souqnaa://seller/orders/{{orderId}}',
     },
     SELLER_PAYMENT_RECEIVED: {

@@ -1082,15 +1082,24 @@ router.post('/:id/read', async (req: Request, res: Response, next: NextFunction)
     );
 
     try {
-      SocketService.get()?.emitToConversation(conversationId, 'messages:read', {
-        conversationId,
-        userId,
-        readAt: now.toISOString(),
-      });
-      SocketService.get()?.emitToConversation(conversationId, 'message:read', {
-        conversationId,
-        userId,
-      });
+      const socketSvc = SocketService.get();
+      if (socketSvc) {
+        const readPayload = {
+          conversationId,
+          userId,
+          readAt: now.toISOString(),
+        };
+        socketSvc.emitToConversation(conversationId, 'messages:read', readPayload);
+        socketSvc.emitToConversation(conversationId, 'message:read', readPayload);
+        const members = await prisma.conversationMember.findMany({
+          where: { conversationId, userId: { not: userId } },
+          select: { userId: true },
+        });
+        for (const m of members) {
+          socketSvc.emitToUser(m.userId, 'messages:read', readPayload);
+          socketSvc.emitToUser(m.userId, 'message:read', readPayload);
+        }
+      }
     } catch (_) {}
 
     ResponseUtil.success(res, { success: true, readAt: now.toISOString() });

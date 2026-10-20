@@ -450,6 +450,44 @@ export class SocketService {
           });
 
           if (conv) {
+            // Update last read timestamp for this member
+            await prisma.conversationMember.updateMany({
+              where: { conversationId: baseConvId, userId },
+              data: { lastReadAt: new Date() },
+            });
+
+            // Mark any unread messages sent by others in this conversation as read
+            const unreadUpdated = await prisma.message.updateMany({
+              where: {
+                conversationId: baseConvId,
+                senderId: { not: userId },
+                isRead: false,
+              },
+              data: { isRead: true },
+            });
+
+            if (unreadUpdated.count > 0 || supConv) {
+              const readData = {
+                conversationId: baseConvId,
+                altConversationId: supConv ? supConv.id : undefined,
+                readByUserId: userId,
+                userId,
+                readAt: new Date().toISOString(),
+              };
+              this.emitToConversation(baseConvId, 'messages:read', readData);
+              this.emitToConversation(baseConvId, 'message:read', readData);
+              if (supConv && supConv.id !== baseConvId) {
+                this.emitToConversation(supConv.id, 'messages:read', readData);
+                this.emitToConversation(supConv.id, 'message:read', readData);
+              }
+              for (const member of conv.members) {
+                if (member.userId !== userId) {
+                  this.emitToUser(member.userId, 'messages:read', readData);
+                  this.emitToUser(member.userId, 'message:read', readData);
+                }
+              }
+            }
+
             for (const member of conv.members) {
               if (member.userId !== userId) {
                 const isOnline = this.isUserOnline(member.userId);
@@ -646,10 +684,13 @@ export class SocketService {
       });
 
       // Messages seen / read receipts
-      socket.on('message:seen', async ({ conversationId }: { conversationId: string }) => {
+      socket.on('message:seen', async (data: any) => {
+        const conversationId = typeof data === 'string' ? data.trim() : (data?.conversationId || data?.id)?.toString().trim();
+        if (!conversationId) return;
+
         try {
-          await prisma.conversationMember.update({
-            where: { conversationId_userId: { conversationId, userId } },
+          await prisma.conversationMember.updateMany({
+            where: { conversationId, userId },
             data: { lastReadAt: new Date() },
           });
 
@@ -662,15 +703,23 @@ export class SocketService {
             data: { isRead: true },
           });
 
-          socket.to(`conversation:${conversationId}`).emit('messages:read', {
+          const readPayload = {
             conversationId,
             userId,
             readAt: new Date().toISOString(),
+          };
+
+          this.emitToConversation(conversationId, 'messages:read', readPayload);
+          this.emitToConversation(conversationId, 'message:read', readPayload);
+
+          const members = await prisma.conversationMember.findMany({
+            where: { conversationId, userId: { not: userId } },
+            select: { userId: true },
           });
-          socket.to(`conversation:${conversationId}`).emit('message:read', {
-            conversationId,
-            userId,
-          });
+          for (const m of members) {
+            this.emitToUser(m.userId, 'messages:read', readPayload);
+            this.emitToUser(m.userId, 'message:read', readPayload);
+          }
 
           // Mark pending chat notifications for this conversation as read
           markChatNotificationsAsRead(conversationId, userId).catch((err) =>
@@ -783,6 +832,16 @@ export class SocketService {
 
           const metadataStr = finalMetadata ? (typeof finalMetadata === 'string' ? finalMetadata : JSON.stringify(finalMetadata)) : null;
 
+          const allMembers = await prisma.conversationMember.findMany({
+            where: { conversationId },
+            select: { userId: true },
+          });
+
+          // Check if the other member is already viewing the conversation room
+          const isRecipientViewing = allMembers.some(
+            (m) => m.userId !== userId && this.isUserInConversation(m.userId, conversationId)
+          );
+
           const created = await prisma.$transaction(async (tx) => {
             const msg = await tx.message.create({
               data: {
@@ -793,6 +852,7 @@ export class SocketService {
                 attachmentUrl: attachmentUrl || null,
                 metadata: metadataStr,
                 clientMessageId: clientMessageId || null,
+                isRead: isRecipientViewing,
               },
               include: {
                 sender: { select: { id: true, firstName: true, lastName: true, avatar: true } },
@@ -824,13 +884,24 @@ export class SocketService {
             fileName: created.type === 'file' ? created.text : null,
             fileSize: null,
             isRead: Boolean(created.isRead),
-            readAt: null,
+            readAt: isRecipientViewing ? new Date().toISOString() : null,
             reactions: {},
             sender: created.sender || null,
           };
 
           // Broadcast to conversation room (single canonical event 'message:new')
           this.io.to(`conversation:${conversationId}`).emit('message:new', norm);
+
+          if (isRecipientViewing) {
+            const readPayload = {
+              conversationId,
+              messageId: String(created.id),
+              userId,
+              readAt: new Date().toISOString(),
+            };
+            this.emitToUser(userId, 'messages:read', readPayload);
+            this.emitToUser(userId, 'message:read', readPayload);
+          }
 
           try {
             const supConv = await prisma.supportConversation.findFirst({
@@ -850,10 +921,6 @@ export class SocketService {
           } catch (_) {}
 
           // Notify members who are NOT currently in the active conversation room
-          const allMembers = await prisma.conversationMember.findMany({
-            where: { conversationId },
-            select: { userId: true },
-          });
           for (const m of allMembers) {
             if (!this.isUserInConversation(m.userId, conversationId)) {
               this.io.to(`user:${m.userId}`).emit('message:new', norm);

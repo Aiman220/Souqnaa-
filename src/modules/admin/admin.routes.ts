@@ -25,6 +25,8 @@ import { SocketService } from '../../services/websocket/socket.service';
 import { CustomerWalletService } from '../wallet/customer-wallet.service';
 import { RefundService } from '../refunds/services/refund.service';
 import { OrderInvoiceService } from '../../services/orders/order-invoice.service';
+import { notificationDispatcher } from '../notifications/services/notification-dispatcher';
+import { NotificationEventFactory } from '../notifications/events/domain-events';
 import { redis } from '../../database/redis';
 import { config } from '../../config';
 
@@ -33,7 +35,6 @@ import { adminDeliveryScheduleRoutes } from './delivery-schedule.routes';
 import { adminUsersRoutes } from './admin-users.routes';
 import { notificationScheduler } from '../notifications/services/notification-scheduler';
 import { notificationEventBus } from '../notifications/services/event-bus';
-import { NotificationEventFactory } from '../notifications/events/domain-events';
 import { setMaintenanceConfig } from '../../middleware/maintenance.middleware';
 import { SellerFinancialRiskService } from '../commission/seller-financial-risk.service';
 import { AdminRbacService, SYSTEM_PERMISSIONS } from './admin-rbac.service';
@@ -3179,6 +3180,106 @@ router.post('/disputes/:id/resolve', async (req: Request, res: Response, next: N
         }
       }
     } catch (_) {}
+
+    // Dispatch durable In-App & Push Notifications to Customer and Seller
+    try {
+      if (dispute.customerId) {
+        await prisma.notification.create({
+          data: {
+            userId: dispute.customerId,
+            recipientType: 'CUSTOMER',
+            category: 'REFUND',
+            priority: 'HIGH',
+            titleAr: isRejected
+              ? 'قرار الإدارة بشأن النزاع ⚖️'
+              : 'تم البت في النزاع بالموافقة على الاسترجاع 💰',
+            titleEn: isRejected
+              ? 'Dispute Decision Issued ⚖️'
+              : 'Refund Approved by Admin 💰',
+            bodyAr: isRejected
+              ? `أصدرت إدارة المنصة قراراً بعد مراجعة النزاع للطلب #${dispute.orderId}: ${resolution}`
+              : `أصدرت إدارة المنصة قراراً بالموافقة على استرجاع ${parsedRefundAmount} ر.ي وإيداعها في محفظتك. القرار: ${resolution}`,
+            bodyEn: `Dispute decision finalized: ${resolution}`,
+            type: isRejected
+              ? NotificationType.REFUND_ADMIN_REJECTED
+              : NotificationType.REFUND_ADMIN_APPROVED,
+            data: JSON.stringify({
+              disputeId: dispute.id,
+              orderId: dispute.orderId,
+              decision: finalDecision,
+              resolution,
+              refundAmount: parsedRefundAmount,
+            }),
+            deepLink: isRejected ? `souqnaa://disputes/${dispute.id}` : 'souqnaa://wallet',
+            status: 'SENT',
+            isRead: false,
+          },
+        }).catch(() => {});
+
+        notificationDispatcher.dispatch(
+          NotificationEventFactory.disputeEvent({
+            eventType: 'DISPUTE_RESOLVED',
+            recipientId: dispute.customerId,
+            disputeId: dispute.id,
+            orderId: dispute.orderId,
+            orderNumber: dispute.orderId,
+            decision: finalDecision,
+            resolution,
+            refundAmount: parsedRefundAmount,
+            recipientRole: 'CUSTOMER',
+          })
+        ).catch(() => {});
+      }
+
+      const targetSeller = await prisma.seller.findUnique({
+        where: { id: dispute.sellerId },
+        select: { userId: true },
+      });
+
+      if (targetSeller?.userId) {
+        await prisma.notification.create({
+          data: {
+            userId: targetSeller.userId,
+            recipientType: 'SELLER',
+            category: 'REFUND',
+            priority: 'HIGH',
+            titleAr: 'قرار الإدارة النهائي بشأن النزاع ⚖️',
+            titleEn: 'Admin Decision on Dispute ⚖️',
+            bodyAr: `أصدرت إدارة المنصة قرارها النهائي بشأن النزاع للطلب #${dispute.orderId}: ${resolution}`,
+            bodyEn: `Admin finalized decision on dispute for order #${dispute.orderId}: ${resolution}`,
+            type: isRejected
+              ? NotificationType.REFUND_ADMIN_REJECTED
+              : NotificationType.REFUND_ADMIN_APPROVED,
+            data: JSON.stringify({
+              disputeId: dispute.id,
+              orderId: dispute.orderId,
+              decision: finalDecision,
+              resolution,
+              refundAmount: parsedRefundAmount,
+            }),
+            deepLink: `souqnaa://seller/refunds/${dispute.id}`,
+            status: 'SENT',
+            isRead: false,
+          },
+        }).catch(() => {});
+
+        notificationDispatcher.dispatch(
+          NotificationEventFactory.disputeEvent({
+            eventType: 'DISPUTE_RESOLVED',
+            recipientId: targetSeller.userId,
+            disputeId: dispute.id,
+            orderId: dispute.orderId,
+            orderNumber: dispute.orderId,
+            decision: finalDecision,
+            resolution,
+            refundAmount: parsedRefundAmount,
+            recipientRole: 'SELLER',
+          })
+        ).catch(() => {});
+      }
+    } catch (notifErr) {
+      console.error('[AdminDisputeResolve] Error dispatching notifications:', notifErr);
+    }
 
     ResponseUtil.success(res, updatedDispute, 'تم إصدار قرار النزاع وتسجيله بنجاح');
   } catch (error) {

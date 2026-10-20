@@ -848,12 +848,18 @@ export class RefundService {
         await tx.notification.create({
           data: {
             userId: refund.seller.userId,
-            titleAr: 'اعتراض العميل على القرار',
-            titleEn: 'Customer Disputed Decision',
+            recipientType: 'SELLER',
+            category: 'REFUND',
+            priority: 'HIGH',
+            titleAr: 'اعتراض العميل على القرار ⚠️',
+            titleEn: 'Customer Disputed Decision ⚠️',
             bodyAr: `قام العميل بتصعيد النزاع للطلب #${refund.refundNumber} وتم إحالته إلى إدارة المنصة.`,
             bodyEn: `Customer opened a dispute for refund #${refund.refundNumber}`,
             type: NotificationType.REFUND_DISPUTED,
-            data: JSON.stringify({ refundId: refund.id, orderId: refund.orderId }),
+            data: JSON.stringify({ refundId: refund.id, orderId: refund.orderId, refundNumber: refund.refundNumber }),
+            deepLink: `souqnaa://seller/refunds/${refund.id}`,
+            status: 'SENT',
+            isRead: false,
           },
         });
       }
@@ -863,14 +869,15 @@ export class RefundService {
 
     if (updated.seller?.userId) {
       notificationDispatcher.dispatch(
-        NotificationEventFactory.refundEvent({
-          eventType: 'REFUND_ESCALATED',
+        NotificationEventFactory.disputeEvent({
+          eventType: 'DISPUTE_SELLER_NOTIFIED',
           recipientId: updated.seller.userId,
-          refundId: updated.id,
-          refundNumber: updated.refundNumber,
+          disputeId: updated.id,
           orderId: updated.orderId,
+          orderNumber: updated.refundNumber,
           reason: disputeReason,
-          isSeller: true,
+          deadline: '48h',
+          recipientRole: 'SELLER',
         })
       ).catch(() => {});
     }
@@ -989,12 +996,18 @@ export class RefundService {
         await tx.notification.create({
           data: {
             userId: refund.customerId,
-            titleAr: 'قرار الإدارة برفض طلب الاسترجاع',
-            titleEn: 'Dispute Decision: Rejected',
+            recipientType: 'CUSTOMER',
+            category: 'REFUND',
+            priority: 'HIGH',
+            titleAr: 'قرار الإدارة برفض طلب الاسترجاع ⚖️',
+            titleEn: 'Dispute Decision: Rejected ⚖️',
             bodyAr: `أصدرت إدارة المنصة قراراً برفض طلب الاسترجاع #${refund.refundNumber}. السبب: ${decisionReason}`,
             bodyEn: `Dispute for refund #${refund.refundNumber} was rejected by admin.`,
             type: NotificationType.REFUND_ADMIN_REJECTED,
-            data: JSON.stringify({ refundId: refund.id }),
+            data: JSON.stringify({ refundId: refund.id, orderId: refund.orderId }),
+            deepLink: `souqnaa://refunds/${refund.id}`,
+            status: 'SENT',
+            isRead: false,
           },
         });
 
@@ -1054,6 +1067,25 @@ export class RefundService {
         include: { order: true, seller: true },
       });
 
+      // Customer In-App Notification on Approval
+      await tx.notification.create({
+        data: {
+          userId: refund.customerId,
+          recipientType: 'CUSTOMER',
+          category: 'REFUND',
+          priority: 'HIGH',
+          titleAr: 'تمت موافقة الإدارة على طلب الاسترجاع 💰',
+          titleEn: 'Refund Approved by Admin 💰',
+          bodyAr: `وافق فريق التحكيم على استرجاع ${finalApprovedAmount} ${refund.currency || 'YER'} لحسابك. القرار: ${decisionReason}`,
+          bodyEn: `Admin approved refund of ${finalApprovedAmount} ${refund.currency || 'YER'}. Resolution: ${decisionReason}`,
+          type: NotificationType.REFUND_ADMIN_APPROVED,
+          data: JSON.stringify({ refundId: refund.id, orderId: refund.orderId, amount: finalApprovedAmount }),
+          deepLink: 'souqnaa://wallet',
+          status: 'SENT',
+          isRead: false,
+        },
+      });
+
       // Execute financial refund according to destination
       await this.executeFinancialRefundInternal(res, tx, adminUserId);
 
@@ -1104,6 +1136,63 @@ export class RefundService {
         status: updated.order?.status,
       });
     } catch (_) {}
+
+    // Dispatch Push & In-App Notifications to Customer and Seller
+    try {
+      // 1. Customer Push Notification
+      notificationDispatcher.dispatch(
+        NotificationEventFactory.disputeEvent({
+          eventType: 'DISPUTE_RESOLVED',
+          recipientId: updated.customerId,
+          disputeId: updated.id,
+          orderId: updated.orderId,
+          orderNumber: updated.refundNumber,
+          decision,
+          resolution: decisionReason,
+          refundAmount: Number(updated.approvedAmount || updated.requestedAmount),
+          currency: updated.currency || 'YER',
+          recipientRole: 'CUSTOMER',
+        })
+      ).catch(() => {});
+
+      // 2. Seller In-App Notification and Push Notification
+      if (updated.seller?.userId) {
+        await prisma.notification.create({
+          data: {
+            userId: updated.seller.userId,
+            recipientType: 'SELLER',
+            category: 'REFUND',
+            priority: 'HIGH',
+            titleAr: 'قرار الإدارة النهائي بشأن النزاع ⚖️',
+            titleEn: 'Admin Decision on Dispute ⚖️',
+            bodyAr: `أصدرت إدارة المنصة قرارها بشأن الطلب #${updated.refundNumber} (${decision === 'REJECT' ? 'رفض الاسترجاع' : 'اعتماد الاسترجاع'}). القرار: ${decisionReason}`,
+            bodyEn: `Admin finalized decision on refund #${updated.refundNumber}. Resolution: ${decisionReason}`,
+            type: decision === 'REJECT' ? NotificationType.REFUND_ADMIN_REJECTED : NotificationType.REFUND_ADMIN_APPROVED,
+            data: JSON.stringify({ refundId: updated.id, orderId: updated.orderId, decision, resolution: decisionReason }),
+            deepLink: `souqnaa://seller/refunds/${updated.id}`,
+            status: 'SENT',
+            isRead: false,
+          },
+        }).catch(() => {});
+
+        notificationDispatcher.dispatch(
+          NotificationEventFactory.disputeEvent({
+            eventType: 'DISPUTE_RESOLVED',
+            recipientId: updated.seller.userId,
+            disputeId: updated.id,
+            orderId: updated.orderId,
+            orderNumber: updated.refundNumber,
+            decision,
+            resolution: decisionReason,
+            refundAmount: Number(updated.approvedAmount || updated.requestedAmount),
+            currency: updated.currency || 'YER',
+            recipientRole: 'SELLER',
+          })
+        ).catch(() => {});
+      }
+    } catch (notifErr) {
+      console.error('[RefundService.adminResolve] Error dispatching notifications:', notifErr);
+    }
 
     if (decision === 'APPROVE_FULL' || decision === 'APPROVE_PARTIAL') {
       MembershipEligibilityService.onRefundCompleted({

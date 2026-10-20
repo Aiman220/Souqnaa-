@@ -1,6 +1,6 @@
 import { prisma } from '../../../database/prisma';
 import { AppError } from '../../../middleware/error.middleware';
-import { RefundStatus, OrderStatus, PaymentStatus } from '@prisma/client';
+import { RefundStatus, OrderStatus, PaymentStatus, DisputeStatus, ReturnRequestStatus } from '@prisma/client';
 
 export interface RefundableItemCheck {
   orderItemId: string;
@@ -38,6 +38,9 @@ export interface OrderRefundEligibility {
   remainingRefundableTotal: number;
   allowedRefundTypes: string[];
   activeRefundId?: string | null;
+  hasExistingRefund?: boolean;
+  existingRefundId?: string | null;
+  existingDisputeId?: string | null;
   items: RefundableItemCheck[];
 }
 
@@ -127,18 +130,37 @@ export class RefundEligibilityService {
     const remainingDays = Math.ceil(remainingSeconds / (24 * 3600));
     const remainingHours = Math.floor((remainingSeconds % (24 * 3600)) / 3600);
 
-    // 3. Find existing refund requests
+    // 3. Find existing refund requests & disputes for this order (Strict One-Time Refund Rule)
     const existingRefunds = await prisma.refundRequest.findMany({
       where: {
         orderId: order.id,
         status: {
-          notIn: [RefundStatus.CANCELLED, RefundStatus.CLOSED, RefundStatus.EXPIRED],
+          not: RefundStatus.CANCELLED,
         },
       },
       include: {
         items: true,
       },
     });
+
+    const existingDispute = await prisma.dispute.findFirst({
+      where: {
+        OR: [{ orderId: order.id }, { orderId: order.orderNumber }],
+      },
+    });
+
+    const existingReturn = await prisma.returnRequest.findFirst({
+      where: {
+        orderId: order.id,
+        status: {
+          not: ReturnRequestStatus.REJECTED,
+        },
+      },
+    });
+
+    const hasPriorRefund = existingRefunds.length > 0;
+    const hasPriorDispute = !!existingDispute;
+    const hasPriorReturn = !!existingReturn;
 
     // Check active pending refund request on the order
     const activeRefund = existingRefunds.find(
@@ -155,12 +177,22 @@ export class RefundEligibilityService {
     if (!isDelivered) {
       orderIneligibleReason =
         'يمكن طلب الاسترجاع فقط بعد توصيل الطلب واستلامه بالكامل (DELIVERED).';
+    } else if (hasPriorDispute) {
+      const isResolved =
+        existingDispute.status === DisputeStatus.RESOLVED ||
+        existingDispute.status === DisputeStatus.REJECTED;
+      orderIneligibleReason = isResolved
+        ? 'تم البت في النزاع والتحكيم لهذا الطلب مسبقاً، ولا يمكن تقديم طلب استرجاع جديد.'
+        : 'يوجد نزاع مفتوح قيد المتابعة والتحكيم لدى المنصة لهذا الطلب حالياً.';
+    } else if (hasPriorRefund) {
+      orderIneligibleReason =
+        'تم تقديم طلب استرجاع لهذا الطلب مسبقاً. يُسمح بتقديم طلب استرجاع واحد فقط لكل طلب وفقاً لسياسة المنصة.';
+    } else if (hasPriorReturn) {
+      orderIneligibleReason =
+        'تم تقديم طلب استرجاع لهذا الطلب مسبقاً ولا يمكن تقديم أكثر من طلب واحد.';
     } else if (refundWindowEnabled && !isWithinWindow) {
       orderIneligibleReason =
         'انتهت مدة طلب الاسترجاع أو الاسترداد لهذا الطلب (REFUND_WINDOW_EXPIRED). الحد الأقصى المسموح به هو 14 يوماً من تاريخ التوصيل.';
-    } else if (activeRefund) {
-      orderIneligibleReason =
-        'يوجد طلب استرجاع قيد المعالجة حالياً لهذا الطلب. لا يمكن تقديم أكثر من طلب استرجاع نشط في نفس الوقت.';
     }
 
     // 5. Item-level calculations and vouchers accounting
@@ -263,6 +295,9 @@ export class RefundEligibilityService {
       remainingRefundableTotal: authoritativeRemaining,
       allowedRefundTypes,
       activeRefundId: activeRefund?.id || null,
+      hasExistingRefund: hasPriorRefund || hasPriorDispute || hasPriorReturn,
+      existingRefundId: existingRefunds[0]?.id || null,
+      existingDisputeId: existingDispute?.id || null,
       items: itemEligibilityList,
     };
   }

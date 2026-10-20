@@ -114,7 +114,32 @@ export class NotificationDispatcher {
     else if (event.category === 'PRICE_ALERT') prismaType = NotificationType.WISHLIST_PRICE_DROP;
     else if (event.category === 'STOCK_ALERT') prismaType = NotificationType.WISHLIST_BACK_IN_STOCK;
     else if (event.category === 'REWARDS') prismaType = NotificationType.REWARD_COINS_EARNED;
-    else if (event.category === 'REFUND') prismaType = NotificationType.REFUND_REQUESTED;
+    else if (event.category === 'REFUND') {
+      if (
+        event.eventType === 'DISPUTE_CREATED' ||
+        event.eventType === 'DISPUTE_SELLER_NOTIFIED' ||
+        event.eventType === 'DISPUTE_ESCALATED' ||
+        event.eventType === 'REFUND_DISPUTED' ||
+        event.eventType === 'REFUND_ESCALATED'
+      ) {
+        prismaType = NotificationType.REFUND_DISPUTED;
+      } else if (
+        event.eventType === 'DISPUTE_RESOLVED' ||
+        event.eventType === 'REFUND_ADMIN_APPROVED'
+      ) {
+        prismaType = NotificationType.REFUND_ADMIN_APPROVED;
+      } else if (event.eventType === 'REFUND_ADMIN_REJECTED') {
+        prismaType = NotificationType.REFUND_ADMIN_REJECTED;
+      } else if (event.eventType === 'REFUND_ACCEPTED') {
+        prismaType = NotificationType.REFUND_SELLER_APPROVED;
+      } else if (event.eventType === 'REFUND_REJECTED') {
+        prismaType = NotificationType.REFUND_SELLER_REJECTED;
+      } else if (event.eventType === 'REFUND_COMPLETED') {
+        prismaType = NotificationType.REFUND_COMPLETED;
+      } else {
+        prismaType = NotificationType.REFUND_REQUESTED;
+      }
+    }
 
     // 7. Persist Canonical Notification in Database
     let savedNotificationId: string | undefined = undefined;

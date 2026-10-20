@@ -35,6 +35,7 @@ import { RewardTxType, RewardTxSource } from '../rewards/rewards.types';
 import { remoteConfigService } from '../remote-config/remote-config.service';
 import { SellerFinancialRiskService } from '../commission/seller-financial-risk.service';
 import { notificationEventBus } from '../notifications/services/event-bus';
+import { notificationDispatcher } from '../notifications/services/notification-dispatcher';
 import { NotificationEventFactory } from '../notifications/events/domain-events';
 import { FirstOrderFreeShippingEligibilityService } from '../promotions/services/first-order-eligibility.service';
 import { FirstOrderPromotionReservationService } from '../promotions/services/first-order-reservation.service';
@@ -2435,7 +2436,13 @@ router.post('/:id/cancellation-request', async (req: Request, res: Response, nex
         OR: [{ id }, { orderNumber: id }],
         userId: req.user!.userId,
       },
-      include: { sellerOrders: true },
+      include: {
+        sellerOrders: {
+          include: {
+            seller: { select: { id: true, userId: true } },
+          },
+        },
+      },
     });
 
     if (!order) throw new AppError('الطلب غير موجود', 404);
@@ -2461,9 +2468,10 @@ router.post('/:id/cancellation-request', async (req: Request, res: Response, nex
       );
     }
 
+    const effectiveSellerOrderId = sellerOrderId || (order.sellerOrders.length === 1 ? order.sellerOrders[0].id : null);
+
     const cancellationRequest = await prisma.$transaction(async (tx) => {
       // 1. Create cancellation request
-      const effectiveSellerOrderId = sellerOrderId || (order.sellerOrders.length === 1 ? order.sellerOrders[0].id : null);
       const reqRecord = await tx.cancellationRequest.create({
         data: {
           orderId: order.id,
@@ -2512,8 +2520,53 @@ router.post('/:id/cancellation-request', async (req: Request, res: Response, nex
       return reqRecord;
     });
 
-    // Notify sellers and customer via socket
+    // Notify sellers via Push, In-App Notifications and Sockets
     try {
+      const targetSellerOrders = effectiveSellerOrderId
+        ? order.sellerOrders.filter((s) => s.id === effectiveSellerOrderId)
+        : order.sellerOrders;
+
+      for (const so of targetSellerOrders) {
+        const sellerUserId = so.seller?.userId;
+        if (sellerUserId) {
+          // 1. In-App Notification in DB
+          await prisma.notification.create({
+            data: {
+              userId: sellerUserId,
+              recipientType: 'SELLER',
+              category: 'ORDER',
+              priority: 'HIGH',
+              titleAr: 'طلب إلغاء من العميل ⚠️',
+              titleEn: 'Customer Cancellation Request ⚠️',
+              bodyAr: `طلب العميل إلغاء الطلب #${order.orderNumber}. السبب: ${reason}`,
+              bodyEn: `Customer requested cancellation for order #${order.orderNumber}. Reason: ${reason}`,
+              type: NotificationType.ORDER_STATUS,
+              data: JSON.stringify({
+                orderId: order.id,
+                orderNumber: order.orderNumber,
+                sellerOrderId: so.id,
+                requestId: cancellationRequest.id,
+                reason,
+              }),
+              deepLink: `souqnaa://seller/orders/${order.id}`,
+              status: 'SENT',
+              isRead: false,
+            },
+          });
+
+          // 2. Push Notification via Dispatcher
+          notificationDispatcher.dispatch(
+            NotificationEventFactory.sellerCancellationRequestedEvent({
+              recipientId: sellerUserId,
+              orderId: order.id,
+              orderNumber: order.orderNumber,
+              sellerOrderId: so.id,
+              reason,
+            })
+          ).catch(() => {});
+        }
+      }
+
       SocketService.get()?.emitGlobal('order:cancellation_requested', {
         orderId: order.id,
         orderNumber: order.orderNumber,
@@ -2526,6 +2579,7 @@ router.post('/:id/cancellation-request', async (req: Request, res: Response, nex
         displayOrderNumber: order.displayOrderNumber || undefined,
         sellerOrderId: sellerOrderId || undefined,
         customerUserId: order.userId,
+        sellerUserIds: targetSellerOrders.map((s) => s.seller?.userId).filter(Boolean) as string[],
         status: OrderStatus.CANCELLATION_REQUESTED,
         changedByRole: 'CUSTOMER',
         extra: { previousStatus: order.status },
@@ -3000,8 +3054,66 @@ router.post(['/:id/disputes', '/:id/dispute'], async (req: Request, res: Respons
       },
     });
 
-    // Notify Admins
+    // Notify Seller, Admins and Customer via Push, In-App Notifications and Sockets
     try {
+      const targetSeller = await prisma.seller.findUnique({
+        where: { id: targetSellerId },
+        select: { userId: true },
+      });
+
+      if (targetSeller?.userId) {
+        // 1. In-App Notification in DB for Seller
+        await prisma.notification.create({
+          data: {
+            userId: targetSeller.userId,
+            recipientType: 'SELLER',
+            category: 'REFUND',
+            priority: 'HIGH',
+            titleAr: 'نزاع جديد يتطلب ردك ⚠️',
+            titleEn: 'New dispute requires your response ⚠️',
+            bodyAr: `قام العميل بتصعيد نزاع على الطلب #${order.orderNumber}. السبب: ${reason}`,
+            bodyEn: `Customer opened a dispute on order #${order.orderNumber}. Reason: ${reason}`,
+            type: NotificationType.REFUND_DISPUTED,
+            data: JSON.stringify({
+              disputeId: dispute.id,
+              orderId: order.id,
+              orderNumber: order.orderNumber,
+              reason,
+            }),
+            deepLink: `souqnaa://seller/refunds/${dispute.id}`,
+            status: 'SENT',
+            isRead: false,
+          },
+        });
+
+        // 2. Push Notification to Seller
+        notificationDispatcher.dispatch(
+          NotificationEventFactory.disputeEvent({
+            eventType: 'DISPUTE_SELLER_NOTIFIED',
+            recipientId: targetSeller.userId,
+            disputeId: dispute.id,
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            reason,
+            deadline: '48h',
+            recipientRole: 'SELLER',
+          })
+        ).catch(() => {});
+      }
+
+      // Notify Customer of successful dispute submission
+      notificationDispatcher.dispatch(
+        NotificationEventFactory.disputeEvent({
+          eventType: 'DISPUTE_CREATED',
+          recipientId: req.user!.userId,
+          disputeId: dispute.id,
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          reason,
+          recipientRole: 'CUSTOMER',
+        })
+      ).catch(() => {});
+
       SocketService.get()?.emitGlobal('admin:new_dispute', {
         disputeId: dispute.id,
         orderId: order.id,
