@@ -91,8 +91,8 @@ export class NotificationTemplateService {
       deepLinkPattern: 'souqnaa://seller/orders/{{orderId}}',
     },
     SELLER_ORDER_CANCELLED: {
-      titleAr: 'تم إلغاء طلب المتجر ❌',
-      titleEn: 'Store order cancelled ❌',
+      titleAr: 'تم إلغاء الطلب',
+      titleEn: 'Order cancelled',
       bodyAr: 'تم إلغاء الطلب رقم #{{orderNumber}}. السبب: {{cancelReason}}',
       bodyEn: 'Order #{{orderNumber}} was cancelled. Reason: {{cancelReason}}',
       deepLinkPattern: 'souqnaa://seller/orders/{{orderId}}',
@@ -209,10 +209,10 @@ export class NotificationTemplateService {
       deepLinkPattern: 'souqnaa://disputes/{{disputeId}}',
     },
     DISPUTE_RESOLVED: {
-      titleAr: 'تم البت في النزاع وإصدار القرار ⚖️',
-      titleEn: 'Dispute decision issued ⚖️',
-      bodyAr: 'أصدرت الإدارة قرارها النهائي: {{resolution}}',
-      bodyEn: 'Dispute decision has been finalized: {{resolution}}',
+      titleAr: 'تم البت في النزاع للطلب #{{orderNumber}} ⚖️',
+      titleEn: 'Dispute decision issued for order #{{orderNumber}} ⚖️',
+      bodyAr: 'أصدرت الإدارة قرارها النهائي للطلب #{{orderNumber}}: {{resolution}}',
+      bodyEn: 'Dispute decision for order #{{orderNumber}} has been finalized: {{resolution}}',
       deepLinkPattern: 'souqnaa://disputes/{{disputeId}}',
     },
     DISPUTE_APPEALED: {

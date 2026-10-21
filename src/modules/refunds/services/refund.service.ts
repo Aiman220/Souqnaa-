@@ -844,6 +844,7 @@ export class RefundService {
       });
 
       // Notify Seller & Admin
+      const orderNumber = refund.order?.orderNumber || refund.refundNumber;
       if (refund.seller.userId) {
         await tx.notification.create({
           data: {
@@ -851,12 +852,12 @@ export class RefundService {
             recipientType: 'SELLER',
             category: 'REFUND',
             priority: 'HIGH',
-            titleAr: 'اعتراض العميل على القرار ⚠️',
-            titleEn: 'Customer Disputed Decision ⚠️',
-            bodyAr: `قام العميل بتصعيد النزاع للطلب #${refund.refundNumber} وتم إحالته إلى إدارة المنصة.`,
-            bodyEn: `Customer opened a dispute for refund #${refund.refundNumber}`,
+            titleAr: `اعتراض العميل على القرار للطلب #${orderNumber} ⚠️`,
+            titleEn: `Customer Disputed Decision for order #${orderNumber} ⚠️`,
+            bodyAr: `قام العميل بتصعيد النزاع للطلب #${orderNumber} وتم إحالته إلى إدارة المنصة للتحكيم.`,
+            bodyEn: `Customer opened a dispute for order #${orderNumber}`,
             type: NotificationType.REFUND_DISPUTED,
-            data: JSON.stringify({ refundId: refund.id, orderId: refund.orderId, refundNumber: refund.refundNumber }),
+            data: JSON.stringify({ refundId: refund.id, orderId: refund.orderId, orderNumber, refundNumber: refund.refundNumber }),
             deepLink: `souqnaa://seller/refunds/${refund.id}`,
             status: 'SENT',
             isRead: false,
@@ -874,7 +875,7 @@ export class RefundService {
           recipientId: updated.seller.userId,
           disputeId: updated.id,
           orderId: updated.orderId,
-          orderNumber: updated.refundNumber,
+          orderNumber: updated.order?.orderNumber || updated.refundNumber,
           reason: disputeReason,
           deadline: '48h',
           recipientRole: 'SELLER',
@@ -993,18 +994,19 @@ export class RefundService {
           include: { order: true, seller: true },
         });
 
+        const orderNumber = refund.order?.orderNumber || refund.refundNumber;
         await tx.notification.create({
           data: {
             userId: refund.customerId,
             recipientType: 'CUSTOMER',
             category: 'REFUND',
             priority: 'HIGH',
-            titleAr: 'قرار الإدارة برفض طلب الاسترجاع ⚖️',
-            titleEn: 'Dispute Decision: Rejected ⚖️',
-            bodyAr: `أصدرت إدارة المنصة قراراً برفض طلب الاسترجاع #${refund.refundNumber}. السبب: ${decisionReason}`,
-            bodyEn: `Dispute for refund #${refund.refundNumber} was rejected by admin.`,
+            titleAr: `قرار الإدارة برفض طلب الاسترجاع للطلب #${orderNumber} ⚖️`,
+            titleEn: `Dispute Decision: Rejected for order #${orderNumber} ⚖️`,
+            bodyAr: `أصدرت إدارة المنصة قراراً برفض طلب الاسترجاع للطلب #${orderNumber}. السبب: ${decisionReason}`,
+            bodyEn: `Dispute for order #${orderNumber} was rejected by admin.`,
             type: NotificationType.REFUND_ADMIN_REJECTED,
-            data: JSON.stringify({ refundId: refund.id, orderId: refund.orderId }),
+            data: JSON.stringify({ refundId: refund.id, orderId: refund.orderId, orderNumber }),
             deepLink: `souqnaa://refunds/${refund.id}`,
             status: 'SENT',
             isRead: false,
@@ -1067,6 +1069,19 @@ export class RefundService {
         include: { order: true, seller: true },
       });
 
+      // Synchronize in prisma.dispute
+      await tx.dispute.updateMany({
+        where: { orderId: refund.orderId, status: { in: [DisputeStatus.OPEN, DisputeStatus.UNDER_REVIEW] } },
+        data: {
+          status: DisputeStatus.RESOLVED,
+          decision: decision === 'APPROVE_PARTIAL' ? 'PARTIAL_REFUND' : 'FULL_REFUND',
+          resolution: decisionReason,
+          refundAmount: finalApprovedAmount,
+        },
+      });
+
+      const orderNumber = refund.order?.orderNumber || refund.refundNumber;
+
       // Customer In-App Notification on Approval
       await tx.notification.create({
         data: {
@@ -1074,12 +1089,16 @@ export class RefundService {
           recipientType: 'CUSTOMER',
           category: 'REFUND',
           priority: 'HIGH',
-          titleAr: 'تمت موافقة الإدارة على طلب الاسترجاع 💰',
-          titleEn: 'Refund Approved by Admin 💰',
-          bodyAr: `وافق فريق التحكيم على استرجاع ${finalApprovedAmount} ${refund.currency || 'YER'} لحسابك. القرار: ${decisionReason}`,
-          bodyEn: `Admin approved refund of ${finalApprovedAmount} ${refund.currency || 'YER'}. Resolution: ${decisionReason}`,
+          titleAr: decision === 'APPROVE_PARTIAL'
+            ? `قرار الإدارة: استرداد جزئي للطلب #${orderNumber} 💰`
+            : `قرار الإدارة: استرداد كامل للطلب #${orderNumber} 💰`,
+          titleEn: `Refund Approved by Admin for order #${orderNumber} 💰`,
+          bodyAr: decision === 'APPROVE_PARTIAL'
+            ? `وافق فريق التحكيم على استرداد جزئي بمبلغ ${finalApprovedAmount} ${refund.currency || 'YER'} للطلب #${orderNumber}. القرار: ${decisionReason}`
+            : `وافق فريق التحكيم على استرداد ${finalApprovedAmount} ${refund.currency || 'YER'} للطلب #${orderNumber}. القرار: ${decisionReason}`,
+          bodyEn: `Admin approved refund of ${finalApprovedAmount} ${refund.currency || 'YER'} for order #${orderNumber}. Resolution: ${decisionReason}`,
           type: NotificationType.REFUND_ADMIN_APPROVED,
-          data: JSON.stringify({ refundId: refund.id, orderId: refund.orderId, amount: finalApprovedAmount }),
+          data: JSON.stringify({ refundId: refund.id, orderId: refund.orderId, orderNumber, amount: finalApprovedAmount }),
           deepLink: 'souqnaa://wallet',
           status: 'SENT',
           isRead: false,
@@ -1139,6 +1158,8 @@ export class RefundService {
 
     // Dispatch Push & In-App Notifications to Customer and Seller
     try {
+      const orderNumber = updated.order?.orderNumber || updated.refundNumber;
+
       // 1. Customer Push Notification
       notificationDispatcher.dispatch(
         NotificationEventFactory.disputeEvent({
@@ -1146,7 +1167,7 @@ export class RefundService {
           recipientId: updated.customerId,
           disputeId: updated.id,
           orderId: updated.orderId,
-          orderNumber: updated.refundNumber,
+          orderNumber,
           decision,
           resolution: decisionReason,
           refundAmount: Number(updated.approvedAmount || updated.requestedAmount),
@@ -1163,12 +1184,12 @@ export class RefundService {
             recipientType: 'SELLER',
             category: 'REFUND',
             priority: 'HIGH',
-            titleAr: 'قرار الإدارة النهائي بشأن النزاع ⚖️',
-            titleEn: 'Admin Decision on Dispute ⚖️',
-            bodyAr: `أصدرت إدارة المنصة قرارها بشأن الطلب #${updated.refundNumber} (${decision === 'REJECT' ? 'رفض الاسترجاع' : 'اعتماد الاسترجاع'}). القرار: ${decisionReason}`,
-            bodyEn: `Admin finalized decision on refund #${updated.refundNumber}. Resolution: ${decisionReason}`,
+            titleAr: `قرار الإدارة بشأن النزاع للطلب #${orderNumber} ⚖️`,
+            titleEn: `Admin Decision on Dispute for order #${orderNumber} ⚖️`,
+            bodyAr: `أصدرت إدارة المنصة قرارها بشأن الطلب #${orderNumber} (${decision === 'REJECT' ? 'رفض الاسترجاع' : (decision === 'APPROVE_PARTIAL' ? 'استرداد جزئي' : 'استرداد كامل')}). القرار: ${decisionReason}`,
+            bodyEn: `Admin finalized decision on refund for order #${orderNumber}. Resolution: ${decisionReason}`,
             type: decision === 'REJECT' ? NotificationType.REFUND_ADMIN_REJECTED : NotificationType.REFUND_ADMIN_APPROVED,
-            data: JSON.stringify({ refundId: updated.id, orderId: updated.orderId, decision, resolution: decisionReason }),
+            data: JSON.stringify({ refundId: updated.id, orderId: updated.orderId, orderNumber, decision, resolution: decisionReason }),
             deepLink: `souqnaa://seller/refunds/${updated.id}`,
             status: 'SENT',
             isRead: false,
@@ -1181,7 +1202,7 @@ export class RefundService {
             recipientId: updated.seller.userId,
             disputeId: updated.id,
             orderId: updated.orderId,
-            orderNumber: updated.refundNumber,
+            orderNumber,
             decision,
             resolution: decisionReason,
             refundAmount: Number(updated.approvedAmount || updated.requestedAmount),

@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../../database/prisma';
+import { redis } from '../../database/redis';
 import { authenticate } from '../../middleware/auth.middleware';
 import { ResponseUtil } from '../../utils/response.util';
 import { AppError } from '../../middleware/error.middleware';
@@ -177,7 +178,19 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           sellerOrders: {
             include: {
               seller: { include: { stores: { select: { name: true, logo: true } } } },
-              items: true,
+              items: {
+                include: {
+                  product: {
+                    select: {
+                      id: true,
+                      nameAr: true,
+                      nameEn: true,
+                      images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
+                    },
+                  },
+                  variant: { select: { id: true, image: true } },
+                },
+              },
             },
           },
           addressSnapshot: true,
@@ -187,7 +200,17 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
       });
 
       if (existingOrder) {
-        return ResponseUtil.success(res, existingOrder, 'تم استرجاع الطلب المنفذ مسبقاً بنجاح');
+        const enrichedExistingOrder = {
+          ...existingOrder,
+          sellerOrders: (existingOrder.sellerOrders || []).map((so) => ({
+            ...so,
+            items: (so.items || []).map((item: any) => ({
+              ...item,
+              productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
+            })),
+          })),
+        };
+        return ResponseUtil.success(res, enrichedExistingOrder, 'تم استرجاع الطلب المنفذ مسبقاً بنجاح');
       }
     }
 
@@ -1330,7 +1353,19 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
         sellerOrders: {
           include: {
             seller: { include: { stores: { select: { name: true, logo: true } } } },
-            items: true,
+            items: {
+              include: {
+                product: {
+                  select: {
+                    id: true,
+                    nameAr: true,
+                    nameEn: true,
+                    images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
+                  },
+                },
+                variant: { select: { id: true, image: true } },
+              },
+            },
           },
         },
         addressSnapshot: true,
@@ -1338,6 +1373,17 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
         statusHistory: { orderBy: { createdAt: 'asc' } },
       },
     });
+
+    if (fullOrder && fullOrder.sellerOrders) {
+      for (const so of fullOrder.sellerOrders) {
+        if (so.items) {
+          so.items = so.items.map((item: any) => ({
+            ...item,
+            productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
+          }));
+        }
+      }
+    }
 
     // Notify sellers and customer wallet
     try {
@@ -1630,6 +1676,16 @@ function buildCustomerPurchaseFilterWhere(userId: string, filter: string): any {
 router.get('/summary', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.userId;
+    const cacheKey = `order_summary:${userId}`;
+
+    // Fast-path: Check Redis cache first (sub-millisecond return)
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        return ResponseUtil.success(res, parsed);
+      } catch (_) {}
+    }
 
     // 1. Fetch unread notifications referencing customer's orders
     const unreadNotifs = await prisma.notification.findMany({
@@ -1646,20 +1702,28 @@ router.get('/summary', async (req: Request, res: Response, next: NextFunction) =
     });
     const unreadEntityIds = new Set(unreadNotifs.map((n) => n.entityId).filter(Boolean) as string[]);
 
-    // 2. Fetch customer's orders with full relation include for authoritative aggregation
+    // 2. Fetch customer's orders with selective columns to minimize payload & query duration
     const orders = await prisma.order.findMany({
       where: { userId },
-      include: {
+      select: {
+        id: true,
+        orderNumber: true,
+        displayOrderNumber: true,
+        status: true,
         payment: { select: { status: true, method: true, paidAt: true } },
         returnRequests: { select: { id: true, status: true } },
         refundRequests: { select: { id: true, status: true } },
         cancellationRequests: { select: { id: true, status: true } },
         sellerOrders: {
-          include: {
+          select: {
+            id: true,
+            sellerOrderNumber: true,
             returnRequests: { select: { id: true, status: true } },
             refundRequests: { select: { id: true, status: true } },
+            cancellationRequests: { select: { id: true, status: true } },
             items: {
-              include: {
+              select: {
+                id: true,
                 productReviews: { select: { id: true } },
               },
             },
@@ -1841,7 +1905,12 @@ router.get('/summary', async (req: Request, res: Response, next: NextFunction) =
       };
     }
 
-    ResponseUtil.success(res, { summaries, lastUpdatedAt: nowIso });
+    const payload = { summaries, lastUpdatedAt: nowIso };
+    try {
+      await redis.set(cacheKey, JSON.stringify(payload), 30);
+    } catch (_) {}
+
+    ResponseUtil.success(res, payload);
   } catch (error) {
     next(error);
   }
@@ -1999,6 +2068,11 @@ router.post('/mark-filter-read', async (req: Request, res: Response, next: NextF
     }
 
     try {
+      await redis.del(`order_summary:${userId}`);
+      const remainingUnreadNotifs = await prisma.notification.count({
+        where: { userId, isRead: false },
+      });
+      SocketService.get()?.emitNotificationBadge(userId, remainingUnreadNotifs);
       SocketService.get()?.emitToUser(userId, 'order:summary_updated', {
         userId,
         filter,
@@ -2066,6 +2140,11 @@ router.post('/:id/read', async (req: Request, res: Response, next: NextFunction)
     });
 
     try {
+      await redis.del(`order_summary:${userId}`);
+      const remainingUnreadNotifs = await prisma.notification.count({
+        where: { userId, isRead: false },
+      });
+      SocketService.get()?.emitNotificationBadge(userId, remainingUnreadNotifs);
       SocketService.get()?.emitToUser(userId, 'order:read', {
         orderId: order.id,
         readCount: updateRes.count,
@@ -2124,6 +2203,15 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
                     where: { userId: req.user!.userId },
                     select: { id: true, rating: true },
                   },
+                  product: {
+                    select: {
+                      id: true,
+                      nameAr: true,
+                      nameEn: true,
+                      images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
+                    },
+                  },
+                  variant: { select: { id: true, image: true } },
                 },
               },
               returnRequests: { orderBy: { createdAt: 'desc' } },
@@ -2195,8 +2283,16 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
         if (so.id) matchIds.push(so.id);
         if (so.sellerOrderNumber) matchIds.push(so.sellerOrderNumber);
       }
+      const sellerOrdersEnriched = (order.sellerOrders || []).map((so) => ({
+        ...so,
+        items: (so.items || []).map((item: any) => ({
+          ...item,
+          productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
+        })),
+      }));
       return {
         ...order,
+        sellerOrders: sellerOrdersEnriched,
         disputes: disputes.filter((d) => matchIds.includes(d.orderId)),
         isUnread: matchIds.some((id) => unreadSet.has(id)),
       };
@@ -2235,7 +2331,19 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
         sellerOrders: {
           include: {
             seller: { include: { stores: true } },
-            items: true,
+            items: {
+              include: {
+                product: {
+                  select: {
+                    id: true,
+                    nameAr: true,
+                    nameEn: true,
+                    images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
+                  },
+                },
+                variant: { select: { id: true, image: true } },
+              },
+            },
             cancellationRequests: true,
             returnRequests: { orderBy: { createdAt: 'desc' } },
             refundRequests: {
@@ -2285,6 +2393,10 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
 
     const sellerOrdersWithDisputes = order.sellerOrders.map(so => ({
       ...so,
+      items: (so.items || []).map((item: any) => ({
+        ...item,
+        productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
+      })),
       disputes: disputes.filter(d => d.sellerId === so.sellerId || !d.sellerId),
     }));
 

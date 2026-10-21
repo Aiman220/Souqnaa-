@@ -2974,6 +2974,12 @@ router.post('/disputes/:id/resolve', async (req: Request, res: Response, next: N
     const dispute = await prisma.dispute.findUnique({ where: { id } });
     if (!dispute) throw new AppError('النزاع غير موجود', 404);
 
+    const relatedOrder = await prisma.order.findFirst({
+      where: { OR: [{ id: dispute.orderId }, { orderNumber: dispute.orderId }] },
+      select: { id: true, orderNumber: true },
+    });
+    const orderNumber = relatedOrder?.orderNumber || dispute.orderId;
+
     const parsedRefundAmount = refundAmount ? parseFloat(refundAmount) : 0.0;
     const finalDecision = decision || 'FULL_REFUND';
     const isRejected = finalDecision === 'REJECTED' || finalDecision === 'SELLER_FAVOR';
@@ -3183,6 +3189,8 @@ router.post('/disputes/:id/resolve', async (req: Request, res: Response, next: N
 
     // Dispatch durable In-App & Push Notifications to Customer and Seller
     try {
+      const orderNumber = (dispute as any).order?.orderNumber || dispute.orderId;
+
       if (dispute.customerId) {
         await prisma.notification.create({
           data: {
@@ -3191,21 +3199,26 @@ router.post('/disputes/:id/resolve', async (req: Request, res: Response, next: N
             category: 'REFUND',
             priority: 'HIGH',
             titleAr: isRejected
-              ? 'قرار الإدارة بشأن النزاع ⚖️'
-              : 'تم البت في النزاع بالموافقة على الاسترجاع 💰',
+              ? `قرار الإدارة بشأن النزاع للطلب #${orderNumber} ⚖️`
+              : (finalDecision === 'PARTIAL_REFUND'
+                  ? `قرار الإدارة: استرداد جزئي للطلب #${orderNumber} 💰`
+                  : `قرار الإدارة: استرداد كامل للطلب #${orderNumber} 💰`),
             titleEn: isRejected
-              ? 'Dispute Decision Issued ⚖️'
-              : 'Refund Approved by Admin 💰',
+              ? `Dispute Decision Issued for order #${orderNumber} ⚖️`
+              : `Refund Approved by Admin for order #${orderNumber} 💰`,
             bodyAr: isRejected
-              ? `أصدرت إدارة المنصة قراراً بعد مراجعة النزاع للطلب #${dispute.orderId}: ${resolution}`
-              : `أصدرت إدارة المنصة قراراً بالموافقة على استرجاع ${parsedRefundAmount} ر.ي وإيداعها في محفظتك. القرار: ${resolution}`,
-            bodyEn: `Dispute decision finalized: ${resolution}`,
+              ? `أصدرت إدارة المنصة قراراً بعد مراجعة النزاع للطلب #${orderNumber}: ${resolution}`
+              : (finalDecision === 'PARTIAL_REFUND'
+                  ? `أصدرت إدارة المنصة قراراً باسترداد جزئي بمبلغ ${parsedRefundAmount} ر.ي للطلب #${orderNumber}. القرار: ${resolution}`
+                  : `أصدرت إدارة المنصة قراراً بالموافقة على استرداد ${parsedRefundAmount} ر.ي وإيداعها في محفظتك للطلب #${orderNumber}. القرار: ${resolution}`),
+            bodyEn: `Dispute decision finalized for order #${orderNumber}: ${resolution}`,
             type: isRejected
               ? NotificationType.REFUND_ADMIN_REJECTED
               : NotificationType.REFUND_ADMIN_APPROVED,
             data: JSON.stringify({
               disputeId: dispute.id,
               orderId: dispute.orderId,
+              orderNumber,
               decision: finalDecision,
               resolution,
               refundAmount: parsedRefundAmount,
@@ -3222,7 +3235,7 @@ router.post('/disputes/:id/resolve', async (req: Request, res: Response, next: N
             recipientId: dispute.customerId,
             disputeId: dispute.id,
             orderId: dispute.orderId,
-            orderNumber: dispute.orderId,
+            orderNumber,
             decision: finalDecision,
             resolution,
             refundAmount: parsedRefundAmount,
@@ -3243,16 +3256,17 @@ router.post('/disputes/:id/resolve', async (req: Request, res: Response, next: N
             recipientType: 'SELLER',
             category: 'REFUND',
             priority: 'HIGH',
-            titleAr: 'قرار الإدارة النهائي بشأن النزاع ⚖️',
-            titleEn: 'Admin Decision on Dispute ⚖️',
-            bodyAr: `أصدرت إدارة المنصة قرارها النهائي بشأن النزاع للطلب #${dispute.orderId}: ${resolution}`,
-            bodyEn: `Admin finalized decision on dispute for order #${dispute.orderId}: ${resolution}`,
+            titleAr: `قرار التحكيم الإداري للطلب #${orderNumber} ⚖️`,
+            titleEn: `Admin Decision on Dispute for order #${orderNumber} ⚖️`,
+            bodyAr: `أصدرت إدارة المنصة قرارها النهائي بشأن النزاع للطلب #${orderNumber}: ${resolution}`,
+            bodyEn: `Admin finalized decision on dispute for order #${orderNumber}: ${resolution}`,
             type: isRejected
               ? NotificationType.REFUND_ADMIN_REJECTED
               : NotificationType.REFUND_ADMIN_APPROVED,
             data: JSON.stringify({
               disputeId: dispute.id,
               orderId: dispute.orderId,
+              orderNumber,
               decision: finalDecision,
               resolution,
               refundAmount: parsedRefundAmount,
@@ -3269,7 +3283,7 @@ router.post('/disputes/:id/resolve', async (req: Request, res: Response, next: N
             recipientId: targetSeller.userId,
             disputeId: dispute.id,
             orderId: dispute.orderId,
-            orderNumber: dispute.orderId,
+            orderNumber,
             decision: finalDecision,
             resolution,
             refundAmount: parsedRefundAmount,

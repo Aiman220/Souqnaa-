@@ -129,6 +129,17 @@ export class SocketService {
       if (socket.data.user?.role === 'ADMIN') {
         socket.join('admin:disputes');
         socket.join('admin:notifications');
+        socket.join('admin:orders');
+        socket.join('admin:dashboard');
+      }
+      if (socket.data.user?.role === 'SELLER') {
+        prisma.seller.findFirst({ where: { userId }, select: { id: true } })
+          .then((s) => {
+            if (s) {
+              socket.join(`seller:${s.id}`);
+            }
+          })
+          .catch(() => {});
       }
 
       // Join authorized order room
@@ -470,20 +481,24 @@ export class SocketService {
               const readData = {
                 conversationId: baseConvId,
                 altConversationId: supConv ? supConv.id : undefined,
+                baseConversationId: supConv ? supConv.conversationId : baseConvId,
                 readByUserId: userId,
                 userId,
                 readAt: new Date().toISOString(),
               };
               this.emitToConversation(baseConvId, 'messages:read', readData);
               this.emitToConversation(baseConvId, 'message:read', readData);
+              this.emitToConversation(baseConvId, 'support:messages:read', readData);
               if (supConv && supConv.id !== baseConvId) {
                 this.emitToConversation(supConv.id, 'messages:read', readData);
                 this.emitToConversation(supConv.id, 'message:read', readData);
+                this.emitToConversation(supConv.id, 'support:messages:read', readData);
               }
               for (const member of conv.members) {
                 if (member.userId !== userId) {
                   this.emitToUser(member.userId, 'messages:read', readData);
                   this.emitToUser(member.userId, 'message:read', readData);
+                  this.emitToUser(member.userId, 'support:messages:read', readData);
                 }
               }
             }
@@ -492,12 +507,24 @@ export class SocketService {
               if (member.userId !== userId) {
                 const isOnline = this.isUserOnline(member.userId);
                 const lastSeen = await this.getLastSeen(member.userId);
-                socket.emit(isOnline ? 'user:online' : 'user:offline', {
+                const memberPresence = {
                   userId: member.userId,
                   isOnline,
                   lastSeen: lastSeen ? (lastSeen instanceof Date ? lastSeen.toISOString() : String(lastSeen)) : null,
-                  conversationId,
-                });
+                  conversationId: baseConvId,
+                };
+                socket.emit(isOnline ? 'user:online' : 'user:offline', memberPresence);
+                socket.emit('user:presence', memberPresence);
+
+                // Immediately inform the other member that THIS user joined/is online
+                const myPresence = {
+                  userId,
+                  isOnline: true,
+                  lastSeen: new Date().toISOString(),
+                  conversationId: baseConvId,
+                };
+                this.emitToUser(member.userId, 'user:online', myPresence);
+                this.emitToUser(member.userId, 'user:presence', myPresence);
               }
             }
           }
@@ -505,24 +532,32 @@ export class SocketService {
           console.error('[Socket.IO] Error in join:conversation:', e);
         }
 
-        // Notify other members in this conversation that user joined/is online
-        socket.to(`conversation:${conversationId}`).emit('user:online', {
+        // Notify other members in this conversation room that user joined/is online
+        const joinPresence = {
           userId,
           isOnline: true,
+          lastSeen: new Date().toISOString(),
           conversationId,
-        });
+        };
+        socket.to(`conversation:${conversationId}`).emit('user:online', joinPresence);
+        socket.to(`conversation:${conversationId}`).emit('user:presence', joinPresence);
       });
 
       // Query presence
-      socket.on('get:presence', async ({ targetUserId }: { targetUserId: string }) => {
+      socket.on('get:presence', async (data: any) => {
+        const targetUserId = typeof data === 'string'
+          ? data.trim()
+          : (data?.targetUserId || data?.userId || data?.id)?.toString().trim();
         if (!targetUserId) return;
         const isOnline = this.isUserOnline(targetUserId);
         const lastSeen = await this.getLastSeen(targetUserId);
-        socket.emit(isOnline ? 'user:online' : 'user:offline', {
+        const presencePayload = {
           userId: targetUserId,
           isOnline,
           lastSeen: lastSeen ? (lastSeen instanceof Date ? lastSeen.toISOString() : String(lastSeen)) : null,
-        });
+        };
+        socket.emit(isOnline ? 'user:online' : 'user:offline', presencePayload);
+        socket.emit('user:presence', presencePayload);
       });
 
       // Leave conversation room
@@ -685,44 +720,79 @@ export class SocketService {
 
       // Messages seen / read receipts
       socket.on('message:seen', async (data: any) => {
-        const conversationId = typeof data === 'string' ? data.trim() : (data?.conversationId || data?.id)?.toString().trim();
-        if (!conversationId) return;
+        const inputId = typeof data === 'string' ? data.trim() : (data?.conversationId || data?.id)?.toString().trim();
+        if (!inputId) return;
 
         try {
+          let baseConvId = inputId;
+          let altConvId: string | null = null;
+          const supConv = await prisma.supportConversation.findFirst({
+            where: { OR: [{ id: inputId }, { conversationId: inputId }] },
+            select: { id: true, conversationId: true, requesterId: true, assignedAgent: { select: { adminUserId: true } } },
+          });
+          if (supConv) {
+            baseConvId = supConv.conversationId;
+            altConvId = supConv.id;
+          }
+
+          const convIds = Array.from(new Set([inputId, baseConvId, ...(altConvId ? [altConvId] : [])]));
+
           await prisma.conversationMember.updateMany({
-            where: { conversationId, userId },
+            where: { conversationId: { in: convIds }, userId },
             data: { lastReadAt: new Date() },
           });
 
           await prisma.message.updateMany({
             where: {
-              conversationId,
+              conversationId: { in: convIds },
               senderId: { not: userId },
               isRead: false,
             },
             data: { isRead: true },
           });
 
+          if (supConv) {
+            const userRole = socket.data.user?.role;
+            const isAgent = userRole === 'ADMIN' || (supConv.assignedAgent?.adminUserId === userId);
+            const isSeller = userRole === 'SELLER';
+            const updateField = isAgent
+              ? { unreadAgentCount: 0 }
+              : isSeller
+              ? { unreadSellerCount: 0 }
+              : { unreadCustomerCount: 0 };
+            await prisma.supportConversation.update({
+              where: { id: supConv.id },
+              data: updateField,
+            });
+          }
+
           const readPayload = {
-            conversationId,
+            conversationId: inputId,
+            baseConversationId: baseConvId,
+            altConversationId: altConvId,
+            readByUserId: userId,
             userId,
             readAt: new Date().toISOString(),
           };
 
-          this.emitToConversation(conversationId, 'messages:read', readPayload);
-          this.emitToConversation(conversationId, 'message:read', readPayload);
+          for (const cid of convIds) {
+            this.emitToConversation(cid, 'messages:read', readPayload);
+            this.emitToConversation(cid, 'message:read', readPayload);
+            this.emitToConversation(cid, 'support:messages:read', readPayload);
+          }
 
           const members = await prisma.conversationMember.findMany({
-            where: { conversationId, userId: { not: userId } },
+            where: { conversationId: { in: convIds }, userId: { not: userId } },
             select: { userId: true },
           });
           for (const m of members) {
             this.emitToUser(m.userId, 'messages:read', readPayload);
             this.emitToUser(m.userId, 'message:read', readPayload);
+            this.emitToUser(m.userId, 'support:messages:read', readPayload);
           }
 
           // Mark pending chat notifications for this conversation as read
-          markChatNotificationsAsRead(conversationId, userId).catch((err) =>
+          markChatNotificationsAsRead(baseConvId, userId).catch((err) =>
             console.error('[Notification Read Error]:', err)
           );
         } catch (_) {}
@@ -837,9 +907,18 @@ export class SocketService {
             select: { userId: true },
           });
 
-          // Check if the other member is already viewing the conversation room
+          let supConvForCheck: any = null;
+          try {
+            supConvForCheck = await prisma.supportConversation.findFirst({
+              where: { OR: [{ id: conversationId }, { conversationId }] },
+            });
+          } catch (_) {}
+
+          const roomIdsToCheck = Array.from(new Set([conversationId, ...(supConvForCheck ? [supConvForCheck.id, supConvForCheck.conversationId] : [])]));
+
+          // Check if the other member is already viewing the conversation room (support or regular)
           const isRecipientViewing = allMembers.some(
-            (m) => m.userId !== userId && this.isUserInConversation(m.userId, conversationId)
+            (m) => m.userId !== userId && roomIdsToCheck.some((rid) => this.isUserInConversation(m.userId, rid))
           );
 
           const created = await prisma.$transaction(async (tx) => {
@@ -893,14 +972,25 @@ export class SocketService {
           this.io.to(`conversation:${conversationId}`).emit('message:new', norm);
 
           if (isRecipientViewing) {
+            const otherMember = allMembers.find((m) => m.userId !== userId);
             const readPayload = {
               conversationId,
+              baseConversationId: supConvForCheck ? supConvForCheck.conversationId : conversationId,
+              altConversationId: supConvForCheck ? supConvForCheck.id : null,
               messageId: String(created.id),
+              readByUserId: otherMember?.userId || '',
               userId,
               readAt: new Date().toISOString(),
             };
             this.emitToUser(userId, 'messages:read', readPayload);
             this.emitToUser(userId, 'message:read', readPayload);
+            this.emitToUser(userId, 'support:messages:read', readPayload);
+
+            for (const rid of roomIdsToCheck) {
+              this.emitToConversation(rid, 'messages:read', readPayload);
+              this.emitToConversation(rid, 'message:read', readPayload);
+              this.emitToConversation(rid, 'support:messages:read', readPayload);
+            }
           }
 
           try {
@@ -1081,6 +1171,9 @@ export class SocketService {
     if (sUserId) {
       this.io.to(`user:${sUserId}`).emit(event, data);
     }
+    if (data?.sellerId) {
+      this.io.to(`seller:${data.sellerId}`).emit(event, data);
+    }
     if (data?.customerId) {
       this.io.to(`user:${data.customerId}`).emit(event, data);
     }
@@ -1200,6 +1293,7 @@ export class SocketService {
 
     // 2. Emit to Customer's private room
     if (customerUserId) {
+      redis.del(`order_summary:${customerUserId}`).catch(() => {});
       this.io.to(`user:${customerUserId}`).emit('order:status', payload);
       this.io.to(`user:${customerUserId}`).emit(specificEvent, payload);
       this.io.to(`user:${customerUserId}`).emit('order:summary_updated', {
@@ -1215,12 +1309,18 @@ export class SocketService {
       if (sUserId) {
         this.io.to(`user:${sUserId}`).emit('order:status', payload);
         this.io.to(`user:${sUserId}`).emit(specificEvent, payload);
+        this.io.to(`user:${sUserId}`).emit('seller:order_updated', payload);
+        if (status === 'PENDING' || status === 'CONFIRMED') {
+          this.io.to(`user:${sUserId}`).emit('seller:new_order', payload);
+          this.io.to(`user:${sUserId}`).emit('order:created', payload);
+        }
       }
     }
 
     // 4. Emit to Admin orders room
     this.io.to('admin:orders').emit('order:status', payload);
     this.io.to('admin:orders').emit(specificEvent, payload);
+    this.io.to('admin:dashboard').emit('admin:order_count_updated', { status, orderId });
   }
 
   emitGlobal(event: string, data: any): void {

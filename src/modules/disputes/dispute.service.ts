@@ -7,12 +7,14 @@ import {
   OrderStatus,
   PaymentStatus,
   UserRoleType,
+  NotificationType,
 } from '@prisma/client';
 import { SocketService } from '../../services/websocket/socket.service';
 import { notificationDispatcher } from '../notifications/services/notification-dispatcher';
 import { NotificationEventFactory } from '../notifications/events/domain-events';
 import { CustomerWalletService } from '../wallet/customer-wallet.service';
 import { RefundService } from '../refunds/services/refund.service';
+import { redis } from '../../database/redis';
 
 export interface CreateDisputeInput {
   customerId: string;
@@ -276,6 +278,32 @@ export class DisputeService {
         },
       });
 
+      // Persistent In-App Notification for Seller
+      if (targetSeller.userId) {
+        await tx.notification.create({
+          data: {
+            userId: targetSeller.userId,
+            recipientType: 'SELLER',
+            category: 'REFUND',
+            priority: 'HIGH',
+            titleAr: `نزاع جديد يتطلب ردك للطلب #${order.orderNumber} ⚠️`,
+            titleEn: `Dispute opened for order #${order.orderNumber} ⚠️`,
+            bodyAr: `فتح العميل نزاعاً على الطلب #${order.orderNumber}. يرجى مراجعة التفاصيل والرد خلال 48 ساعة. السبب: ${reason}`,
+            bodyEn: `Customer opened a dispute on order #${order.orderNumber}. Reason: ${reason}`,
+            type: NotificationType.REFUND_DISPUTED,
+            data: JSON.stringify({
+              disputeId: dispute.id,
+              orderId: order.id,
+              orderNumber: order.orderNumber,
+              refundId: refundReq?.id,
+            }),
+            deepLink: `souqnaa://seller/refunds/${dispute.id}`,
+            status: 'SENT',
+            isRead: false,
+          },
+        });
+      }
+
       return { dispute, order, targetSeller, refundReq };
     });
 
@@ -318,38 +346,42 @@ export class DisputeService {
       console.error('[DisputeService] Socket broadcast error:', sockErr);
     }
 
-    // Durable In-App & Push Notifications (Async after DB commit)
+    // Durable In-App & Push Notifications (Guaranteed persistence)
     try {
-      // 1. Notify Customer (Confirmation)
-      notificationDispatcher.dispatch(
-        NotificationEventFactory.disputeEvent({
-          eventType: 'DISPUTE_CREATED',
-          recipientId: customerId,
-          disputeId: dispute.id,
-          orderId: order.id,
-          orderNumber: order.orderNumber,
-          refundId: finalRefundReq?.id,
-          reason,
-          recipientRole: 'CUSTOMER',
-        })
-      );
-
-      // 2. Notify Seller (Action Required within 48h)
-      if (targetSeller.userId) {
+      const dispatches: Promise<any>[] = [
         notificationDispatcher.dispatch(
           NotificationEventFactory.disputeEvent({
-            eventType: 'DISPUTE_SELLER_NOTIFIED',
-            recipientId: targetSeller.userId,
+            eventType: 'DISPUTE_CREATED',
+            recipientId: customerId,
             disputeId: dispute.id,
             orderId: order.id,
             orderNumber: order.orderNumber,
             refundId: finalRefundReq?.id,
             reason,
-            deadline: '48h',
-            recipientRole: 'SELLER',
+            recipientRole: 'CUSTOMER',
           })
+        ),
+      ];
+
+      if (targetSeller.userId) {
+        dispatches.push(
+          notificationDispatcher.dispatch(
+            NotificationEventFactory.disputeEvent({
+              eventType: 'DISPUTE_SELLER_NOTIFIED',
+              recipientId: targetSeller.userId,
+              disputeId: dispute.id,
+              orderId: order.id,
+              orderNumber: order.orderNumber,
+              refundId: finalRefundReq?.id,
+              reason,
+              deadline: '48h',
+              recipientRole: 'SELLER',
+            })
+          )
         );
       }
+
+      await Promise.allSettled(dispatches);
     } catch (notifErr) {
       console.error('[DisputeService] Notification dispatch error:', notifErr);
     }
@@ -779,6 +811,12 @@ export class DisputeService {
     });
     if (!dispute) throw new AppError('النزاع غير موجود', 404);
 
+    const relatedOrder = await prisma.order.findFirst({
+      where: { OR: [{ id: dispute.orderId }, { orderNumber: dispute.orderId }] },
+      select: { id: true, orderNumber: true },
+    });
+    const orderNumber = relatedOrder?.orderNumber || dispute.orderId;
+
     const parsedRefundAmount = Math.max(0, Number(refundAmount) || 0);
     const isRejected = decision === 'REJECTED' || decision === 'SELLER_FAVOR';
     const finalStatus = isRejected ? DisputeStatus.REJECTED : DisputeStatus.RESOLVED;
@@ -926,6 +964,68 @@ export class DisputeService {
         });
       }
 
+      // In-App Notification for Customer
+      await tx.notification.create({
+        data: {
+          userId: dispute.customerId,
+          recipientType: 'CUSTOMER',
+          category: 'REFUND',
+          priority: 'HIGH',
+          titleAr: isRejected
+            ? `قرار الإدارة بشأن النزاع للطلب #${orderNumber} ⚖️`
+            : (decision === 'PARTIAL_REFUND'
+                ? `قرار الإدارة: استرداد جزئي للطلب #${orderNumber} 💰`
+                : `قرار الإدارة: استرداد كامل للطلب #${orderNumber} 💰`),
+          titleEn: `Dispute Decision for order #${orderNumber} ⚖️`,
+          bodyAr: isRejected
+            ? `أصدرت إدارة المنصة قراراً برفض النزاع للطلب #${orderNumber}: ${resolution}`
+            : (decision === 'PARTIAL_REFUND'
+                ? `أصدرت إدارة المنصة قراراً باسترداد جزئي بمبلغ ${parsedRefundAmount} ر.ي للطلب #${orderNumber}: ${resolution}`
+                : `أصدرت إدارة المنصة قراراً باسترداد كامل بمبلغ ${parsedRefundAmount} ر.ي للطلب #${orderNumber}: ${resolution}`),
+          bodyEn: `Dispute decision finalized for order #${orderNumber}: ${resolution}`,
+          type: isRejected ? NotificationType.REFUND_ADMIN_REJECTED : NotificationType.REFUND_ADMIN_APPROVED,
+          data: JSON.stringify({
+            disputeId: dispute.id,
+            orderId: dispute.orderId,
+            orderNumber,
+            decision,
+            resolution,
+            refundAmount: parsedRefundAmount,
+          }),
+          deepLink: isRejected ? `souqnaa://disputes/${dispute.id}` : 'souqnaa://wallet',
+          status: 'SENT',
+          isRead: false,
+        },
+      });
+
+      // In-App Notification for Seller
+      if (dispute.seller?.userId) {
+        await tx.notification.create({
+          data: {
+            userId: dispute.seller.userId,
+            recipientType: 'SELLER',
+            category: 'REFUND',
+            priority: 'HIGH',
+            titleAr: `قرار التحكيم الإداري للطلب #${orderNumber} ⚖️`,
+            titleEn: `Admin Decision for order #${orderNumber} ⚖️`,
+            bodyAr: `أصدرت إدارة المنصة قرارها النهائي بشأن النزاع للطلب #${orderNumber}: ${resolution}`,
+            bodyEn: `Admin finalized dispute decision for order #${orderNumber}: ${resolution}`,
+            type: isRejected ? NotificationType.REFUND_ADMIN_REJECTED : NotificationType.REFUND_ADMIN_APPROVED,
+            data: JSON.stringify({
+              disputeId: dispute.id,
+              orderId: dispute.orderId,
+              orderNumber,
+              decision,
+              resolution,
+              refundAmount: parsedRefundAmount,
+            }),
+            deepLink: `souqnaa://seller/refunds/${dispute.id}`,
+            status: 'SENT',
+            isRead: false,
+          },
+        });
+      }
+
       return d;
     }, { maxWait: 5000, timeout: 10000 });
 
@@ -980,6 +1080,7 @@ export class DisputeService {
           recipientId: dispute.customerId,
           disputeId: dispute.id,
           orderId: dispute.orderId,
+          orderNumber,
           decision,
           resolution,
           refundAmount: parsedRefundAmount,
@@ -995,6 +1096,7 @@ export class DisputeService {
             recipientId: dispute.seller.userId,
             disputeId: dispute.id,
             orderId: dispute.orderId,
+            orderNumber,
             decision,
             resolution,
             refundAmount: parsedRefundAmount,
@@ -1195,5 +1297,141 @@ export class DisputeService {
       statusHistory: refundReq?.statusHistory || [],
       serverTime: new Date().toISOString(),
     };
+  }
+
+  /**
+   * 9. Scheduled Routine: Check dispute SLA deadlines (36h reminder & 48h auto-escalation) (§Phase 5)
+   */
+  static async checkDisputeDeadlines(): Promise<{ remindersSent: number; escalatedCount: number }> {
+    let remindersSent = 0;
+    let escalatedCount = 0;
+
+    try {
+      const openDisputes = await prisma.dispute.findMany({
+        where: {
+          status: DisputeStatus.OPEN,
+        },
+        include: {
+          seller: { select: { id: true, userId: true } },
+        },
+        take: 50,
+      });
+
+      if (!openDisputes.length) return { remindersSent: 0, escalatedCount: 0 };
+
+      const now = Date.now();
+
+      for (const dispute of openDisputes) {
+        const elapsedHours = (now - new Date(dispute.createdAt).getTime()) / (1000 * 60 * 60);
+
+        // A. 36-Hour Warning: Approaching Deadline
+        if (elapsedHours >= 36 && elapsedHours < 48) {
+          const reminderKey = `dispute_reminder_36h:${dispute.id}`;
+          const alreadyReminded = await redis.get(reminderKey);
+
+          if (!alreadyReminded) {
+            await redis.set(reminderKey, '1', 7 * 24 * 60 * 60);
+
+            if (dispute.seller?.userId) {
+              notificationDispatcher.dispatch(
+                NotificationEventFactory.disputeEvent({
+                  eventType: 'DISPUTE_DEADLINE_APPROACHING',
+                  recipientId: dispute.seller.userId,
+                  disputeId: dispute.id,
+                  orderId: dispute.orderId,
+                  orderNumber: dispute.orderId,
+                  recipientRole: 'SELLER',
+                  deadline: '12h',
+                })
+              );
+            }
+
+            try {
+              const socket = SocketService.get();
+              if (socket) {
+                socket.emitDisputeUpdate(dispute.id, 'dispute:deadline_approaching', {
+                  disputeId: dispute.id,
+                  orderId: dispute.orderId,
+                  remainingHours: Math.max(0, Math.round(48 - elapsedHours)),
+                });
+              }
+            } catch (_) {}
+
+            remindersSent++;
+          }
+        }
+
+        // B. 48-Hour Deadline Exceeded: Auto-Escalate to Admin
+        if (elapsedHours >= 48) {
+          const escalateKey = `dispute_escalated_48h:${dispute.id}`;
+          const alreadyEscalated = await redis.get(escalateKey);
+
+          if (!alreadyEscalated) {
+            await redis.set(escalateKey, '1', 7 * 24 * 60 * 60);
+
+            const timestamp = new Date().toISOString();
+            const noteText = `\n[${timestamp}] [تصعيد تلقائي] انتهاء مهلة الرد (48 ساعة) دون استجابة من المتجر، تم تصعيد النزاع للتحكيم الإداري.`;
+            const currentNotes = dispute.adminNotes || '';
+
+            await prisma.dispute.update({
+              where: { id: dispute.id },
+              data: {
+                status: DisputeStatus.UNDER_REVIEW,
+                adminNotes: `${currentNotes}${noteText}`.trim(),
+              },
+            });
+
+            // Notify Customer & Seller
+            notificationDispatcher.dispatch(
+              NotificationEventFactory.disputeEvent({
+                eventType: 'DISPUTE_ESCALATED',
+                recipientId: dispute.customerId,
+                disputeId: dispute.id,
+                orderId: dispute.orderId,
+                orderNumber: dispute.orderId,
+                recipientRole: 'CUSTOMER',
+              })
+            );
+
+            if (dispute.seller?.userId) {
+              notificationDispatcher.dispatch(
+                NotificationEventFactory.disputeEvent({
+                  eventType: 'DISPUTE_ESCALATED',
+                  recipientId: dispute.seller.userId,
+                  disputeId: dispute.id,
+                  orderId: dispute.orderId,
+                  orderNumber: dispute.orderId,
+                  recipientRole: 'SELLER',
+                })
+              );
+            }
+
+            // Real-time broadcast
+            try {
+              const socket = SocketService.get();
+              if (socket) {
+                socket.emitDisputeUpdate(dispute.id, 'dispute:escalated', {
+                  disputeId: dispute.id,
+                  orderId: dispute.orderId,
+                  status: DisputeStatus.UNDER_REVIEW,
+                  autoEscalated: true,
+                });
+                socket.emitToRoom('admin:disputes', 'admin:dispute_escalated', {
+                  disputeId: dispute.id,
+                  orderId: dispute.orderId,
+                  autoEscalated: true,
+                });
+              }
+            } catch (_) {}
+
+            escalatedCount++;
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[DisputeService] checkDisputeDeadlines error:', err);
+    }
+
+    return { remindersSent, escalatedCount };
   }
 }

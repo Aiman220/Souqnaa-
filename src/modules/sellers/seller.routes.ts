@@ -141,6 +141,105 @@ router.get('/me', async (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
+// ── Seller Notifications Endpoints ───────────────────────────────────────────
+router.get('/me/notifications', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 20));
+    const skip = (page - 1) * limit;
+
+    const seller = await prisma.seller.findUnique({
+      where: { userId: req.user!.userId },
+      select: { id: true },
+    });
+
+    const where: any = {
+      OR: [
+        { userId: req.user!.userId },
+        ...(seller ? [{ userId: seller.id }] : []),
+      ],
+    };
+
+    const [items, total, unreadCount] = await Promise.all([
+      prisma.notification.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.notification.count({ where }),
+      prisma.notification.count({
+        where: {
+          ...where,
+          isRead: false,
+        },
+      }),
+    ]);
+
+    const totalPages = Math.ceil(total / limit);
+
+    ResponseUtil.success(res, {
+      items,
+      notifications: items,
+      total,
+      unreadCount,
+      page,
+      limit,
+      totalPages,
+      hasNext: page < totalPages,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch('/me/notifications/:id/read', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params.id);
+    const seller = await prisma.seller.findUnique({
+      where: { userId: req.user!.userId },
+      select: { id: true },
+    });
+
+    await prisma.notification.updateMany({
+      where: {
+        id,
+        OR: [
+          { userId: req.user!.userId },
+          ...(seller ? [{ userId: seller.id }] : []),
+        ],
+      },
+      data: { isRead: true, readAt: new Date() },
+    });
+    ResponseUtil.success(res, { success: true }, 'تم تحديث حالة الإشعار');
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch('/me/notifications/read-all', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const seller = await prisma.seller.findUnique({
+      where: { userId: req.user!.userId },
+      select: { id: true },
+    });
+
+    await prisma.notification.updateMany({
+      where: {
+        OR: [
+          { userId: req.user!.userId },
+          ...(seller ? [{ userId: seller.id }] : []),
+        ],
+        isRead: false,
+      },
+      data: { isRead: true, readAt: new Date() },
+    });
+    ResponseUtil.success(res, { success: true }, 'تم تحديد جميع الإشعارات كمقروءة');
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/user/:userId', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const targetUserId = String(req.params.userId);
@@ -890,7 +989,19 @@ router.get('/dashboard', async (req: Request, res: Response, next: NextFunction)
       orderBy: { createdAt: 'desc' },
       include: {
         order: { select: { orderNumber: true, createdAt: true } },
-        items: true,
+        items: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                nameAr: true,
+                nameEn: true,
+                images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
+              },
+            },
+            variant: { select: { id: true, image: true } },
+          },
+        },
       },
     });
 
@@ -900,6 +1011,14 @@ router.get('/dashboard', async (req: Request, res: Response, next: NextFunction)
     const isFinanciallyRestricted = seller.isFinanciallyRestricted || false;
     const financialRestrictionLevel = seller.financialRestrictionLevel || 'NORMAL';
     const amountNeededToUnblock = Math.max(0, outstandingCommission - 4000);
+
+    const enrichedRecentOrders = recentOrders.map((ro) => ({
+      ...ro,
+      items: (ro.items || []).map((item: any) => ({
+        ...item,
+        productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
+      })),
+    }));
 
     const payload = {
       revenue: earned,
@@ -916,7 +1035,7 @@ router.get('/dashboard', async (req: Request, res: Response, next: NextFunction)
       totalOrders,
       pendingOrders,
       totalProducts,
-      recentOrders,
+      recentOrders: enrichedRecentOrders,
     };
 
     // Cache metrics for 30s in-memory (real-time enough for sellers, zero DB pressure)
@@ -1581,7 +1700,19 @@ router.get('/me/orders', async (req: Request, res: Response, next: NextFunction)
               },
             },
           },
-          items: true,
+          items: {
+            include: {
+              product: {
+                select: {
+                  id: true,
+                  nameAr: true,
+                  nameEn: true,
+                  images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
+                },
+              },
+              variant: { select: { id: true, image: true } },
+            },
+          },
           deliveryMethod: true,
           deliveryQuoteSnapshot: true,
           cancellationRequests: true,
@@ -1612,6 +1743,10 @@ router.get('/me/orders', async (req: Request, res: Response, next: NextFunction)
       }
       return {
         ...o,
+        items: (o.items || []).map((item: any) => ({
+          ...item,
+          productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
+        })),
         notes: (o as any).notes || o.order?.notes || null,
         returnReason: firstRefund?.reasonText || firstReturn?.reason || (o as any).returnReason || null,
         returnDescription: firstRefund?.description || firstReturn?.description || (o as any).returnDescription || null,
@@ -1668,7 +1803,19 @@ router.get('/me/orders/:id', async (req: Request, res: Response, next: NextFunct
             },
           },
         },
-        items: true,
+        items: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                nameAr: true,
+                nameEn: true,
+                images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
+              },
+            },
+            variant: { select: { id: true, image: true } },
+          },
+        },
         deliveryMethod: true,
         deliveryQuoteSnapshot: true,
         cancellationRequests: { orderBy: { createdAt: 'desc' } },
@@ -1699,6 +1846,10 @@ router.get('/me/orders/:id', async (req: Request, res: Response, next: NextFunct
 
     const enrichedOrder = {
       ...order,
+      items: (order.items || []).map((item: any) => ({
+        ...item,
+        productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
+      })),
       notes: (order as any).notes || order.order?.notes || null,
       returnReason: firstRefund?.reasonText || firstReturn?.reason || (order as any).returnReason || null,
       returnDescription: firstRefund?.description || firstReturn?.description || (order as any).returnDescription || null,
@@ -1754,6 +1905,26 @@ router.get(
           printLogs: {
             orderBy: { printedAt: 'desc' },
             take: 10,
+          },
+          settlementItems: {
+            include: {
+              settlement: {
+                select: {
+                  id: true,
+                  settlementNumber: true,
+                  status: true,
+                  processedAt: true,
+                  settlementDate: true,
+                },
+              },
+            },
+          },
+          deliveryOrder: {
+            select: {
+              id: true,
+              status: true,
+              deliveryTime: true,
+            },
           },
         },
       });

@@ -328,16 +328,28 @@ router.post('/conversations/:id/read', async (req: Request, res: Response, next:
             conversationId: conv.id,
             baseConversationId: conv.conversationId,
             readByUserId: userId,
+            userId,
             readAt: new Date().toISOString(),
           };
           io.emitToConversation(conv.conversationId, 'support:messages:read', readData);
-          if (conv.id !== conv.conversationId) {
-            io.emitToConversation(conv.id, 'support:messages:read', readData);
-          }
+          io.emitToConversation(conv.conversationId, 'messages:read', readData);
           io.emitToConversation(conv.conversationId, 'message:read', readData);
           if (conv.id !== conv.conversationId) {
+            io.emitToConversation(conv.id, 'support:messages:read', readData);
+            io.emitToConversation(conv.id, 'messages:read', readData);
             io.emitToConversation(conv.id, 'message:read', readData);
           }
+
+          const members = await prisma.conversationMember.findMany({
+            where: { conversationId: conv.conversationId },
+            select: { userId: true },
+          });
+          for (const m of members) {
+            io.emitToUser(m.userId, 'support:messages:read', readData);
+            io.emitToUser(m.userId, 'messages:read', readData);
+            io.emitToUser(m.userId, 'message:read', readData);
+          }
+
           io.emitToUser(userId, 'support:conversation:read', { conversationId: conv.id });
           io.emitGlobal('support:queue:updated', { action: 'read', conversationId: conv.id });
         }

@@ -193,4 +193,68 @@ describe('SOUQNA Universal Seller Order Print & Export Engine', () => {
       assert.equal((StatementExportService as any).escapeCell('سوقناا "للأجهزة"'), `"سوقناا ""للأجهزة"""`);
     });
   });
+
+  describe('5. Order Status Presentation & Currency Formatting Verification', () => {
+    it('should format numbers with comma thousands separator and 2 decimal places', () => {
+      assert.equal(SellerOrderPrintService.formatNumber(0), '0.00');
+      assert.equal(SellerOrderPrintService.formatNumber(1500), '1,500.00');
+      assert.equal(SellerOrderPrintService.formatNumber(65000), '65,000.00');
+      assert.equal(SellerOrderPrintService.formatNumber(1234567.89), '1,234,567.89');
+      assert.equal(SellerOrderPrintService.formatAmount(2500, 'ر.ي'), '2,500.00 ر.ي');
+    });
+
+    it('should render correct badge, icon, and colors for DELIVERED status without false waiting indicators', () => {
+      const mockData = createMockPrintData('INVOICE', 'A4');
+      mockData.orderStatusAr = 'تم التوصيل للعميل';
+      mockData.orderStatusEn = 'DELIVERED';
+      mockData.orderStatusIcon = '✓';
+      mockData.orderStatusColor = '#16a34a';
+      mockData.orderStatusBg = '#dcfce7';
+
+      const html = SellerOrderPrintService.renderHtmlDocument(mockData);
+
+      // Must display the delivered badge with checkmark icon and emerald color
+      assert.ok(html.includes('✓'), 'Must render checkmark icon for delivered status');
+      assert.ok(html.includes('تم التوصيل للعميل'), 'Must render Arabic label for delivered status');
+      assert.ok(html.includes('#16a34a') || html.includes('16a34a'), 'Must use emerald green text color');
+      assert.ok(html.includes('#dcfce7') || html.includes('dcfce7'), 'Must use light green background');
+
+      // Verify no false waiting icon or text in invoice
+      assert.ok(!html.includes('معلق لحين اكتمال التسليم'), 'Delivered order must never display pending delivery text');
+    });
+
+    it('should render correct badge and icon for CANCELLED status', () => {
+      const mockData = createMockPrintData('INVOICE', '80MM');
+      mockData.orderStatusAr = 'ملغي';
+      mockData.orderStatusEn = 'CANCELLED';
+      mockData.orderStatusIcon = '✕';
+      mockData.orderStatusColor = '#dc2626';
+      mockData.orderStatusBg = '#fee2e2';
+
+      const html = SellerOrderPrintService.renderHtmlDocument(mockData);
+
+      assert.ok(html.includes('✕'), 'Must render X icon for cancelled status');
+      assert.ok(html.includes('ملغي'), 'Must render Arabic cancelled label');
+      assert.ok(html.includes('#dc2626') || html.includes('dc2626'), 'Must use red text color');
+    });
+
+    it('should render order status with icon across all 3 formats for STATEMENT', () => {
+      for (const format of paperFormats) {
+        const mockData = createMockPrintData('STATEMENT', format);
+        mockData.orderStatusAr = 'تم التوصيل للعميل';
+        mockData.orderStatusEn = 'DELIVERED';
+        mockData.orderStatusIcon = '✓';
+        mockData.orderStatusColor = '#16a34a';
+        mockData.orderStatusBg = '#dcfce7';
+        mockData.sellerFinancials.walletReleaseStatus = 'مكتمل التسليم — بانتظار دورة التسوية للمحفظة';
+
+        const html = SellerOrderPrintService.renderHtmlDocument(mockData);
+
+        assert.ok(html.includes('✓'), `STATEMENT (${format}) must include status icon`);
+        assert.ok(html.includes('تم التوصيل للعميل'), `STATEMENT (${format}) must include status text`);
+        assert.ok(html.includes('مكتمل التسليم — بانتظار دورة التسوية للمحفظة'), `STATEMENT (${format}) must show delivered wallet release text`);
+      }
+    });
+  });
 });
+

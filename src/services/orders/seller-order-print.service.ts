@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import QRCode from 'qrcode';
+import { config } from '../../config';
 
 export type PrintDocumentType = 'INVOICE' | 'PACKING_SLIP' | 'STATEMENT';
 export type PrintFormat = 'A4' | '80MM' | '58MM';
@@ -33,6 +34,9 @@ export interface PrintDocumentData {
   paymentStatusEn: string;
   orderStatusAr: string;
   orderStatusEn: string;
+  orderStatusIcon?: string;
+  orderStatusColor?: string;
+  orderStatusBg?: string;
   souqnaLogoDataUri: string;
   store: {
     name: string;
@@ -71,6 +75,7 @@ export interface PrintDocumentData {
     customerOrderTotal: number;
     sellerGrossAmount: number;
     platformCommission: number;
+    commissionRate?: number;
     discountContribution: number;
     platformFundedDiscount: number;
     refundDeduction: number;
@@ -91,6 +96,23 @@ export interface PrintDocumentData {
 let cachedSouqnaLogoBase64: string = '';
 
 export class SellerOrderPrintService {
+  /**
+   * Formats numbers to localized string with 2 decimals and standard thousands grouping
+   */
+  public static formatNumber(val: number | undefined | null): string {
+    const num = Number(val || 0);
+    return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  /**
+   * Formats numbers to currency string with 2 decimals
+   */
+  public static formatAmount(val: number | undefined | null, currency: string = 'ر.ي'): string {
+    const num = Number(val || 0);
+    const suffix = currency ? ` ${currency}` : '';
+    return `${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${suffix}`;
+  }
+
   /**
    * HTML Entity Escaper to strictly prevent stored XSS injection (§20, §44)
    */
@@ -234,20 +256,35 @@ export class SellerOrderPrintService {
     };
     const paymentStatus = paymentStatusMap[rawPayStatus] || { ar: rawPayStatus, en: rawPayStatus };
 
-    // Order status mapping
+    // Order status mapping with authoritative labels, icons, and status theme colors
     const rawOrderStatus = (sellerOrder.status || 'PENDING').toUpperCase();
-    const orderStatusMap: Record<string, { ar: string; en: string }> = {
-      PENDING: { ar: 'قيد الانتظار', en: 'PENDING' },
-      CONFIRMED: { ar: 'مؤكد وجاري التجهيز', en: 'CONFIRMED' },
-      PROCESSING: { ar: 'قيد التجهيز والتغليف', en: 'PROCESSING' },
-      READY_TO_SHIP: { ar: 'جاهز للشحن والتسليم', en: 'READY_TO_SHIP' },
-      READY_FOR_SHIPMENT: { ar: 'جاهز للشحن والتسليم', en: 'READY_TO_SHIP' },
-      SHIPPED: { ar: 'تم الشحن مع المندوب', en: 'SHIPPED' },
-      DELIVERED: { ar: 'تم التسليم بنجاح ✓', en: 'DELIVERED' },
-      CANCELLED: { ar: 'ملغي', en: 'CANCELLED' },
-      RETURNED: { ar: 'مرتجع', en: 'RETURNED' },
+    const orderStatusMap: Record<string, { ar: string; en: string; icon: string; color: string; bg: string }> = {
+      PENDING: { ar: 'قيد الانتظار والمراجعة', en: 'PENDING', icon: '⏳', color: '#d97706', bg: '#fef3c7' },
+      CONFIRMED: { ar: 'مؤكد وجاري التجهيز', en: 'CONFIRMED', icon: '✓', color: '#0284c7', bg: '#e0f2fe' },
+      PROCESSING: { ar: 'قيد التجهيز والتغليف', en: 'PROCESSING', icon: '📦', color: '#7c3aed', bg: '#ede9fe' },
+      READY_TO_SHIP: { ar: 'جاهز للشحن والتسليم', en: 'READY_TO_SHIP', icon: '📦', color: '#0d9488', bg: '#ccfbf1' },
+      READY_FOR_SHIPMENT: { ar: 'جاهز للشحن والتسليم', en: 'READY_TO_SHIP', icon: '📦', color: '#0d9488', bg: '#ccfbf1' },
+      SHIPPED: { ar: 'تم الشحن مع المندوب', en: 'SHIPPED', icon: '🚚', color: '#0284c7', bg: '#e0f2fe' },
+      DELIVERED: { ar: 'تم التسليم بنجاح ✓', en: 'DELIVERED', icon: '✓', color: '#16a34a', bg: '#dcfce7' },
+      CANCELLED_BY_CUSTOMER: { ar: 'ملغي من قبل العميل', en: 'CANCELLED_BY_CUSTOMER', icon: '✕', color: '#dc2626', bg: '#fee2e2' },
+      CANCELLED_BY_SELLER: { ar: 'ملغي من قبل المتجر', en: 'CANCELLED_BY_SELLER', icon: '✕', color: '#dc2626', bg: '#fee2e2' },
+      REJECTED_BY_SELLER: { ar: 'مرفوض من المتجر', en: 'REJECTED_BY_SELLER', icon: '✕', color: '#dc2626', bg: '#fee2e2' },
+      CANCELLED_BY_ADMIN: { ar: 'ملغي من قبل الإدارة', en: 'CANCELLED_BY_ADMIN', icon: '✕', color: '#dc2626', bg: '#fee2e2' },
+      CANCELLED: { ar: 'ملغي', en: 'CANCELLED', icon: '✕', color: '#dc2626', bg: '#fee2e2' },
+      CANCELLATION_REQUESTED: { ar: 'طلب إلغاء قيد المراجعة', en: 'CANCELLATION_REQUESTED', icon: '⏳', color: '#d97706', bg: '#fef3c7' },
+      RETURN_REQUESTED: { ar: 'طلب إرجاع قيد المراجعة', en: 'RETURN_REQUESTED', icon: '↩', color: '#ea580c', bg: '#ffedd5' },
+      RETURN_APPROVED: { ar: 'تمت الموافقة على الإرجاع', en: 'RETURN_APPROVED', icon: '✓', color: '#16a34a', bg: '#dcfce7' },
+      RETURNED: { ar: 'تم استلام المرتجع', en: 'RETURNED', icon: '↩', color: '#475569', bg: '#f1f5f9' },
+      REFUND_PENDING: { ar: 'استرداد المبلغ قيد التنفيذ', en: 'REFUND_PENDING', icon: '💳', color: '#0d9488', bg: '#ccfbf1' },
+      REFUNDED: { ar: 'تم الاسترداد بالكامل ✓', en: 'REFUNDED', icon: '✓', color: '#0d9488', bg: '#ccfbf1' },
     };
-    const orderStatus = orderStatusMap[rawOrderStatus] || { ar: rawOrderStatus, en: rawOrderStatus };
+    const orderStatus = orderStatusMap[rawOrderStatus] || {
+      ar: rawOrderStatus,
+      en: rawOrderStatus,
+      icon: rawOrderStatus === 'DELIVERED' ? '✓' : (rawOrderStatus.includes('CANCEL') ? '✕' : 'ℹ'),
+      color: rawOrderStatus === 'DELIVERED' ? '#16a34a' : (rawOrderStatus.includes('CANCEL') ? '#dc2626' : '#64748b'),
+      bg: rawOrderStatus === 'DELIVERED' ? '#dcfce7' : (rawOrderStatus.includes('CANCEL') ? '#fee2e2' : '#f1f5f9'),
+    };
 
     // Safe customer fulfillment info
     const rawCustomerName = addr.recipientName || parentOrder.user?.firstName
@@ -307,29 +344,86 @@ export class SellerOrderPrintService {
       };
     });
 
+    // Authoritative Currency from configuration or order
+    const currency = config.marketplace.currencySymbol || 'ر.ي';
+
     // Totals directly from real database columns
-    const subtotal = Number(sellerOrder.subtotal ?? items.reduce((s, i) => s + i.totalPrice, 0));
+    const calculatedItemsSubtotal = items.reduce((s, i) => s + i.totalPrice, 0);
+    const subtotal = Number(sellerOrder.subtotal ?? calculatedItemsSubtotal);
     const deliveryFee = Number(sellerOrder.deliveryFee ?? sellerOrder.shippingFee ?? 0);
     const sellerDisc = Number(sellerOrder.sellerFundedDiscount ?? sellerOrder.sellerDiscountShare ?? 0);
-    const couponDisc = Number(sellerOrder.voucherDiscountAmount ?? sellerOrder.couponDiscountShare ?? 0);
     const platformDisc = Number(sellerOrder.platformFundedDiscount ?? sellerOrder.platformDiscountShare ?? 0);
+    // Voucher discount is total promotional discount. It includes sellerFundedDiscount + platformFundedDiscount.
+    const voucherDisc = Number(sellerOrder.voucherDiscountAmount ?? (sellerDisc + platformDisc));
     const productDisc = items.reduce((s, i) => s + i.discount, 0);
-    const grandTotal = Number(sellerOrder.total ?? (subtotal + deliveryFee - sellerDisc - couponDisc));
-    const currency = 'ر.ي';
+
+    // Customer payable grand total for this seller sub-order:
+    // Subtotal + Delivery fee - total voucher discount (deducted exactly once)
+    const grandTotal = Number(
+      sellerOrder.total ??
+      Math.max(0, subtotal + deliveryFee - voucherDisc)
+    );
 
     // Financial settlements for statement directly from real database columns
-    const commissionRate = sellerOrder.seller?.commissionRate ?? 0.10;
-    const commission = Number(sellerOrder.commissionAmount ?? (subtotal * commissionRate));
-    const sellerPayout = Number(sellerOrder.sellerPayout ?? (subtotal - commission - sellerDisc + platformDisc));
+    const commissionRate = sellerOrder.seller?.commissionRate ?? config.marketplace.defaultCommissionRate ?? 0.10;
+    const commission = sellerOrder.commissionAmount !== null && sellerOrder.commissionAmount !== undefined
+      ? Number(sellerOrder.commissionAmount)
+      : Math.round(subtotal * commissionRate);
 
-    const walletReleaseStatus = sellerOrder.isSettled ? 'تم التحويل للمحفظة ✓' : 'معلق لحين اكتمال التسليم';
-    const releaseDays = 3;
-    const estimatedRelease = new Date(orderDate.getTime() + releaseDays * 24 * 60 * 60 * 1000);
-    const walletReleaseDate = estimatedRelease.toLocaleDateString('ar-YE', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    });
+    // Net seller payout: authoritative database column sellerPayout
+    const sellerPayout = sellerOrder.sellerPayout !== null && sellerOrder.sellerPayout !== undefined
+      ? Number(sellerOrder.sellerPayout)
+      : Math.max(0, subtotal - commission - sellerDisc + platformDisc);
+
+    // Authoritative Settlement / Wallet Release Status
+    const isCompletedSettlement =
+      Array.isArray(sellerOrder.settlementItems) &&
+      sellerOrder.settlementItems.some(
+        (si: any) => si.settlement?.status === 'COMPLETED' || si.settlement?.processedAt || si.settlement?.settlementDate
+      );
+    const isExplicitlySettled = Boolean(sellerOrder.isSettled || isCompletedSettlement);
+
+    let walletReleaseStatus = 'معلق لحين اكتمال التسليم للعميل';
+    let walletReleaseDate = '';
+
+    if (isExplicitlySettled) {
+      walletReleaseStatus = 'تم التحويل للمحفظة ✓';
+      const settlementRecord = sellerOrder.settlementItems?.[0]?.settlement;
+      const settlementTimestamp = settlementRecord?.processedAt || settlementRecord?.settlementDate;
+      const paidDate = settlementTimestamp
+        ? new Date(settlementTimestamp)
+        : (sellerOrder.deliveredAt ? new Date(sellerOrder.deliveredAt) : orderDate);
+      walletReleaseDate = paidDate.toLocaleDateString('ar-YE', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+    } else if (rawOrderStatus === 'DELIVERED') {
+      walletReleaseStatus = 'مكتمل التسليم — بانتظار دورة التسوية للمحفظة';
+      const deliveredTime = sellerOrder.deliveredAt ? new Date(sellerOrder.deliveredAt).getTime() : orderDate.getTime();
+      const releaseDays = 3;
+      const estimatedRelease = new Date(deliveredTime + releaseDays * 24 * 60 * 60 * 1000);
+      walletReleaseDate = estimatedRelease.toLocaleDateString('ar-YE', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+    } else if (rawOrderStatus.includes('CANCEL') || rawOrderStatus.includes('REJECT')) {
+      walletReleaseStatus = 'ملغي — لا توجد مستحقات محفظة';
+      walletReleaseDate = 'غير مستحق';
+    } else if (rawOrderStatus.includes('RETURN') || rawOrderStatus.includes('REFUND')) {
+      walletReleaseStatus = 'مسترد / تسوية مرتجع';
+      walletReleaseDate = 'تسوية مرتجع';
+    } else {
+      walletReleaseStatus = 'معلق لحين اكتمال التسليم للعميل';
+      const releaseDays = 3;
+      const estimatedRelease = new Date(orderDate.getTime() + releaseDays * 24 * 60 * 60 * 1000);
+      walletReleaseDate = estimatedRelease.toLocaleDateString('ar-YE', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+    }
 
     // Generate secure QR Payload
     const qrPayload = `SOUQNAA-VERIFY|ORD:${sellerOrderNumber}|STORE:${store.name || 'Store'}|TOT:${grandTotal}YER|DATE:${orderDate.toISOString().slice(0, 10)}`;
@@ -372,6 +466,9 @@ export class SellerOrderPrintService {
       paymentStatusEn: paymentStatus.en,
       orderStatusAr: orderStatus.ar,
       orderStatusEn: orderStatus.en,
+      orderStatusIcon: orderStatus.icon,
+      orderStatusColor: orderStatus.color,
+      orderStatusBg: orderStatus.bg,
       souqnaLogoDataUri,
       store: {
         name: store.name || `${sellerUser.firstName || ''} ${sellerUser.lastName || ''}`.trim() || 'متجر سوقناا المعتمد',
@@ -399,7 +496,7 @@ export class SellerOrderPrintService {
       totals: {
         subtotal,
         productDiscounts: productDisc,
-        couponDiscount: couponDisc,
+        couponDiscount: voucherDisc,
         sellerDiscount: sellerDisc,
         deliveryFee,
         otherFees: 0,
@@ -410,6 +507,7 @@ export class SellerOrderPrintService {
         customerOrderTotal: grandTotal,
         sellerGrossAmount: subtotal,
         platformCommission: commission,
+        commissionRate: Math.round(commissionRate * (commissionRate <= 1 ? 100 : 1)),
         discountContribution: sellerDisc,
         platformFundedDiscount: platformDisc,
         refundDeduction: 0,
@@ -432,8 +530,8 @@ export class SellerOrderPrintService {
    * Generates production-ready, beautifully styled HTML for the chosen document & format.
    */
   public static renderHtmlDocument(data: PrintDocumentData, autoPrint = false): string {
-    if (data.totals) {
-      data.totals.currency = 'ر.ي';
+    if (data.totals && !data.totals.currency) {
+      data.totals.currency = config.marketplace.currencySymbol || 'ر.ي';
     }
     switch (data.documentType) {
       case 'PACKING_SLIP':
@@ -1064,6 +1162,7 @@ export class SellerOrderPrintService {
         <div class="hero-main-order">الطلب الرئيسي: ${d.mainOrderNumber}</div>
       </div>
       <div class="hero-badges-group">
+        <div class="status-pill" style="background: ${d.orderStatusBg}; color: ${d.orderStatusColor}; font-weight: 800;">${d.orderStatusIcon} ${d.orderStatusAr}</div>
         <div class="status-pill ${d.paymentStatusAr.includes('مدفوع') ? 'paid' : 'pending'}">${d.paymentStatusAr}</div>
         <div class="status-pill method">${d.paymentMethodAr}</div>
       </div>
@@ -1074,7 +1173,7 @@ export class SellerOrderPrintService {
       <div class="meta-card">
         <h3>📅 بيانات الطلب والتسليم</h3>
         <div class="meta-row"><span class="lbl">تاريخ ووقت الشراء:</span><span class="val">${d.orderDateFormattedAr}</span></div>
-        <div class="meta-row"><span class="lbl">حالة معالجة الطلب:</span><span class="val" style="color:#0d9488;">${d.orderStatusAr}</span></div>
+        <div class="meta-row"><span class="lbl">حالة معالجة الطلب:</span><span class="val" style="color:${d.orderStatusColor}; font-weight:800;">${d.orderStatusIcon} ${d.orderStatusAr}</span></div>
         <div class="meta-row"><span class="lbl">طريقة الدفع المختارة:</span><span class="val">${d.paymentMethodAr}</span></div>
       </div>
 
@@ -1114,9 +1213,9 @@ export class SellerOrderPrintService {
               </td>
               <td><span class="item-sku-code">${it.sku}</span></td>
               <td class="center"><strong>${it.quantity}</strong></td>
-              <td>${it.unitPrice.toLocaleString()} ${d.totals.currency}</td>
-              <td style="color: #059669; font-weight: 700;">${it.discount > 0 ? `-${it.discount.toLocaleString()} ${d.totals.currency}` : '0'}</td>
-              <td class="left">${it.totalPrice.toLocaleString()} ${d.totals.currency}</td>
+              <td>${SellerOrderPrintService.formatNumber(it.unitPrice)} ${d.totals.currency}</td>
+              <td style="color: #059669; font-weight: 700;">${it.discount > 0 ? `-${SellerOrderPrintService.formatNumber(it.discount)} ${d.totals.currency}` : '0.00'}</td>
+              <td class="left">${SellerOrderPrintService.formatNumber(it.totalPrice)} ${d.totals.currency}</td>
             </tr>
           `
         )
@@ -1139,30 +1238,30 @@ export class SellerOrderPrintService {
       <div class="totals-card">
         <div class="total-row">
           <span>المجموع الفرعي:</span>
-          <strong>${d.totals.subtotal.toLocaleString()} ${d.totals.currency}</strong>
+          <strong>${SellerOrderPrintService.formatNumber(d.totals.subtotal)} ${d.totals.currency}</strong>
         </div>
         ${d.totals.couponDiscount > 0
         ? `<div class="total-row discount">
             <span>خصم القسيمة:</span>
-            <strong>-${d.totals.couponDiscount.toLocaleString()} ${d.totals.currency}</strong>
+            <strong>-${SellerOrderPrintService.formatNumber(d.totals.couponDiscount)} ${d.totals.currency}</strong>
           </div>`
         : ''
       }
         ${d.totals.sellerDiscount > 0
         ? `<div class="total-row discount">
             <span>خصم المتجر:</span>
-            <strong>-${d.totals.sellerDiscount.toLocaleString()} ${d.totals.currency}</strong>
+            <strong>-${SellerOrderPrintService.formatNumber(d.totals.sellerDiscount)} ${d.totals.currency}</strong>
           </div>`
         : ''
       }
         <div class="total-row">
           <span>رسوم التوصيل:</span>
-          <strong>${d.totals.deliveryFee > 0 ? `${d.totals.deliveryFee.toLocaleString()} ${d.totals.currency}` : 'مجاني'}</strong>
+          <strong>${d.totals.deliveryFee > 0 ? `${SellerOrderPrintService.formatNumber(d.totals.deliveryFee)} ${d.totals.currency}` : 'مجاني'}</strong>
         </div>
 
         <div class="grand-total-box">
           <span class="grand-label">الإجمالي النهائي:</span>
-          <span class="grand-value">${d.totals.grandTotal.toLocaleString()} ${d.totals.currency}</span>
+          <span class="grand-value">${SellerOrderPrintService.formatNumber(d.totals.grandTotal)} ${d.totals.currency}</span>
         </div>
       </div>
     </div>
@@ -1307,7 +1406,8 @@ export class SellerOrderPrintService {
 
   <div class="row tight"><span>رقم طلب البائع:</span><span class="bold" dir="ltr">${d.sellerOrderNumber}</span></div>
   <div class="row tight"><span>الطلب الرئيسي:</span><span class="bold" dir="ltr">${d.mainOrderNumber}</span></div>
-  <div class="row tight"><span>التاريخ:</span><span>${d.orderDateFormattedEn}</span></div>
+  <div class="row tight"><span>التاريخ:</span><span>${d.orderDateFormattedAr || d.orderDateFormattedEn}</span></div>
+  <div class="row tight"><span>حالة الطلب:</span><span class="bold" style="color: ${d.orderStatusColor};">${d.orderStatusIcon} ${d.orderStatusAr}</span></div>
   <div class="divider"></div>
 
   <table>
@@ -1325,7 +1425,7 @@ export class SellerOrderPrintService {
         <tr>
           <td>${it.productName}</td>
           <td class="center">${it.quantity}</td>
-          <td class="left">${it.totalPrice.toLocaleString()}</td>
+          <td class="left">${SellerOrderPrintService.formatNumber(it.totalPrice)}</td>
         </tr>
       `
         )
@@ -1334,11 +1434,11 @@ export class SellerOrderPrintService {
   </table>
 
   <div class="divider"></div>
-  <div class="row tight"><span>المجموع الفرعي:</span><span>${d.totals.subtotal.toLocaleString()} ${d.totals.currency}</span></div>
-  ${d.totals.couponDiscount + d.totals.sellerDiscount > 0 ? `<div class="row tight"><span>الخصم:</span><span>-${(d.totals.couponDiscount + d.totals.sellerDiscount).toLocaleString()} ${d.totals.currency}</span></div>` : ''}
-  <div class="row tight"><span>التوصيل:</span><span>${d.totals.deliveryFee.toLocaleString()} ${d.totals.currency}</span></div>
+  <div class="row tight"><span>المجموع الفرعي:</span><span>${SellerOrderPrintService.formatNumber(d.totals.subtotal)} ${d.totals.currency}</span></div>
+  ${d.totals.couponDiscount + d.totals.sellerDiscount > 0 ? `<div class="row tight"><span>الخصم:</span><span>-${SellerOrderPrintService.formatNumber(d.totals.couponDiscount + d.totals.sellerDiscount)} ${d.totals.currency}</span></div>` : ''}
+  <div class="row tight"><span>التوصيل:</span><span>${d.totals.deliveryFee > 0 ? `${SellerOrderPrintService.formatNumber(d.totals.deliveryFee)} ${d.totals.currency}` : 'مجاني'}</span></div>
   <div class="divider"></div>
-  <div class="row grand-total"><span>الإجمالي:</span><span>${d.totals.grandTotal.toLocaleString()} ${d.totals.currency}</span></div>
+  <div class="row grand-total"><span>الإجمالي:</span><span>${SellerOrderPrintService.formatNumber(d.totals.grandTotal)} ${d.totals.currency}</span></div>
   <div class="divider"></div>
 
   <div class="row tight"><span>طريقة الدفع:</span><span class="bold">${d.paymentMethodAr}</span></div>
@@ -1460,7 +1560,8 @@ export class SellerOrderPrintService {
 
   <div class="row"><span>طلب المتجر:</span><span class="bold" dir="ltr">${d.sellerOrderNumber}</span></div>
   <div class="row"><span>الرئيسي:</span><span dir="ltr">${d.mainOrderNumber}</span></div>
-  <div class="row"><span>التاريخ:</span><span>${d.orderDateISO.slice(0, 10)}</span></div>
+  <div class="row"><span>التاريخ:</span><span>${d.orderDateFormattedAr || d.orderDateISO.slice(0, 10)}</span></div>
+  <div class="row"><span>حالة الطلب:</span><span class="bold">${d.orderStatusIcon} ${d.orderStatusAr}</span></div>
   <div class="divider"></div>
 
   ${d.items
@@ -1469,8 +1570,8 @@ export class SellerOrderPrintService {
     <div class="item-block">
       <div class="item-name">• ${it.productName}</div>
       <div class="item-calc">
-        <span>${it.quantity}x ${it.unitPrice.toLocaleString()}</span>
-        <span class="bold">${it.totalPrice.toLocaleString()} ${d.totals.currency}</span>
+        <span>${it.quantity}x ${SellerOrderPrintService.formatNumber(it.unitPrice)}</span>
+        <span class="bold">${SellerOrderPrintService.formatNumber(it.totalPrice)} ${d.totals.currency}</span>
       </div>
     </div>
   `
@@ -1478,11 +1579,11 @@ export class SellerOrderPrintService {
         .join('')}
 
   <div class="divider"></div>
-  <div class="row"><span>المجموع:</span><span>${d.totals.subtotal.toLocaleString()}</span></div>
-  ${d.totals.couponDiscount + d.totals.sellerDiscount > 0 ? `<div class="row"><span>الخصم:</span><span>-${(d.totals.couponDiscount + d.totals.sellerDiscount).toLocaleString()}</span></div>` : ''}
-  <div class="row"><span>التوصيل:</span><span>${d.totals.deliveryFee.toLocaleString()}</span></div>
+  <div class="row"><span>المجموع:</span><span>${SellerOrderPrintService.formatNumber(d.totals.subtotal)}</span></div>
+  ${d.totals.couponDiscount + d.totals.sellerDiscount > 0 ? `<div class="row"><span>الخصم:</span><span>-${SellerOrderPrintService.formatNumber(d.totals.couponDiscount + d.totals.sellerDiscount)}</span></div>` : ''}
+  <div class="row"><span>التوصيل:</span><span>${d.totals.deliveryFee > 0 ? SellerOrderPrintService.formatNumber(d.totals.deliveryFee) : '0.00'}</span></div>
   <div class="divider"></div>
-  <div class="row grand"><span>الإجمالي:</span><span>${d.totals.grandTotal.toLocaleString()} ${d.totals.currency}</span></div>
+  <div class="row grand"><span>الإجمالي:</span><span>${SellerOrderPrintService.formatNumber(d.totals.grandTotal)} ${d.totals.currency}</span></div>
   <div class="divider"></div>
 
   <div class="row"><span>الدفع:</span><span>${d.paymentMethodAr}</span></div>
@@ -1989,43 +2090,44 @@ export class SellerOrderPrintService {
   <div>طلب المتجر: <span class="bold" dir="ltr">${d.sellerOrderNumber}</span></div>
   <div>الطلب الرئيسي: <span dir="ltr">${d.mainOrderNumber}</span></div>
   <div>التاريخ: <span>${d.orderDateFormattedAr}</span></div>
-  <div>طريقة دفع العميل: <span>${d.paymentMethodAr}</span></div>
+  <div>حالة الطلب: <span class="bold" style="color: ${d.orderStatusColor};">${d.orderStatusIcon} ${d.orderStatusAr}</span></div>
+  <div>طريقة دفع العميل: <span>${d.paymentMethodAr} (${d.paymentStatusAr})</span></div>
   <div class="divider"></div>
 
   <div class="bold" style="margin-bottom: 4px;">تسوية مبيعات الطلب للمتجر:</div>
   <div class="row">
     <span>إجمالي مبيعات المتجر:</span>
-    <span class="bold">${fin.sellerGrossAmount.toLocaleString()} ${d.totals.currency}</span>
+    <span class="bold">${SellerOrderPrintService.formatNumber(fin.sellerGrossAmount)} ${d.totals.currency}</span>
   </div>
   <div class="row">
-    <span>عمولة المنصة:</span>
-    <span style="color: #dc2626;">-${fin.platformCommission.toLocaleString()} ${d.totals.currency}</span>
+    <span>عمولة المنصة (${fin.commissionRate ?? 10}%):</span>
+    <span style="color: #dc2626;">-${SellerOrderPrintService.formatNumber(fin.platformCommission)} ${d.totals.currency}</span>
   </div>
   ${fin.discountContribution > 0 ? `
   <div class="row">
     <span>مساهمة المتجر بالخصم:</span>
-    <span style="color: #dc2626;">-${fin.discountContribution.toLocaleString()} ${d.totals.currency}</span>
+    <span style="color: #dc2626;">-${SellerOrderPrintService.formatNumber(fin.discountContribution)} ${d.totals.currency}</span>
   </div>` : ''}
   ${fin.platformFundedDiscount > 0 ? `
   <div class="row">
     <span>تعويض عروض المنصة:</span>
-    <span style="color: #16a34a;">+${fin.platformFundedDiscount.toLocaleString()} ${d.totals.currency}</span>
+    <span style="color: #16a34a;">+${SellerOrderPrintService.formatNumber(fin.platformFundedDiscount)} ${d.totals.currency}</span>
   </div>` : ''}
   ${fin.refundDeduction > 0 ? `
   <div class="row">
     <span>استقطاعات المرتجع:</span>
-    <span style="color: #dc2626;">-${fin.refundDeduction.toLocaleString()} ${d.totals.currency}</span>
+    <span style="color: #dc2626;">-${SellerOrderPrintService.formatNumber(fin.refundDeduction)} ${d.totals.currency}</span>
   </div>` : ''}
 
   <div class="divider"></div>
   <div class="row highlight-net">
     <span>صافي مستحقات البائع:</span>
-    <span dir="ltr">${fin.netSellerAmount.toLocaleString()} ${d.totals.currency}</span>
+    <span dir="ltr">${SellerOrderPrintService.formatNumber(fin.netSellerAmount)} ${d.totals.currency}</span>
   </div>
 
   <div class="row">
-    <span>حالة تحويل المحفظة:</span>
-    <span class="bold">${fin.walletReleaseStatus}</span>
+    <span>حالة استحقاق المحفظة:</span>
+    <span class="bold" style="color: ${fin.walletReleaseStatus.includes('✓') || fin.walletReleaseStatus.includes('مكتمل') ? '#16a34a' : '#d97706'};">${fin.walletReleaseStatus}</span>
   </div>
   ${fin.walletReleaseDate ? `
   <div class="row">
@@ -2090,31 +2192,32 @@ export class SellerOrderPrintService {
   <div>المتجر: <span class="bold">${d.store.name}</span></div>
   <div>الطلب: <span class="bold" dir="ltr">${d.sellerOrderNumber}</span></div>
   <div>التاريخ: <span>${d.orderDateFormattedAr}</span></div>
+  <div>الحالة: <span class="bold">${d.orderStatusIcon} ${d.orderStatusAr}</span></div>
   <div class="divider"></div>
 
   <div class="row">
     <span>المبيعات:</span>
-    <span class="bold">${fin.sellerGrossAmount.toLocaleString()} ${d.totals.currency}</span>
+    <span class="bold">${SellerOrderPrintService.formatNumber(fin.sellerGrossAmount)} ${d.totals.currency}</span>
   </div>
   <div class="row">
     <span>عمولة المنصة:</span>
-    <span style="color: #dc2626;">-${fin.platformCommission.toLocaleString()}</span>
+    <span style="color: #dc2626;">-${SellerOrderPrintService.formatNumber(fin.platformCommission)}</span>
   </div>
   ${fin.discountContribution > 0 ? `
   <div class="row">
     <span>خصم المتجر:</span>
-    <span>-${fin.discountContribution.toLocaleString()}</span>
+    <span>-${SellerOrderPrintService.formatNumber(fin.discountContribution)}</span>
   </div>` : ''}
   ${fin.refundDeduction > 0 ? `
   <div class="row">
     <span>المرتجع:</span>
-    <span>-${fin.refundDeduction.toLocaleString()}</span>
+    <span>-${SellerOrderPrintService.formatNumber(fin.refundDeduction)}</span>
   </div>` : ''}
 
   <div class="divider"></div>
   <div class="row highlight-net">
     <span>الصافي للبائع:</span>
-    <span dir="ltr">${fin.netSellerAmount.toLocaleString()} ${d.totals.currency}</span>
+    <span dir="ltr">${SellerOrderPrintService.formatNumber(fin.netSellerAmount)} ${d.totals.currency}</span>
   </div>
 
   <div class="row">
@@ -2305,15 +2408,17 @@ export class SellerOrderPrintService {
           <div style="font-size: 11px; font-weight: bold; color: #64748b;">رقم طلب المتجر:</div>
           <div style="font-size: 16px; font-weight: 900; color: #FF6B00; font-family: 'Inter', monospace;">${d.sellerOrderNumber}</div>
           <div style="font-size: 12px; font-weight: 700; color: #64748b; font-family: 'Inter', monospace;">الرئيسي: ${d.mainOrderNumber}</div>
+          <div style="margin-top: 6px; display: inline-block; background: ${d.orderStatusBg}; color: ${d.orderStatusColor}; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 800;">${d.orderStatusIcon} ${d.orderStatusAr}</div>
         </div>
       </div>
     </div>
 
     <div class="info-grid">
       <div>تاريخ الطلب: <strong>${d.orderDateFormattedAr}</strong></div>
-      <div>حالة استحقاق المحفظة: <strong style="color: #059669;">${fin.walletReleaseStatus}</strong></div>
-      <div>طريقة دفع العميل: <strong>${d.paymentMethodAr}</strong></div>
-      <div>موعد تحرير الرصيد المتوقع: <strong>${fin.walletReleaseDate}</strong></div>
+      <div>حالة الطلب: <strong style="color: ${d.orderStatusColor};">${d.orderStatusIcon} ${d.orderStatusAr}</strong></div>
+      <div>طريقة دفع العميل: <strong>${d.paymentMethodAr}</strong> (${d.paymentStatusAr})</div>
+      <div>حالة استحقاق المحفظة: <strong style="color: ${fin.walletReleaseStatus.includes('✓') || fin.walletReleaseStatus.includes('مكتمل') ? '#059669' : '#d97706'};">${fin.walletReleaseStatus}</strong></div>
+      ${fin.walletReleaseDate ? `<div>موعد تحرير الرصيد المتوقع: <strong>${fin.walletReleaseDate}</strong></div>` : ''}
     </div>
 
     <div class="table-container">
@@ -2328,18 +2433,18 @@ export class SellerOrderPrintService {
         <tbody>
           <tr>
             <td>إجمالي قيمة مبيعات المتجر (Seller Gross Amount)</td>
-            <td style="text-align: left; font-weight: bold;">${fin.sellerGrossAmount.toLocaleString()}</td>
+            <td style="text-align: left; font-weight: bold;">${SellerOrderPrintService.formatNumber(fin.sellerGrossAmount)}</td>
             <td>قيمة منتجات المتجر المباعة للعميل</td>
           </tr>
           <tr>
             <td>عمولة منصة سوقناا (Platform Commission)</td>
-            <td style="text-align: left; color: #dc2626; font-weight: bold;">-${fin.platformCommission.toLocaleString()}</td>
-            <td>النسبة المتفق عليها لخدمات المنصة والبوابة</td>
+            <td style="text-align: left; color: #dc2626; font-weight: bold;">-${SellerOrderPrintService.formatNumber(fin.platformCommission)}</td>
+            <td>النسبة المتفق عليها لخدمات المنصة والبوابة (${fin.commissionRate ?? 10}%)</td>
           </tr>
           ${fin.discountContribution > 0
         ? `<tr>
               <td>مساهمة المتجر في الخصم (Seller Discount)</td>
-              <td style="text-align: left; color: #dc2626; font-weight: bold;">-${fin.discountContribution.toLocaleString()}</td>
+              <td style="text-align: left; color: #dc2626; font-weight: bold;">-${SellerOrderPrintService.formatNumber(fin.discountContribution)}</td>
               <td>الخصم الترويجي الممول من المتجر</td>
             </tr>`
         : ''
@@ -2347,7 +2452,7 @@ export class SellerOrderPrintService {
           ${fin.platformFundedDiscount > 0
         ? `<tr>
               <td>خصم ممول من المنصة (Platform Subsidized)</td>
-              <td style="text-align: left; color: #059669; font-weight: bold;">+${fin.platformFundedDiscount.toLocaleString()}</td>
+              <td style="text-align: left; color: #059669; font-weight: bold;">+${SellerOrderPrintService.formatNumber(fin.platformFundedDiscount)}</td>
               <td>تعويض المنصة للمتجر عن عروض سوقناا</td>
             </tr>`
         : ''
@@ -2355,14 +2460,14 @@ export class SellerOrderPrintService {
           ${fin.refundDeduction > 0
         ? `<tr>
               <td>استقطاعات المرتجعات (Refund Deduction)</td>
-              <td style="text-align: left; color: #dc2626; font-weight: bold;">-${fin.refundDeduction.toLocaleString()}</td>
+              <td style="text-align: left; color: #dc2626; font-weight: bold;">-${SellerOrderPrintService.formatNumber(fin.refundDeduction)}</td>
               <td>تسوية المنتجات المسترجعة أو التالفة</td>
             </tr>`
         : ''
       }
           <tr class="net-row">
             <td>صافي مستحقات المتجر للأرباح (Net Seller Payout)</td>
-            <td style="text-align: left;">${fin.netSellerAmount.toLocaleString()}</td>
+            <td style="text-align: left;">${SellerOrderPrintService.formatNumber(fin.netSellerAmount)}</td>
             <td>المبلغ الصافي المستحق التحويل لمحفظة المتجر</td>
           </tr>
         </tbody>

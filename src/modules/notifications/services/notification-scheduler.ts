@@ -32,6 +32,12 @@ export class NotificationScheduler {
       notificationDigestService.processRoutineDigests().catch((err) => {
         console.error('[NotificationScheduler] Digest processing error:', err);
       });
+      // Routine dispute SLA deadline monitor (36h warning & 48h auto-escalate) (§Phase 5)
+      import('../../disputes/dispute.service').then(({ DisputeService }) => {
+        DisputeService.checkDisputeDeadlines().catch((err) => {
+          console.error('[NotificationScheduler] Dispute deadline check error:', err);
+        });
+      }).catch(() => {});
     }, intervalMs);
     console.log('[NotificationScheduler] Started scheduled notification worker cycle.');
   }

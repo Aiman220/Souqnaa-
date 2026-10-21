@@ -10,6 +10,7 @@
  */
 
 import QRCode from 'qrcode';
+import { config } from '../../config';
 import { StatementSnapshotDto, StatementType } from './statement.types';
 import { StatementPeriodService } from './statement-period.service';
 import { SellerOrderPrintService } from '../../services/orders/seller-order-print.service';
@@ -54,7 +55,7 @@ export class StatementPdfService {
     snapshot: StatementSnapshotDto,
     options?: StatementRenderOptions
   ): Promise<string> {
-    snapshot = { ...snapshot, currency: 'ر.ي' };
+    snapshot = { ...snapshot, currency: snapshot.currency || config.marketplace.currencySymbol || 'ر.ي' };
     const autoPrint = options?.autoPrint ?? false;
     const exportUrl = options?.exportUrl ?? '';
     const qrPayload = snapshot.metadata?.qrPayload || `SOUQNAA-STMT|${snapshot.statementNumber}|${snapshot.statementType}`;
