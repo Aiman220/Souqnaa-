@@ -38,6 +38,7 @@ import { notificationEventBus } from '../notifications/services/event-bus';
 import { setMaintenanceConfig } from '../../middleware/maintenance.middleware';
 import { SellerFinancialRiskService } from '../commission/seller-financial-risk.service';
 import { AdminRbacService, SYSTEM_PERMISSIONS } from './admin-rbac.service';
+import { recommendationService } from '../recommendations/services/recommendation.service';
 
 const router = Router();
 router.use(authenticate, requireAdmin);
@@ -1088,6 +1089,7 @@ router.post('/products/:id/approve', async (req: Request, res: Response, next: N
       data: { isActive: true },
     });
     await logAdminAction(req.user?.userId, 'PRODUCT_APPROVED', 'products', { id }, req);
+    recommendationService.invalidateProductCache(id).catch(() => {});
     ResponseUtil.success(res, product, 'تم اعتماد وتفعيل نشر المنتج في السوق');
   } catch (error) {
     next(error);
@@ -1103,6 +1105,7 @@ router.post('/products/:id/suspend', async (req: Request, res: Response, next: N
       data: { isActive: false },
     });
     await logAdminAction(req.user?.userId, 'PRODUCT_SUSPENDED', 'products', { id, reason, reportType }, req);
+    recommendationService.invalidateProductCache(id).catch(() => {});
     ResponseUtil.success(res, product, 'تم إيقاف وحجب المنتج عن العرض لانتهاك السياسات أو البلاغات');
   } catch (error) {
     next(error);
@@ -1127,6 +1130,7 @@ router.put('/products/:id', async (req: Request, res: Response, next: NextFuncti
     });
 
     await logAdminAction(req.user?.userId, 'PRODUCT_UPDATED', 'products', { id, updated }, req);
+    recommendationService.invalidateProductCache(id).catch(() => {});
     ResponseUtil.success(res, updated, 'تم تحديث بيانات المنتج بنجاح');
   } catch (error) {
     next(error);
@@ -1145,10 +1149,12 @@ router.delete('/products/:id', async (req: Request, res: Response, next: NextFun
     if (existing._count.orderItems > 0) {
       await prisma.product.update({ where: { id }, data: { isActive: false } });
       await logAdminAction(req.user?.userId, 'PRODUCT_SOFT_DELETED', 'products', { id, reason: 'Has order items' }, req);
+      recommendationService.invalidateProductCache(id).catch(() => {});
       ResponseUtil.success(res, null, 'نظراً لوجود مبيعات سابقة للمنتج، تم حجب المنتج وأرشفته');
     } else {
       await prisma.product.delete({ where: { id } });
       await logAdminAction(req.user?.userId, 'PRODUCT_DELETED', 'products', { id }, req);
+      recommendationService.invalidateProductCache(id).catch(() => {});
       ResponseUtil.success(res, null, 'تم حذف المنتج نهائياً من قاعدة البيانات');
     }
   } catch (error) {

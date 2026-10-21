@@ -35,6 +35,18 @@ export class AdminRecommendationController {
       ]);
 
       const activeModel = activeModels.find((m) => m.isProduction) || activeModels[0] || null;
+      const latestMetric = recentMetrics[0];
+
+      // Calculate real event-derived baseline rates when no aggregated daily metric exists yet
+      const clicksCount = topEvents.find((t) => t.eventType === 'PRODUCT_CLICK')?._count.id || 0;
+      const viewsCount = topEvents.find((t) => t.eventType === 'PRODUCT_VIEW')?._count.id || 0;
+      const purchasesCount = topEvents.find((t) => t.eventType === 'PURCHASE' || t.eventType === 'ORDER_COMPLETED')?._count.id || 0;
+
+      const ctr = latestMetric?.ctr ?? (viewsCount > 0 ? Number(((clicksCount / viewsCount) * 100).toFixed(2)) : 0.0);
+      const conversionRate = latestMetric?.conversionRate ?? (clicksCount > 0 ? Number(((purchasesCount / clicksCount) * 100).toFixed(2)) : 0.0);
+      const coverage = latestMetric?.coverage ?? 100.0;
+      const coldStartPercentage = latestMetric?.coldStartPercentage ?? (totalProfiles > 0 ? 0.0 : 100.0);
+      const fallbackPercentage = latestMetric?.fallbackPercentage ?? 0.0;
 
       res.json({
         success: true,
@@ -46,11 +58,11 @@ export class AdminRecommendationController {
           algorithm: activeModel?.algorithm || 'LIGHTFM_WARP_HYBRID',
           topEventTypes: topEvents.map((t) => ({ eventType: t.eventType, count: t._count.id })),
           recentMetrics,
-          coldStartPercentage: 12.5,
-          fallbackPercentage: 4.2,
-          ctr: 8.7,
-          conversionRate: 3.4,
-          coverage: 96.8,
+          coldStartPercentage,
+          fallbackPercentage,
+          ctr,
+          conversionRate,
+          coverage,
         },
       });
     } catch (err: any) {

@@ -23,8 +23,10 @@ export const authenticate = async (
       token = authHeader.split(' ')[1];
     } else if (req.query.token && typeof req.query.token === 'string') {
       token = req.query.token;
+      console.warn('[Security] JWT supplied via URL query param ?token= — this is insecure (logged in proxy/server logs). Migrate clients to Authorization header.');
     } else if (req.query.auth_token && typeof req.query.auth_token === 'string') {
       token = req.query.auth_token;
+      console.warn('[Security] JWT supplied via URL query param ?auth_token= — this is insecure (logged in proxy/server logs). Migrate clients to Authorization header.');
     }
 
     if (!token) {
@@ -70,8 +72,10 @@ export const optionalAuth = async (
       token = authHeader.split(' ')[1];
     } else if (req.query.token && typeof req.query.token === 'string') {
       token = req.query.token;
+      console.warn('[Security] JWT supplied via URL query param ?token= — insecure. Migrate to Authorization header.');
     } else if (req.query.auth_token && typeof req.query.auth_token === 'string') {
       token = req.query.auth_token;
+      console.warn('[Security] JWT supplied via URL query param ?auth_token= — insecure. Migrate to Authorization header.');
     }
 
     if (token) {

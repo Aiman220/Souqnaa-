@@ -23,8 +23,8 @@ export const globalLimiter = rateLimit({
 });
 
 export const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: config.env === 'development' ? 10000 : 100, // Generous limit for auth
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  max: config.env === 'development' ? 10000 : 10, // 10 attempts per 10 min (brute-force hardening)
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => {
@@ -35,7 +35,49 @@ export const authLimiter = rateLimit({
   handler: (req, res) => {
     ResponseUtil.error(
       res,
-      'Too many authentication attempts. Please try again after a moment.',
+      'Too many authentication attempts. Please try again after 10 minutes.',
+      429
+    );
+  },
+});
+
+/** File upload: 10 uploads per 10 minutes per authenticated user. */
+export const uploadFileLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  max: config.env === 'development' ? 10000 : 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req as any).user?.userId || req.ip || 'anonymous',
+  skip: (req) => {
+    if (config.env === 'development') return true;
+    const ip = req.ip || req.socket.remoteAddress || '';
+    return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+  },
+  handler: (req, res) => {
+    ResponseUtil.error(
+      res,
+      'Upload limit reached. Maximum 10 file uploads per 10 minutes.',
+      429
+    );
+  },
+});
+
+/** Upload-by-URL (remote fetch): 5 per 10 minutes per user — tighter due to SSRF risk surface. */
+export const uploadByUrlLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  max: config.env === 'development' ? 10000 : 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req as any).user?.userId || req.ip || 'anonymous',
+  skip: (req) => {
+    if (config.env === 'development') return true;
+    const ip = req.ip || req.socket.remoteAddress || '';
+    return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+  },
+  handler: (req, res) => {
+    ResponseUtil.error(
+      res,
+      'Remote URL import limit reached. Maximum 5 URL imports per 10 minutes.',
       429
     );
   },

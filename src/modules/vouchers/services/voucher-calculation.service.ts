@@ -8,6 +8,7 @@ import {
 } from '../voucher.types';
 import { VoucherValidationService } from './voucher-validation.service';
 import { VoucherStackingService, StackingGroup } from './voucher-stacking.service';
+import { config } from '../../../config';
 
 export class VoucherCalculationService {
   /**
@@ -20,7 +21,7 @@ export class VoucherCalculationService {
     vouchers: any[];
     currency?: string;
   }): Promise<VoucherCalculationResult> {
-    const { customerId, items, shippingFee = 0, vouchers, currency = 'SAR' } = params;
+    const { customerId, items, shippingFee = 0, vouchers, currency = config.marketplace.currency || 'YER' } = params;
 
     // 1. Group items by seller
     const sellerMap = new Map<string, CartEvaluationItem[]>();

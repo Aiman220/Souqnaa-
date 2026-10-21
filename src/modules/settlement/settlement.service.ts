@@ -126,7 +126,7 @@ export class SettlementEngine {
 
     for (const so of eligibleOrders) {
       const orderGross = so.subtotal;
-      const orderDiscount = TaxMath.add(so.voucherDiscountAmount, so.sellerFundedDiscount);
+      const orderDiscount = Number(so.sellerFundedDiscount || 0);
       const orderTax = so.taxAmount;
       const orderCommission = so.commissionAmount;
       const orderRefund = (so.refundRequests || []).reduce(

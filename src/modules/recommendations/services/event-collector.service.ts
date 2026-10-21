@@ -137,14 +137,22 @@ export class EventCollectorService {
    */
   async invalidateUserPersonalizationCache(userId?: string | null, sessionId?: string | null): Promise<void> {
     if (userId) {
-      await redisService.del(`rec:home:${userId}`);
-      await redisService.del(`rec:for_you:${userId}`);
-      await redisService.del(`recommendations:user:${userId}`);
+      await Promise.all([
+        redisService.del(`recommendations:home:user:${userId}`),
+        redisService.del(`recommendations:home:${userId}`),
+        redisService.del(`recommendations:user:${userId}`),
+        redisService.del(`rec:home:${userId}`),
+        redisService.del(`rec:for_you:${userId}`),
+      ]);
     }
     if (sessionId) {
-      await redisService.del(`rec:home:${sessionId}`);
-      await redisService.del(`rec:for_you:${sessionId}`);
-      await redisService.del(`recommendations:user:${sessionId}`);
+      await Promise.all([
+        redisService.del(`recommendations:home:session:${sessionId}`),
+        redisService.del(`recommendations:home:${sessionId}`),
+        redisService.del(`recommendations:user:${sessionId}`),
+        redisService.del(`rec:home:${sessionId}`),
+        redisService.del(`rec:for_you:${sessionId}`),
+      ]);
     }
   }
 }

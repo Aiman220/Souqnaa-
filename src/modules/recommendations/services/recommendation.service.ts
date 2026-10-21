@@ -21,10 +21,37 @@ export class RecommendationService {
    * Progressive section loading with global deduplication across sections.
    */
   async getHomeSections(context: RecommendationContext): Promise<RecommendationSectionDto[]> {
-    const cacheKey = `recommendations:home:${context.userId || context.sessionId || 'guest'}`;
-    const cached = await redisService.getJson<RecommendationSectionDto[]>(cacheKey);
-    if (cached && Array.isArray(cached) && cached.length > 0) {
-      return cached;
+    // Safe cache isolation:
+    // If authenticated user: isolate by user ID
+    // If unique guest session: isolate by session ID
+    // If generic anonymous guest: use public_guest cache without private browsing
+    const isGenericGuest =
+      !context.userId &&
+      (!context.sessionId ||
+        context.sessionId === 'guest' ||
+        context.sessionId === 'anonymous_session' ||
+        context.sessionId === 'customer_session');
+
+    let cacheKey: string;
+    if (context.userId) {
+      cacheKey = `recommendations:home:user:${context.userId}`;
+    } else if (!isGenericGuest) {
+      cacheKey = `recommendations:home:session:${context.sessionId}`;
+    } else {
+      cacheKey = 'recommendations:home:public_guest';
+    }
+
+    const hasPrivateSignals = Boolean(
+      (context.recentViewedIds && context.recentViewedIds.length > 0) ||
+      (context.cartProductIds && context.cartProductIds.length > 0)
+    );
+
+    // If generic guest with private signals, do not read from public cache to avoid leaking or seeing shared cache
+    if (!isGenericGuest || !hasPrivateSignals) {
+      const cached = await redisService.getJson<RecommendationSectionDto[]>(cacheKey);
+      if (cached && Array.isArray(cached) && cached.length > 0) {
+        return cached;
+      }
     }
 
     const sections: RecommendationSectionDto[] = [];
@@ -40,25 +67,41 @@ export class RecommendationService {
       globalSeenProductIds
     );
 
+    // Check if real personalization was performed
+    const hasPersonalizedCandidates = diversifiedForYou.some((c) => c.personalizationScore > 0.05);
+    const isPersonalized =
+      Boolean(context.userId || (context.recentViewedIds && context.recentViewedIds.length > 0)) &&
+      hasPersonalizedCandidates;
+
     if (diversifiedForYou.length > 0) {
       diversifiedForYou.forEach((c) => globalSeenProductIds.add(c.productId));
       sections.push({
         id: 'rec_sec_for_you',
         type: RecommendationType.FOR_YOU,
-        title: 'Recommended for You',
-        titleAr: 'موصى به لك',
-        subtitle: 'Hand-picked based on your taste and activity',
-        subtitleAr: 'مختارة خصيصاً بناءً على اهتماماتك وتصفحك',
+        title: isPersonalized ? 'Recommended for You' : 'Top Picks for You',
+        titleAr: isPersonalized ? 'موصى به لك' : 'مختارات مميزة لك',
+        subtitle: isPersonalized
+          ? 'Hand-picked based on your taste and activity'
+          : 'Popular and highly rated selections in SOUQNAA',
+        subtitleAr: isPersonalized
+          ? 'مختارة خصيصاً بناءً على اهتماماتك وتصفحك'
+          : 'تشكيلة متميزة من المنتجات الأكثر طلباً وإقبالاً',
         products: diversifiedForYou.map((c) => c.product),
         items: diversifiedForYou.map((c) => ({
           product: c.product,
           score: c.finalScore,
-          explanation: c.explanation,
-          algorithm: 'hybrid_ranker_v2',
+          explanation: isPersonalized
+            ? c.explanation
+            : {
+                reason: 'Popular in SOUQNAA',
+                reasonAr: 'من المنتجات الأكثر طلباً في سوقناا',
+                sourceType: 'POPULAR_SELECTION',
+              },
+          algorithm: isPersonalized ? 'hybrid_ranker_v2' : 'cold_start_curation',
         })),
         hasMore: true,
         nextCursor: 'cursor_for_you_p2',
-        algorithm: 'hybrid_ranker_v2',
+        algorithm: isPersonalized ? 'hybrid_ranker_v2' : 'cold_start_curation',
       });
     }
 
@@ -256,6 +299,32 @@ export class RecommendationService {
       });
     }
 
+    // ── 8. BASED ON CART SECTION ──────────────────────────────────────────
+    if (context.cartProductIds && context.cartProductIds.length > 0) {
+      const cartComplementary: any[] = [];
+      for (const cpid of context.cartProductIds.slice(0, 3)) {
+        const fbt = await associationRulesService.getFrequentlyBoughtTogether(cpid, 4);
+        cartComplementary.push(...fbt);
+      }
+      const filteredCartRecs = cartComplementary.filter(
+        (p) => !globalSeenProductIds.has(p.id) && !context.cartProductIds!.includes(p.id)
+      );
+      if (filteredCartRecs.length > 0) {
+        filteredCartRecs.forEach((p) => globalSeenProductIds.add(p.id));
+        sections.push({
+          id: 'rec_sec_based_on_cart',
+          type: RecommendationType.BASED_ON_CART,
+          title: 'Frequently Paired with Your Cart',
+          titleAr: 'مكملات مميزة لسلة تسوقك',
+          subtitle: 'Items customers often add with your selections',
+          subtitleAr: 'منتجات يُفضل المتسوقون إضافتها مع محتويات سلتك',
+          products: filteredCartRecs.slice(0, 10),
+          hasMore: false,
+          algorithm: 'cart_complementary_fbt',
+        });
+      }
+    }
+
     // Safety fallback: If zero sections (e.g. fresh empty store), ensure we return fallback popular items (§22)
     if (sections.length === 0) {
       const fallbackProducts = await prisma.product.findMany({
@@ -296,8 +365,10 @@ export class RecommendationService {
       }
     }
 
-    // Cache the assembled Home sections for 15 minutes
-    await redisService.setJson(cacheKey, sections, 900);
+    // Cache the assembled Home sections for 15 minutes only when safe from leaking private browsing
+    if (!isGenericGuest || !hasPrivateSignals) {
+      await redisService.setJson(cacheKey, sections, 900);
+    }
     return sections;
   }
 
@@ -463,6 +534,19 @@ export class RecommendationService {
       recentlyViewed: fmtRecentlyViewed,
       becauseYouBought: fmtBecauseYouBought,
     };
+  }
+
+  /**
+   * Invalidate product recommendation caches upon product modification, suspension, or deletion.
+   */
+  async invalidateProductCache(productId: string): Promise<void> {
+    await Promise.all([
+      redisService.del(`recommendations:product_page:${productId}`),
+      redisService.del(`recommendations:product:similar:${productId}:12`),
+      redisService.del(`recommendations:product:similar:${productId}:20`),
+      redisService.del(`recommendations:product:fbt:${productId}:5`),
+      redisService.del(`recommendations:product:fbt:${productId}:6`),
+    ]);
   }
 }
 

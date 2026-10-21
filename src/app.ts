@@ -100,7 +100,21 @@ export const createApp = (): Application => {
   // Security & Middleware
   app.use(
     helmet({
-      contentSecurityPolicy: false,
+      contentSecurityPolicy: {
+        useDefaults: true,
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],  // unsafe-inline needed for admin SPA inline styles
+          imgSrc: ["'self'", 'data:', 'https:', 'blob:'],
+          connectSrc: ["'self'", 'https://api.souqnaa.com', 'wss:'],
+          fontSrc: ["'self'", 'https:', 'data:'],
+          objectSrc: ["'none'"],
+          mediaSrc: ["'self'", 'https:'],
+          frameSrc: ["'none'"],
+          upgradeInsecureRequests: [],
+        },
+      },
       crossOriginResourcePolicy: { policy: 'cross-origin' },
       hsts: config.cloudflare.hstsEnabled
         ? {
@@ -111,7 +125,7 @@ export const createApp = (): Application => {
         : false,
       referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
       noSniff: true,
-      xssFilter: true,
+      // xssFilter is deprecated and removed; CSP replaces it
     })
   );
 
@@ -494,11 +508,11 @@ export const createApp = (): Application => {
   app.use(`${p}/admin`, adminSellerPerformanceRouter);
   app.use('/admin', adminSellerPerformanceRouter);
 
-  // 404 Route handler
+  // 404 Route handler — do NOT echo raw req.originalUrl to avoid reflected path info leakage
   app.use((req: Request, res: Response) => {
     res.status(404).json({
       success: false,
-      message: `Route not found: ${req.method} ${req.originalUrl}`,
+      message: 'Route not found',
     });
   });
 

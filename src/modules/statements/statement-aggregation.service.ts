@@ -50,9 +50,9 @@ export class StatementAggregationService {
     let openingBalance = 0;
     for (const tx of priorTransactions) {
       if (tx.type === 'CREDIT') {
-        openingBalance = StatementMath.add(openingBalance, tx.amount);
-      } else if (tx.type === 'DEBIT' || tx.type === 'WITHDRAWAL' || tx.type === 'REFUND') {
-        openingBalance = StatementMath.subtract(openingBalance, tx.amount);
+        openingBalance = StatementMath.add(openingBalance, Math.abs(tx.amount));
+      } else if (tx.type === 'DEBIT' || tx.type === 'WITHDRAWAL' || tx.type === 'REFUND' || tx.type === 'COMMISSION') {
+        openingBalance = StatementMath.subtract(openingBalance, Math.abs(tx.amount));
       }
     }
 
@@ -116,7 +116,7 @@ export class StatementAggregationService {
     // Convert Orders into statement lines
     for (const so of sellerOrders) {
       grossSales = StatementMath.add(grossSales, so.subtotal);
-      const discount = StatementMath.add(so.voucherDiscountAmount, so.sellerFundedDiscount);
+      const discount = Number(so.sellerFundedDiscount || 0);
       productDiscounts = StatementMath.add(productDiscounts, discount);
       tax = StatementMath.add(tax, so.taxAmount);
       platformCommission = StatementMath.add(platformCommission, so.commissionAmount);
@@ -449,7 +449,7 @@ export class StatementAggregationService {
 
     for (const so of sellerOrders) {
       grossSales = StatementMath.add(grossSales, so.subtotal);
-      const discount = StatementMath.add(so.voucherDiscountAmount, so.sellerFundedDiscount);
+      const discount = Number(so.sellerFundedDiscount || 0);
       const base = Math.max(0, StatementMath.subtract(so.subtotal, discount));
       eligibleSales = StatementMath.add(eligibleSales, base);
       totalCommissionBase = StatementMath.add(totalCommissionBase, base);
@@ -543,7 +543,7 @@ export class StatementAggregationService {
     // 2. Query RefundTaxRecords for this seller in the period
     const refundTaxRecords = await prisma.refundTaxRecord.findMany({
       where: {
-        order: { sellerOrders: { some: { sellerId: params.sellerId } } },
+        refundRequest: { sellerId: params.sellerId },
         createdAt: { gte: params.periodStart, lte: params.periodEnd },
       },
       include: {

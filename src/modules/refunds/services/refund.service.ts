@@ -1334,12 +1334,29 @@ export class RefundService {
         },
       });
 
-      // 4. Update Payment status
+      // 4. Update Payment status with partial vs full refund accuracy
       if (refund.orderId) {
-        await tx.payment.updateMany({
+        const payment = await tx.payment.findUnique({
           where: { orderId: refund.orderId },
-          data: { status: PaymentStatus.REFUNDED },
         });
+        if (payment) {
+          const completedRefunds = await tx.refundRequest.findMany({
+            where: {
+              orderId: refund.orderId,
+              status: RefundStatus.REFUND_COMPLETED,
+            },
+            select: { approvedAmount: true },
+          });
+          const totalRefunded = completedRefunds.reduce((sum: number, r: { approvedAmount: number | null }) => sum + (r.approvedAmount || 0), 0);
+          const newStatus = totalRefunded >= (payment.amount - 0.01)
+            ? PaymentStatus.REFUNDED
+            : PaymentStatus.PARTIALLY_REFUNDED;
+
+          await tx.payment.update({
+            where: { id: payment.id },
+            data: { status: newStatus },
+          });
+        }
       }
 
       // 5. Notify customer
@@ -1503,7 +1520,13 @@ export class RefundService {
       });
     }
 
-    const commissionRate = 0.10; // 10%
+    const seller = refund.sellerId
+      ? await tx.seller.findUnique({
+          where: { id: refund.sellerId },
+          select: { commissionRate: true },
+        })
+      : null;
+    const commissionRate = seller?.commissionRate ?? 0.10;
     const commissionReversal = parseFloat((approvedAmount * commissionRate).toFixed(2));
     const sellerNetDebit = parseFloat((approvedAmount - commissionReversal).toFixed(2));
 

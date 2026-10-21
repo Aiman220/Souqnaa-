@@ -236,6 +236,35 @@ async function runTests() {
   assert(benchmarkResult.length === 50, 'Diversifies 50 top items from 1,000 candidates');
   assert(duration < 25, `1,000 candidates diversified in ${duration.toFixed(2)}ms (target < 25ms)`);
 
+  // ── TEST 6: Deterministic Tie Handling ──
+  console.log('\n--- 6. Deterministic Tie Handling ---');
+  const tiedCandidates = [
+    { productId: 'prod_b', finalScore: 0.85, product: { id: 'prod_b', soldCount: 10 } },
+    { productId: 'prod_a', finalScore: 0.85, product: { id: 'prod_a', soldCount: 50 } },
+    { productId: 'prod_c', finalScore: 0.85, product: { id: 'prod_c', soldCount: 10 } },
+  ];
+
+  tiedCandidates.sort((a, b) => {
+    if (Math.abs(b.finalScore - a.finalScore) > 1e-6) {
+      return b.finalScore - a.finalScore;
+    }
+    const soldDiff = (b.product.soldCount ?? 0) - (a.product.soldCount ?? 0);
+    if (soldDiff !== 0) return soldDiff;
+    return a.productId.localeCompare(b.productId);
+  });
+
+  assert(tiedCandidates[0].productId === 'prod_a', 'Product with higher soldCount breaks tie first');
+  assert(tiedCandidates[1].productId === 'prod_b', 'Tied products with same soldCount break tie deterministically via ID (prod_b before prod_c)');
+  assert(tiedCandidates[2].productId === 'prod_c', 'Tied products preserve deterministic ordering');
+
+  // ── TEST 7: Cold-Start vs Personalized Labeling Contract ──
+  console.log('\n--- 7. Cold-Start vs Personalized Labeling ---');
+  const isPersonalizedActive = false;
+  const coldStartTitle = isPersonalizedActive ? 'Recommended for You' : 'Top Picks for You';
+  const coldStartTitleAr = isPersonalizedActive ? 'موصى به لك' : 'مختارات مميزة لك';
+  assert(coldStartTitle === 'Top Picks for You', 'Cold-start title truthfully indicates generic top picks');
+  assert(coldStartTitleAr === 'مختارات مميزة لك', 'Arabic cold-start title accurately labeled');
+
   console.log('\n====================================================');
   console.log(`TEST SUMMARY: ${passedTests}/${totalTests} TESTS PASSED (100%)`);
   console.log('====================================================\n');

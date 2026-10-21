@@ -1,6 +1,7 @@
 import http from 'http';
 import { spawn } from 'child_process';
 import path from 'path';
+import fs from 'fs';
 
 export class PythonBridgeService {
   private static readonly PYTHON_SERVICE_PORT = 8008;
@@ -75,14 +76,40 @@ export class PythonBridgeService {
   }
 
   /**
+   * Dynamically resolves the Python executable path across environments
+   * (Docker, Linux production, Windows local, or custom env var).
+   */
+  getPythonExecutable(): string {
+    if (process.env.PYTHON_PATH && fs.existsSync(process.env.PYTHON_PATH)) {
+      return process.env.PYTHON_PATH;
+    }
+
+    if (process.platform === 'win32') {
+      const localWinPath = 'C:\\Users\\Aiman\\python311\\python.exe';
+      if (fs.existsSync(localWinPath)) {
+        return localWinPath;
+      }
+      return 'python';
+    }
+
+    // Linux / MacOS / Docker container
+    return 'python3';
+  }
+
+  /**
    * Spawns offline model training asynchronously without blocking the Node.js event loop.
    */
   async runOfflineTrainingScript(scriptName: string): Promise<boolean> {
-    const pythonExe = 'C:\\Users\\Aiman\\python311\\python.exe';
+    const pythonExe = this.getPythonExecutable();
     const trainingDir = path.resolve(process.cwd(), 'recommendations/training');
     const scriptPath = path.join(trainingDir, scriptName);
 
-    console.log(`[PythonBridge] Starting offline training: ${scriptPath}`);
+    if (!fs.existsSync(scriptPath)) {
+      console.warn(`[PythonBridge] Training script not found at ${scriptPath}, skipping execution.`);
+      return false;
+    }
+
+    console.log(`[PythonBridge] Starting offline training using '${pythonExe}': ${scriptPath}`);
 
     try {
       const child = spawn(pythonExe, [scriptPath], {

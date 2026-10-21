@@ -165,6 +165,7 @@ export class DeliveryFeeService {
   async determineZone(distanceKm: number): Promise<{
     zoneId: string | null;
     zoneName: string;
+    minDistanceKm: number;
     baseFee: number;
     extraFeePerKm: number;
     currency: string;
@@ -181,6 +182,7 @@ export class DeliveryFeeService {
         return {
           zoneId: zone.id,
           zoneName: zone.nameAr || zone.name,
+          minDistanceKm: zone.minDistanceKm,
           baseFee: zone.baseFee,
           extraFeePerKm: zone.extraFeePerKm,
           currency: zone.currency,
@@ -305,7 +307,7 @@ export class DeliveryFeeService {
     // 4. Compute base fee (includes extra per-km for open-ended zones)
     let baseFee = zone.baseFee;
     if (zone.extraFeePerKm > 0) {
-      const extraKm = Math.max(0, distanceKm - /* zone minDistanceKm approximation */ distanceKm);
+      const extraKm = Math.max(0, distanceKm - zone.minDistanceKm);
       baseFee += extraKm * zone.extraFeePerKm;
     }
 

@@ -163,8 +163,15 @@ export class RecommendationRankerV2 {
       });
     }
 
-    // Sort descending by finalScore
-    scoredList.sort((a, b) => b.finalScore - a.finalScore);
+    // Sort descending by finalScore with deterministic secondary tie-breakers
+    scoredList.sort((a, b) => {
+      if (Math.abs(b.finalScore - a.finalScore) > 1e-6) {
+        return b.finalScore - a.finalScore;
+      }
+      const soldDiff = (b.product.soldCount ?? 0) - (a.product.soldCount ?? 0);
+      if (soldDiff !== 0) return soldDiff;
+      return a.productId.localeCompare(b.productId);
+    });
     return scoredList;
   }
 

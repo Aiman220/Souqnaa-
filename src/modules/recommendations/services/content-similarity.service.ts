@@ -158,16 +158,18 @@ export class ContentSimilarityService {
     if (!targetProduct) return [];
 
     // Candidate selection: fetch products from same category or same brand
+    const orConditions: any[] = [{ categoryId: targetProduct.categoryId }];
+    if (targetProduct.brandId) {
+      orConditions.push({ brandId: targetProduct.brandId });
+    }
+
     const candidates = await prisma.product.findMany({
       where: {
         id: { not: productId },
         isActive: true,
         isSuspended: false,
         inventory: { quantity: { gt: 0 } },
-        OR: [
-          { categoryId: targetProduct.categoryId },
-          { brandId: targetProduct.brandId ? targetProduct.brandId : undefined },
-        ],
+        OR: orConditions,
       },
       include: {
         store: true,

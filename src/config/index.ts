@@ -139,12 +139,14 @@ export const config = {
   geo: {
     geocodingProvider: process.env.GEOCODING_PROVIDER || 'geoapify',
     routingProvider: process.env.ROUTING_PROVIDER || 'geoapify',
-    // Never log or expose this key. It is used server-side only.
-    geoapifyApiKey: process.env.GEOAPIFY_API_KEY || process.env.GEOAPIF_API_KEY || '2c6e2f5f780a4e228a2b576d8ba3cd35',
-    // Tile URL template returned to Flutter for rendering — key is embedded server-side
+    // Never hardcode or log this key. Derived strictly from environment variables.
+    geoapifyApiKey: process.env.GEOAPIFY_API_KEY || process.env.GEOAPIF_API_KEY || '',
+    // Tile URL template returned to Flutter for rendering — defaults to open CARTO/OSM when no key is set
     geoapifyTileUrl: process.env.GEOAPIFY_TILE_URL ||
       process.env.GEOAPIF_TILE_URL ||
-      `https://maps.geoapify.com/v1/tile/osm-bright/{z}/{x}/{y}.png?apiKey=${process.env.GEOAPIFY_API_KEY || process.env.GEOAPIF_API_KEY || '2c6e2f5f780a4e228a2b576d8ba3cd35'}`,
+      (process.env.GEOAPIFY_API_KEY || process.env.GEOAPIF_API_KEY
+        ? `https://maps.geoapify.com/v1/tile/osm-bright/{z}/{x}/{y}.png?apiKey=${process.env.GEOAPIFY_API_KEY || process.env.GEOAPIF_API_KEY}`
+        : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png'),
   },
 
   rateLimits: {

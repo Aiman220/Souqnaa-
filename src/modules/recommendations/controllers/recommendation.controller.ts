@@ -27,10 +27,20 @@ export class RecommendationController {
         }
       }
 
+      let cartProductIds: string[] = [];
+      if (req.query.cartProductIds) {
+        try {
+          cartProductIds = JSON.parse(req.query.cartProductIds as string);
+        } catch (_) {
+          cartProductIds = (req.query.cartProductIds as string).split(',');
+        }
+      }
+
       const context: RecommendationContext = {
         userId,
         sessionId,
         recentViewedIds,
+        cartProductIds,
         limit,
         cursor,
         platform: (req.headers['x-platform'] as string) || 'flutter_customer',

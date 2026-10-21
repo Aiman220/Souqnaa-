@@ -5,9 +5,35 @@ import { storageService } from '../../services/storage/storage.service';
 import { authenticate } from '../../middleware/auth.middleware';
 import { ResponseUtil } from '../../utils/response.util';
 import { AppError } from '../../middleware/error.middleware';
+import { uploadFileLimiter, uploadByUrlLimiter } from '../../middleware/rate-limiter.middleware';
 
 const router = Router();
 router.use(authenticate);
+
+// Allowlist of valid R2 folder prefixes that clients may write into.
+// Never allow arbitrary user-supplied paths to reach the storage bucket.
+export const ALLOWED_UPLOAD_FOLDERS = new Set([
+  'general',
+  'products',
+  'categories',
+  'stores',
+  'avatars',
+  'chat',
+  'support',
+  'refunds',
+  'reviews',
+  'disputes',
+  'documents',
+  'reports',
+  'promotions',
+]);
+
+/** Sanitise a client-supplied folder name: must be in the allowlist, no path traversal. */
+function sanitizeFolder(raw: unknown, defaultFolder = 'general'): string {
+  if (typeof raw !== 'string' || !raw.trim()) return defaultFolder;
+  const cleaned = raw.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+  return ALLOWED_UPLOAD_FOLDERS.has(cleaned) ? cleaned : defaultFolder;
+}
 
 export const ALLOWED_MIME_TYPES = new Set([
   'image/jpeg',
@@ -88,11 +114,11 @@ export function isPrivateOrReservedHost(hostname: string): boolean {
 }
 
 // POST /api/v1/upload (single)
-router.post('/', upload.single('file'), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/', uploadFileLimiter, upload.single('file'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.file) throw new AppError('No file uploaded', 400);
 
-    const folder = (req.body.folder as string) || 'general';
+    const folder = sanitizeFolder(req.body.folder);
     const result = await storageService.uploadFile(req.file, folder);
 
     ResponseUtil.created(res, result, 'File uploaded successfully');
@@ -102,12 +128,12 @@ router.post('/', upload.single('file'), async (req: Request, res: Response, next
 });
 
 // POST /api/v1/upload/multiple
-router.post('/multiple', upload.array('files', 10), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/multiple', uploadFileLimiter, upload.array('files', 10), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const files = req.files as Express.Multer.File[];
     if (!files || files.length === 0) throw new AppError('No files uploaded', 400);
 
-    const folder = (req.body.folder as string) || 'general';
+    const folder = sanitizeFolder(req.body.folder);
     const results = await Promise.all(
       files.map((f) => storageService.uploadFile(f, folder))
     );
@@ -119,9 +145,10 @@ router.post('/multiple', upload.array('files', 10), async (req: Request, res: Re
 });
 
 // POST /api/v1/upload/by-url (SSRF-hardened)
-router.post('/by-url', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/by-url', uploadByUrlLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { url, folder = 'products' } = req.body;
+    const { url } = req.body;
+    const folder = sanitizeFolder(req.body.folder, 'products');
     if (!url || typeof url !== 'string' || !url.trim()) {
       throw new AppError('رابط الصورة مطلوب', 400);
     }

@@ -238,11 +238,16 @@ export class OrderStateMachine {
           }
         }
 
-        // Revert seller pending balance
-        await tx.sellerBalance.updateMany({
+        // Revert seller pending balance safely without going below 0
+        const currentBal = await tx.sellerBalance.findUnique({
           where: { sellerId: sellerOrder.sellerId },
-          data: { pendingBalance: { decrement: sellerOrder.sellerPayout } },
         });
+        if (currentBal) {
+          await tx.sellerBalance.update({
+            where: { id: currentBal.id },
+            data: { pendingBalance: Math.max(0, currentBal.pendingBalance - sellerOrder.sellerPayout) },
+          });
+        }
 
         // If order was PAID (via Card, Online, SOUQNApay Wallet, etc.) -> directly credit back customer's local wallet with full payment
         const isPaid = Boolean(
@@ -369,34 +374,54 @@ export class OrderStateMachine {
           }
         }
 
-        // Move seller payout from pendingBalance to availableBalance
-        const bal = await tx.sellerBalance.upsert({
+        const isCodOrder = sellerOrder.order.payment?.method === 'CASH_ON_DELIVERY';
+        const currentBal = await tx.sellerBalance.findUnique({
           where: { sellerId: sellerOrder.sellerId },
-          update: {
-            pendingBalance: { decrement: sellerOrder.sellerPayout },
-            availableBalance: { increment: sellerOrder.sellerPayout },
-          },
-          create: {
-            sellerId: sellerOrder.sellerId,
-            pendingBalance: 0,
-            availableBalance: sellerOrder.sellerPayout,
-            withdrawnBalance: 0,
-          },
         });
+        const newPending = currentBal ? Math.max(0, currentBal.pendingBalance - sellerOrder.sellerPayout) : 0;
 
-        // Record credit transaction
-        await tx.sellerTransaction.create({
-          data: {
-            sellerBalanceId: bal.id,
-            amount: sellerOrder.sellerPayout,
-            type: TransactionType.CREDIT,
-            referenceId: sellerOrder.id,
-            description: `أرباح الطلب #${sellerOrder.order.orderNumber}`,
-          },
-        });
+        if (isCodOrder) {
+          // COD: Cash is collected in person by seller/courier upon delivery.
+          // Marketplace does NOT credit availableBalance to prevent double payout.
+          await tx.sellerBalance.upsert({
+            where: { sellerId: sellerOrder.sellerId },
+            update: { pendingBalance: newPending },
+            create: {
+              sellerId: sellerOrder.sellerId,
+              pendingBalance: 0,
+              availableBalance: 0,
+              withdrawnBalance: 0,
+            },
+          });
+        } else {
+          // Prepaid: Platform holds customer funds and moves payout to availableBalance
+          const bal = await tx.sellerBalance.upsert({
+            where: { sellerId: sellerOrder.sellerId },
+            update: {
+              pendingBalance: newPending,
+              availableBalance: { increment: sellerOrder.sellerPayout },
+            },
+            create: {
+              sellerId: sellerOrder.sellerId,
+              pendingBalance: 0,
+              availableBalance: sellerOrder.sellerPayout,
+              withdrawnBalance: 0,
+            },
+          });
+
+          // Record credit transaction
+          await tx.sellerTransaction.create({
+            data: {
+              sellerBalanceId: bal.id,
+              amount: sellerOrder.sellerPayout,
+              type: TransactionType.CREDIT,
+              referenceId: sellerOrder.id,
+              description: `أرباح الطلب #${sellerOrder.order.orderNumber}`,
+            },
+          });
+        }
 
         // Update payment status to PAID if it was CASH_ON_DELIVERY and PENDING
-        const isCodOrder = sellerOrder.order.payment?.method === 'CASH_ON_DELIVERY';
         if (sellerOrder.order.payment && sellerOrder.order.payment.status === PaymentStatus.PENDING) {
           await tx.payment.update({
             where: { orderId: sellerOrder.orderId },
@@ -953,11 +978,16 @@ export class OrderStateMachine {
             }
           }
 
-          // Revert pending balance
-          await tx.sellerBalance.updateMany({
+          // Revert pending balance safely without going below 0
+          const currentBal = await tx.sellerBalance.findUnique({
             where: { sellerId: so.sellerId },
-            data: { pendingBalance: { decrement: so.sellerPayout } },
           });
+          if (currentBal) {
+            await tx.sellerBalance.update({
+              where: { id: currentBal.id },
+              data: { pendingBalance: Math.max(0, currentBal.pendingBalance - so.sellerPayout) },
+            });
+          }
         }
 
         if (isCancellationOrRejection) {
@@ -1002,32 +1032,53 @@ export class OrderStateMachine {
             }
           }
 
-          const bal = await tx.sellerBalance.upsert({
+          const isCodOrder = order.payment?.method === 'CASH_ON_DELIVERY';
+          const currentBal = await tx.sellerBalance.findUnique({
             where: { sellerId: so.sellerId },
-            update: {
-              pendingBalance: { decrement: so.sellerPayout },
-              availableBalance: { increment: so.sellerPayout },
-            },
-            create: {
-              sellerId: so.sellerId,
-              pendingBalance: 0,
-              availableBalance: so.sellerPayout,
-              withdrawnBalance: 0,
-            },
           });
+          const newPending = currentBal ? Math.max(0, currentBal.pendingBalance - so.sellerPayout) : 0;
 
-          await tx.sellerTransaction.create({
-            data: {
-              sellerBalanceId: bal.id,
-              amount: so.sellerPayout,
-              type: TransactionType.CREDIT,
-              referenceId: so.id,
-              description: `أرباح الطلب #${order.orderNumber}`,
-            },
-          });
+          if (isCodOrder) {
+            // COD: Cash is collected directly in-person by seller/courier.
+            // Platform does not credit availableBalance to avoid double payout.
+            await tx.sellerBalance.upsert({
+              where: { sellerId: so.sellerId },
+              update: { pendingBalance: newPending },
+              create: {
+                sellerId: so.sellerId,
+                pendingBalance: 0,
+                availableBalance: 0,
+                withdrawnBalance: 0,
+              },
+            });
+          } else {
+            // Prepaid: Platform holds customer funds, move to availableBalance
+            const bal = await tx.sellerBalance.upsert({
+              where: { sellerId: so.sellerId },
+              update: {
+                pendingBalance: newPending,
+                availableBalance: { increment: so.sellerPayout },
+              },
+              create: {
+                sellerId: so.sellerId,
+                pendingBalance: 0,
+                availableBalance: so.sellerPayout,
+                withdrawnBalance: 0,
+              },
+            });
+
+            await tx.sellerTransaction.create({
+              data: {
+                sellerBalanceId: bal.id,
+                amount: so.sellerPayout,
+                type: TransactionType.CREDIT,
+                referenceId: so.id,
+                description: `أرباح الطلب #${order.orderNumber}`,
+              },
+            });
+          }
 
           // Authoritative Platform Commission collection & Outstanding liability handling
-          const isCodOrder = order.payment?.method === 'CASH_ON_DELIVERY';
           await SellerFinancialRiskService.processDeliveredOrderCommission(tx, {
             sellerOrderId: so.id,
             orderNumber: order.orderNumber,

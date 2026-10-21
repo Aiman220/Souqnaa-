@@ -229,8 +229,8 @@ export class CommissionEngine {
       orderDate: so.order.createdAt,
       orderStatus: so.status,
       grossSales: so.subtotal,
-      discount: so.voucherDiscountAmount + so.sellerFundedDiscount,
-      commissionBase: Math.max(0, so.subtotal - (so.voucherDiscountAmount + so.sellerFundedDiscount)),
+      discount: Number(so.sellerFundedDiscount || 0),
+      commissionBase: Math.max(0, so.subtotal - Number(so.sellerFundedDiscount || 0)),
       commissionAmount: so.commissionAmount,
       currency: config.marketplace.currency || 'YER',
       items: so.items.map((it) => ({
