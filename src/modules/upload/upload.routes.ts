@@ -9,7 +9,7 @@ import { AppError } from '../../middleware/error.middleware';
 const router = Router();
 router.use(authenticate);
 
-const ALLOWED_MIME_TYPES = new Set([
+export const ALLOWED_MIME_TYPES = new Set([
   'image/jpeg',
   'image/png',
   'image/webp',
@@ -23,7 +23,7 @@ const ALLOWED_MIME_TYPES = new Set([
   'application/pdf',
 ]);
 
-const ALLOWED_EXTENSIONS = new Set([
+export const ALLOWED_EXTENSIONS = new Set([
   '.jpg',
   '.jpeg',
   '.png',
@@ -58,7 +58,7 @@ const upload = multer({
   },
 });
 
-function isPrivateOrReservedHost(hostname: string): boolean {
+export function isPrivateOrReservedHost(hostname: string): boolean {
   const host = hostname.toLowerCase().trim();
   if (
     host === 'localhost' ||

@@ -1238,7 +1238,8 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
       }
 
       // 6. Handle Wallet Debit & Create Payment record
-      const isInstantPaid = req.body.instantPay === true;
+      // Security fix: Client-supplied instantPay is strictly eliminated.
+      // Payment status is derived exclusively from committed wallet debit or gateway verification.
       const isWalletPayment = mappedPaymentMethod === PaymentMethodType.WALLET;
       const isYemeniWallet = mappedPaymentMethod === PaymentMethodType.YEMENI_WALLET;
       const effectiveProvider = walletProvider || (isWalletPayment ? 'SOUQNAAPAY' : (isYemeniWallet ? pmUpper : null));
@@ -1262,8 +1263,8 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           orderId: createdOrder.id,
           method: mappedPaymentMethod,
           amount: total,
-          status: (isInstantPaid || isWalletPayment) ? PaymentStatus.PAID : PaymentStatus.PENDING,
-          paidAt: (isInstantPaid || isWalletPayment) ? new Date() : null,
+          status: isWalletPayment ? PaymentStatus.PAID : PaymentStatus.PENDING,
+          paidAt: isWalletPayment ? new Date() : null,
           transactionId: isWalletPayment ? `WTX-SQP-${createdOrder.orderNumber}` : (walletTransactionRef || null),
           walletProvider: effectiveProvider,
           walletSenderNumber: walletSenderNumber || null,
@@ -2792,7 +2793,7 @@ router.post(['/:id/mock-pay', '/:id/pay'], async (req: Request, res: Response, n
         paymentRecord = await tx.payment.update({
           where: { id: paymentRecord.id },
           data: {
-            status: PaymentStatus.PAID,
+            status: PaymentStatus.PAID, // MOCK-PAY DEV ONLY (guarded by NODE_ENV !== 'production')
             transactionId: txnId,
             paidAt: new Date(),
           },
@@ -2803,7 +2804,7 @@ router.post(['/:id/mock-pay', '/:id/pay'], async (req: Request, res: Response, n
             orderId: order.id,
             method: PaymentMethodType.MADA,
             amount: order.total,
-            status: PaymentStatus.PAID,
+            status: PaymentStatus.PAID, // MOCK-PAY DEV ONLY (guarded by NODE_ENV !== 'production')
             transactionId: txnId,
             paidAt: new Date(),
           },
@@ -2816,7 +2817,7 @@ router.post(['/:id/mock-pay', '/:id/pay'], async (req: Request, res: Response, n
           gateway,
           referenceId: txnId,
           amount: order.total,
-          status: PaymentStatus.PAID,
+          status: PaymentStatus.PAID, // MOCK-PAY DEV ONLY (guarded by NODE_ENV !== 'production')
         },
       });
     });

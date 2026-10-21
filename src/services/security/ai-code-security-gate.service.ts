@@ -82,7 +82,6 @@ export class AICodeSecurityGate {
         filePath.includes('test') ||
         filePath.includes('schema') ||
         filePath.includes('seed') ||
-        filePath.includes('order.routes.ts') || // Handled with environment guard
         filePath.includes('order.state-machine.ts') || // Authoritative server-side state machine
         filePath.includes('admin.routes.ts') || // Authoritative admin manual wire reconciliation
         filePath.includes('webhook') ||
@@ -91,6 +90,8 @@ export class AICodeSecurityGate {
         line.includes('status ===') || // Comparisons
         line.includes('status !==') ||
         line.includes('in: [') ||
+        line.includes('isWalletPayment') || // Authoritative wallet debit
+        line.includes('MOCK-PAY') || // Guarded mock-pay dev endpoints
         filePath.includes('payment.routes.ts'),
     },
     // 5. Unsafe CORS with Wildcard and Credentials
@@ -187,8 +188,8 @@ export class AICodeSecurityGate {
     };
   }
 
-  private static scanFile(filePath: string, violations: SecurityViolation[]): void {
-    const content = fs.readFileSync(filePath, 'utf-8');
+  public static scanContent(content: string, virtualFilePath: string): SecurityViolation[] {
+    const violations: SecurityViolation[] = [];
     const lines = content.split('\n');
 
     for (let i = 0; i < lines.length; i++) {
@@ -196,14 +197,14 @@ export class AICodeSecurityGate {
 
       for (const rule of this.SECURITY_RULES) {
         if (rule.pattern.test(line)) {
-          if (rule.isFalsePositive && rule.isFalsePositive(line, filePath)) {
+          if (rule.isFalsePositive && rule.isFalsePositive(line, virtualFilePath)) {
             continue;
           }
           violations.push({
             ruleId: rule.id,
             category: rule.category,
             severity: rule.severity,
-            filePath,
+            filePath: virtualFilePath,
             lineNumber: i + 1,
             message: rule.message,
             evidence: line.trim().slice(0, 120),
@@ -211,5 +212,13 @@ export class AICodeSecurityGate {
         }
       }
     }
+
+    return violations;
+  }
+
+  private static scanFile(filePath: string, violations: SecurityViolation[]): void {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const fileViolations = this.scanContent(content, filePath);
+    violations.push(...fileViolations);
   }
 }

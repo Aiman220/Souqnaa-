@@ -12,6 +12,7 @@ import {
 } from '../../utils/product-formatter.util';
 import { WishlistAlertsJob } from '../../services/jobs/wishlist-alerts.job';
 import { catalogVisualIndexService } from '../search/visual/catalog-visual-index.service';
+import { recommendationService } from '../recommendations/services/recommendation.service';
 
 const router = Router();
 
@@ -260,7 +261,15 @@ router.post('/', authenticate, requireSeller, async (req: Request, res: Response
       throw new AppError('You must create a store before listing products', 400);
     }
 
-    const storeId = req.body.storeId || seller.stores[0].id;
+    const validStore = req.body.storeId
+      ? seller.stores.find((s) => s.id === req.body.storeId)
+      : seller.stores[0];
+
+    if (!validStore) {
+      throw new AppError('المتجر المحدد غير صالح أو لا تملك صلاحية النشر فيه', 403);
+    }
+
+    const storeId = validStore.id;
 
     const {
       categoryId,
@@ -345,15 +354,82 @@ router.post('/', authenticate, requireSeller, async (req: Request, res: Response
 router.put('/:id', authenticate, requireSeller, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
-    const { price, compareAtPrice, stockQuantity, ...data } = req.body;
+    const isAdmin = req.user?.role === 'ADMIN';
+
+    // 1. Fetch existing product with store relation
+    const existing = await prisma.product.findUnique({
+      where: { id },
+      include: {
+        store: { select: { id: true, sellerId: true } },
+      },
+    });
+
+    if (!existing) {
+      throw new AppError('المنتج غير موجود أو لا تملك صلاحية تعديله', 404);
+    }
+
+    // 2. Enforce strict seller store ownership if not admin
+    if (!isAdmin) {
+      const seller = await prisma.seller.findUnique({
+        where: { userId: req.user!.userId },
+        include: { stores: { select: { id: true } } },
+      });
+
+      const ownedStoreIds = seller?.stores.map((s) => s.id) || [];
+      if (!seller || !ownedStoreIds.includes(existing.storeId)) {
+        throw new AppError('المنتج غير موجود أو لا تملك صلاحية تعديله', 404);
+      }
+    }
+
+    // 3. Strict whitelist of mutable fields to prevent privilege escalation / mass assignment
+    // Disallow storeId, sellerId, commissionRate, isSuspended, isFeatured, rating, reviewCount, soldCount tampering
+    const {
+      nameAr,
+      nameEn,
+      descriptionAr,
+      descriptionEn,
+      categoryId,
+      brandId,
+      sku,
+      barcode,
+      price,
+      compareAtPrice,
+      weight,
+      hasWarranty,
+      warrantyPeriod,
+      warrantyPolicy,
+      videoUrl,
+      isActive,
+      stockQuantity,
+    } = req.body;
+
+    const updateData: any = {};
+    if (nameAr !== undefined) updateData.nameAr = String(nameAr);
+    if (nameEn !== undefined) updateData.nameEn = String(nameEn);
+    if (descriptionAr !== undefined) updateData.descriptionAr = descriptionAr ? String(descriptionAr) : null;
+    if (descriptionEn !== undefined) updateData.descriptionEn = descriptionEn ? String(descriptionEn) : null;
+    if (categoryId !== undefined) updateData.categoryId = String(categoryId);
+    if (brandId !== undefined) updateData.brandId = brandId ? String(brandId) : null;
+    if (sku !== undefined) updateData.sku = sku ? String(sku) : null;
+    if (barcode !== undefined) updateData.barcode = barcode ? String(barcode) : null;
+    if (price !== undefined) updateData.price = parseFloat(String(price));
+    if (compareAtPrice !== undefined) updateData.compareAtPrice = compareAtPrice ? parseFloat(String(compareAtPrice)) : null;
+    if (weight !== undefined) updateData.weight = weight ? parseFloat(String(weight)) : null;
+    if (hasWarranty !== undefined) updateData.hasWarranty = Boolean(hasWarranty);
+    if (warrantyPeriod !== undefined) updateData.warrantyPeriod = warrantyPeriod ? String(warrantyPeriod) : null;
+    if (warrantyPolicy !== undefined) updateData.warrantyPolicy = warrantyPolicy ? String(warrantyPolicy) : null;
+    if (videoUrl !== undefined) updateData.videoUrl = videoUrl ? String(videoUrl) : null;
+    if (isActive !== undefined) updateData.isActive = Boolean(isActive);
+
+    if (isAdmin) {
+      if (req.body.isFeatured !== undefined) updateData.isFeatured = Boolean(req.body.isFeatured);
+      if (req.body.isSuspended !== undefined) updateData.isSuspended = Boolean(req.body.isSuspended);
+      if (req.body.commissionRate !== undefined) updateData.commissionRate = req.body.commissionRate !== null ? parseFloat(String(req.body.commissionRate)) : null;
+    }
 
     const updated = await prisma.product.update({
       where: { id },
-      data: {
-        ...data,
-        ...(price ? { price: parseFloat(price) } : {}),
-        ...(compareAtPrice ? { compareAtPrice: parseFloat(compareAtPrice) } : {}),
-      },
+      data: updateData,
     });
 
     if (stockQuantity !== undefined) {
@@ -371,6 +447,10 @@ router.put('/:id', authenticate, requireSeller, async (req: Request, res: Respon
 
     catalogVisualIndexService.indexProduct(id).catch(err => {
       console.warn('[VisualIndex] Background product reindex error:', err);
+    });
+
+    recommendationService.invalidateProductCache(id).catch(err => {
+      console.warn('[Recommendation] Product cache invalidation error:', err);
     });
 
     ResponseUtil.success(res, updated, 'Product updated successfully');

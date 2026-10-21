@@ -341,13 +341,14 @@ class SellerPromotionService {
     }
 
     // Debit from seller wallet
+    // Security fix: Initialize seller balance at 0.0 only (never grant arbitrary unbacked funds)
     let balance = await prisma.sellerBalance.findUnique({ where: { sellerId } });
     if (!balance) {
       balance = await prisma.sellerBalance.create({
         data: {
           sellerId,
-          availableBalance: 100000,
-          pendingBalance: 0,
+          availableBalance: 0.0,
+          pendingBalance: 0.0,
           currency: 'YER',
         },
       });
