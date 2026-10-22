@@ -5,7 +5,7 @@ import { ResponseUtil } from '../../../utils/response.util';
 import { AppError } from '../../../middleware/error.middleware';
 import { RefundService } from '../services/refund.service';
 import { RefundStateMachine } from '../refund.state-machine';
-import { RefundActorType } from '@prisma/client';
+import { RefundActorType, RefundStatus } from '@prisma/client';
 
 const router = Router();
 router.use(authenticate);
@@ -32,8 +32,14 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     const where: any = { sellerId: seller.id };
     if (statusParam && statusParam.toUpperCase() !== 'ALL') {
       const upper = statusParam.toUpperCase();
-      const formatted = upper.includes('_') ? upper : upper.replace(/([A-Z])/g, '_$1').toUpperCase().replace(/^_/, '');
-      where.status = formatted;
+      if (upper === 'DISPUTED' || upper === 'CUSTOMER_DISPUTED' || upper === 'ADMIN_REVIEW') {
+        where.status = {
+          in: [RefundStatus.CUSTOMER_DISPUTED, RefundStatus.ADMIN_REVIEW, RefundStatus.DISPUTED],
+        };
+      } else {
+        const formatted = upper.includes('_') ? upper : upper.replace(/([A-Z])/g, '_$1').toUpperCase().replace(/^_/, '');
+        where.status = formatted;
+      }
     }
 
     const [total, refunds] = await Promise.all([
@@ -82,9 +88,30 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const seller = await getSellerProfile(req.user!.userId);
     const id = String(req.params.id);
+    let disputeOrderId: string | undefined;
+    const matchedDispute = await prisma.dispute.findFirst({
+      where: { id, sellerId: seller.id },
+      select: { orderId: true },
+    });
+    if (matchedDispute) {
+      disputeOrderId = matchedDispute.orderId;
+    }
+
+    const orConditions: any[] = [
+      { id },
+      { refundNumber: id },
+      { orderId: id },
+      { order: { orderNumber: id } },
+    ];
+    if (disputeOrderId) {
+      orConditions.push({ orderId: disputeOrderId });
+    }
 
     const refund = await prisma.refundRequest.findFirst({
-      where: { id, sellerId: seller.id },
+      where: {
+        sellerId: seller.id,
+        OR: orConditions,
+      },
       include: {
         items: {
           include: {

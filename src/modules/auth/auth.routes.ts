@@ -30,6 +30,12 @@ router.post('/social/link', authenticate, validate(socialLinkSchema), auditLog('
 router.post('/social/unlink', authenticate, validate(socialUnlinkSchema), auditLog('USER_SOCIAL_UNLINK', 'users'), AuthController.unlinkSocialAccount);
 router.get('/social/identities', authenticate, AuthController.getLinkedIdentities);
 
+// Universal Web OAuth Endpoints (Android, iOS, Web, Desktop)
+router.get('/social/:provider/authorize', AuthController.socialAuthorize);
+router.get('/social/:provider/callback', AuthController.socialCallback);
+router.get('/social/session/:sessionKey', AuthController.getSocialSession);
+router.post('/social/session/:sessionKey/cancel', AuthController.cancelSocialSession);
+
 router.post('/refresh', validate(refreshTokenSchema), AuthController.refreshToken);
 router.post('/logout', authenticate, AuthController.logout);
 

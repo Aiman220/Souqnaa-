@@ -130,10 +130,20 @@ export class NotificationTokenService {
       where.appType = appType;
     }
 
-    const devices = await prisma.notificationDevice.findMany({
+    let devices = await prisma.notificationDevice.findMany({
       where,
       orderBy: { lastSeenAt: 'desc' },
     });
+
+    // Fallback: If querying with a specific appType yielded no devices,
+    // look for any active device registered for this user (guarantees delivery
+    // to Admin users receiving generic system/broadcast notifications)
+    if (devices.length === 0 && appType) {
+      devices = await prisma.notificationDevice.findMany({
+        where: { userId, isActive: true },
+        orderBy: { lastSeenAt: 'desc' },
+      });
+    }
 
     const seenTokens = new Set<string>();
     const uniqueDevices: typeof devices = [];

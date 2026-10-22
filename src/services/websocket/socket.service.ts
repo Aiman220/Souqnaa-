@@ -576,32 +576,47 @@ export class SocketService {
         } catch (_) {}
       });
 
-      // Unified typing indicators (handles typing:start, typing:stop, support:typing:start, support:typing:stop)
+      // Unified typing indicators (handles typing:start, typing:stop, support:typing:start, support:typing:stop, typing, typing:status)
       const handleTypingEvent = async (convId: string, isTyping: boolean) => {
         let altRoom: string | null = null;
         let supportRequesterId: string | null = null;
         let supportAgentUserId: string | null = null;
 
+        const cleanConvId = convId.trim();
+        if (!cleanConvId) return;
+
         try {
           const supConv = await prisma.supportConversation.findFirst({
-            where: { OR: [{ id: convId }, { conversationId: convId }] },
+            where: {
+              OR: [
+                { id: cleanConvId },
+                { conversationId: cleanConvId },
+                { id: cleanConvId.toLowerCase() },
+                { conversationId: cleanConvId.toLowerCase() },
+              ],
+            },
             include: { assignedAgent: true },
           });
           if (supConv) {
-            altRoom = supConv.id === convId ? supConv.conversationId : supConv.id;
+            altRoom = supConv.id.toLowerCase() === cleanConvId.toLowerCase()
+              ? supConv.conversationId
+              : supConv.id;
             supportRequesterId = supConv.requesterId;
             supportAgentUserId = supConv.assignedAgent?.adminUserId || null;
           }
         } catch (_) {}
 
         const typingPayload = {
-          conversationId: convId,
+          conversationId: cleanConvId,
+          altConversationId: altRoom,
           userId,
           isTyping,
         };
 
-        const rooms = [convId, ...(altRoom ? [altRoom] : [])];
-        for (const r of rooms) {
+        const rawRooms = [cleanConvId, ...(altRoom ? [altRoom] : [])];
+        const uniqueRooms = Array.from(new Set(rawRooms.flatMap(r => [r, r.toLowerCase()])));
+
+        for (const r of uniqueRooms) {
           const payload = {
             conversationId: r,
             altConversationId: altRoom,
@@ -625,7 +640,7 @@ export class SocketService {
 
           const members = await prisma.conversationMember.findMany({
             where: {
-              conversationId: { in: rooms },
+              conversationId: { in: uniqueRooms },
               userId: { not: userId },
             },
             select: { userId: true },
@@ -642,24 +657,46 @@ export class SocketService {
         } catch (_) {}
       };
 
+      const parseTypingData = (data: any): { convId: string | null; isTyping?: boolean } => {
+        if (typeof data === 'string') {
+          return { convId: data.trim() };
+        }
+        const convId = (data?.conversationId || data?.conversation_id || data?.id)?.toString().trim() || null;
+        let isTyping: boolean | undefined = undefined;
+        if (data?.isTyping !== undefined) {
+          isTyping = data.isTyping === true || data.isTyping === 'true' || data.isTyping === 1;
+        }
+        return { convId, isTyping };
+      };
+
       socket.on('typing:start', async (data: any) => {
-        const convId = typeof data === 'string' ? data.trim() : (data?.conversationId || data?.id)?.toString().trim();
+        const { convId } = parseTypingData(data);
         if (convId) await handleTypingEvent(convId, true);
       });
 
       socket.on('support:typing:start', async (data: any) => {
-        const convId = typeof data === 'string' ? data.trim() : (data?.conversationId || data?.id)?.toString().trim();
+        const { convId } = parseTypingData(data);
         if (convId) await handleTypingEvent(convId, true);
       });
 
       socket.on('typing:stop', async (data: any) => {
-        const convId = typeof data === 'string' ? data.trim() : (data?.conversationId || data?.id)?.toString().trim();
+        const { convId } = parseTypingData(data);
         if (convId) await handleTypingEvent(convId, false);
       });
 
       socket.on('support:typing:stop', async (data: any) => {
-        const convId = typeof data === 'string' ? data.trim() : (data?.conversationId || data?.id)?.toString().trim();
+        const { convId } = parseTypingData(data);
         if (convId) await handleTypingEvent(convId, false);
+      });
+
+      socket.on('typing', async (data: any) => {
+        const { convId, isTyping } = parseTypingData(data);
+        if (convId) await handleTypingEvent(convId, isTyping !== undefined ? isTyping : true);
+      });
+
+      socket.on('typing:status', async (data: any) => {
+        const { convId, isTyping } = parseTypingData(data);
+        if (convId) await handleTypingEvent(convId, isTyping !== undefined ? isTyping : true);
       });
 
       // ── Support Chat Center Events ──────────────────────────────────────────
@@ -1189,6 +1226,7 @@ export class SocketService {
   emitToUser(userId: string, event: string, data: any): void {
     if (this.io) {
       this.io.to(`user:${userId}`).emit(event, data);
+      this.io.to(`seller:${userId}`).emit(event, data);
     }
   }
 

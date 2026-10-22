@@ -14,6 +14,7 @@ import {
   CancellationRequestStatus,
   ReturnRequestStatus,
   RefundStatus,
+  RefundActorType,
   NotificationType,
 } from '@prisma/client';
 import { OrderStateMachine } from './order.state-machine';
@@ -3156,18 +3157,47 @@ router.post(['/:id/disputes', '/:id/dispute'], async (req: Request, res: Respons
       },
     });
 
-    // Also update any related RefundRequest to ADMIN_REVIEW
-    await prisma.refundRequest.updateMany({
-      where: {
-        orderId: order.id,
-        status: { in: [RefundStatus.REQUESTED, RefundStatus.SELLER_REVIEW, RefundStatus.REJECTED] },
-      },
+    // Ensure a related RefundRequest exists with status ADMIN_REVIEW so it appears in Seller Disputes
+    let refundReq = await prisma.refundRequest.findFirst({
+      where: { orderId: order.id },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!refundReq) {
+      refundReq = await prisma.refundRequest.create({
+        data: {
+          refundNumber: `REF-DSP-${dispute.id.substring(0, 8)}`,
+          orderId: order.id,
+          customerId: req.user!.userId,
+          sellerId: targetSellerId,
+          status: RefundStatus.ADMIN_REVIEW,
+          reasonText: reason,
+          description,
+          requestedAmount: order.total,
+        },
+      });
+    } else {
+      await prisma.refundRequest.update({
+        where: { id: refundReq.id },
+        data: {
+          status: RefundStatus.ADMIN_REVIEW,
+        },
+      });
+    }
+
+    // Record Status History
+    await prisma.refundStatusHistory.create({
       data: {
-        status: RefundStatus.ADMIN_REVIEW,
+        refundRequestId: refundReq.id,
+        fromStatus: refundReq.status,
+        toStatus: RefundStatus.ADMIN_REVIEW,
+        changedBy: req.user!.userId,
+        actorType: RefundActorType.CUSTOMER,
+        reason: `تصعيد نزاع #${dispute.id}: ${reason}`,
       },
     });
 
-    // Notify Seller, Admins and Customer via Push, In-App Notifications and Sockets
+    // Notify Seller, Admins and Customer via Unified Notification Dispatcher (In-App + Push + Realtime)
     try {
       const targetSeller = await prisma.seller.findUnique({
         where: { id: targetSellerId },
@@ -3175,43 +3205,40 @@ router.post(['/:id/disputes', '/:id/dispute'], async (req: Request, res: Respons
       });
 
       if (targetSeller?.userId) {
-        // 1. In-App Notification in DB for Seller
-        await prisma.notification.create({
-          data: {
-            userId: targetSeller.userId,
-            recipientType: 'SELLER',
-            category: 'REFUND',
-            priority: 'HIGH',
-            titleAr: 'نزاع جديد يتطلب ردك ⚠️',
-            titleEn: 'New dispute requires your response ⚠️',
-            bodyAr: `قام العميل بتصعيد نزاع على الطلب #${order.orderNumber}. السبب: ${reason}`,
-            bodyEn: `Customer opened a dispute on order #${order.orderNumber}. Reason: ${reason}`,
-            type: NotificationType.REFUND_DISPUTED,
-            data: JSON.stringify({
-              disputeId: dispute.id,
-              orderId: order.id,
-              orderNumber: order.orderNumber,
-              reason,
-            }),
-            deepLink: `souqnaa://seller/refunds/${dispute.id}`,
-            status: 'SENT',
-            isRead: false,
-          },
-        });
-
-        // 2. Push Notification to Seller
-        notificationDispatcher.dispatch(
+        // Dispatches canonical In-App DB record, FCM Push notification, and WebSocket alerts
+        await notificationDispatcher.dispatch(
           NotificationEventFactory.disputeEvent({
             eventType: 'DISPUTE_SELLER_NOTIFIED',
             recipientId: targetSeller.userId,
             disputeId: dispute.id,
             orderId: order.id,
             orderNumber: order.orderNumber,
+            refundId: refundReq.id,
             reason,
             deadline: '48h',
             recipientRole: 'SELLER',
           })
-        ).catch(() => {});
+        );
+
+        // Targeted socket alerts for seller
+        const socketSvc = SocketService.get();
+        if (socketSvc) {
+          socketSvc.emitToUser(targetSeller.userId, 'dispute:created', {
+            disputeId: dispute.id,
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            refundId: refundReq.id,
+            reason,
+            status: dispute.status,
+            createdAt: dispute.createdAt,
+          });
+          socketSvc.emitToUser(targetSeller.userId, 'refund:disputed', {
+            disputeId: dispute.id,
+            refundId: refundReq.id,
+            orderId: order.id,
+            status: 'ADMIN_REVIEW',
+          });
+        }
       }
 
       // Notify Customer of successful dispute submission
@@ -3222,6 +3249,7 @@ router.post(['/:id/disputes', '/:id/dispute'], async (req: Request, res: Respons
           disputeId: dispute.id,
           orderId: order.id,
           orderNumber: order.orderNumber,
+          refundId: refundReq.id,
           reason,
           recipientRole: 'CUSTOMER',
         })
@@ -3229,6 +3257,7 @@ router.post(['/:id/disputes', '/:id/dispute'], async (req: Request, res: Respons
 
       SocketService.get()?.emitGlobal('admin:new_dispute', {
         disputeId: dispute.id,
+        refundId: refundReq.id,
         orderId: order.id,
         orderNumber: order.orderNumber,
         customerId: req.user!.userId,
@@ -3238,6 +3267,12 @@ router.post(['/:id/disputes', '/:id/dispute'], async (req: Request, res: Respons
       SocketService.get()?.emitGlobal('dispute:created', {
         orderId: order.id,
         disputeId: dispute.id,
+        refundId: refundReq.id,
+      });
+      SocketService.get()?.emitGlobal('refund:disputed', {
+        orderId: order.id,
+        refundId: refundReq.id,
+        status: 'ADMIN_REVIEW',
       });
     } catch (_) {}
 

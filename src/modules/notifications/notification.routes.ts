@@ -9,7 +9,7 @@ import { notificationTemplateService } from './services/notification-template.se
 import { notificationAnalyticsService } from './services/notification-analytics.service';
 import { notificationDispatcher } from './services/notification-dispatcher';
 import { NotificationEventFactory } from './events/domain-events';
-import { NotificationCategory, NotificationPriority, AppType, normalizePriority } from './notification.types';
+import { NotificationCategory, NotificationPriority, NotificationChannel, AppType, normalizePriority } from './notification.types';
 import { adminNotificationRouter } from './services/admin-notification-router.service';
 import { smtpEmailProvider } from './providers/email.provider';
 import { smsNotificationProvider } from './providers/sms.provider';
@@ -451,7 +451,7 @@ router.post('/admin/kill-switch', async (req: Request, res: Response, next: Next
 router.post('/admin/test-send', async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (req.user!.role !== 'ADMIN') return ResponseUtil.forbidden(res, 'Admin access required');
-    const { titleAr, titleEn, bodyAr, bodyEn, category = 'SYSTEM', priority = 'NORMAL', channels } = req.body;
+    const { titleAr, titleEn, bodyAr, bodyEn, category = 'ADMIN', priority = 'HIGH', channels } = req.body;
 
     const event = NotificationEventFactory.adminAlertEvent({
       eventType: 'ADMIN_ALERT',
@@ -460,11 +460,17 @@ router.post('/admin/test-send', async (req: Request, res: Response, next: NextFu
       titleEn: titleEn || 'Test notification from SOUQNAA platform',
       messageAr: bodyAr || 'هذا إشعار تجريبي للتحقق من سلامة قنوات التوصيل.',
       messageEn: bodyEn || 'This is a test notification verifying delivery channels.',
+      priority: priority || 'HIGH',
+      data: {
+        category,
+        deepLink: 'souqnaa://admin/notifications',
+      },
     });
 
-    if (channels && Array.isArray(channels)) {
-      event.channelsOverride = channels;
-    }
+    const resolvedChannels = channels && Array.isArray(channels) && channels.length > 0
+      ? channels
+      : [NotificationChannel.PUSH, NotificationChannel.IN_APP, NotificationChannel.REAL_TIME];
+    event.channelsOverride = resolvedChannels;
 
     const result = await notificationDispatcher.dispatch(event);
     ResponseUtil.success(res, result, 'Test notification dispatched');

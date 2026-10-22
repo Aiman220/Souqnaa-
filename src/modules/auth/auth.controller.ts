@@ -10,6 +10,8 @@ import { otpService } from './otp.service';
 import { smtpEmailProvider } from '../notifications/providers/email.provider';
 import { socialAuthService } from './social/social-auth.service';
 import { SocialProvider, SocialAccountType } from './social/social-auth.types';
+import crypto from 'crypto';
+import { config } from '../../config';
 import { MembershipEligibilityService } from '../membership/membership-eligibility.service';
 
 export class AuthController {
@@ -597,6 +599,22 @@ export class AuthController {
   static async socialLogin(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const { provider, credential, applicationType, platform } = req.body;
+
+      // Handle Universal Web OAuth pre-verified session exchange
+      if (typeof credential === 'string' && credential.startsWith('session_')) {
+        const sessionKey = credential.replace('session_', '');
+        const cached = await redis.get(`social_session_verified:${sessionKey}`);
+        if (cached) {
+          await redis.del(`social_session_verified:${sessionKey}`);
+          const result = JSON.parse(cached);
+          const message = result.isNewAccount
+            ? 'تم إنشاء الحساب بنجاح عبر تسجيل الدخول الاجتماعي'
+            : 'تم تسجيل الدخول بنجاح';
+          ResponseUtil.success(res, result, message);
+          return;
+        }
+      }
+
       const result = await socialAuthService.authenticateSocialLogin({
         provider,
         credential,
@@ -670,6 +688,222 @@ export class AuthController {
       const userId = req.user!.userId;
       const identities = await socialAuthService.getLinkedIdentities(userId);
       ResponseUtil.success(res, identities);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // ===========================================================================
+  // UNIVERSAL WEB OAUTH (Android, iOS, Web, Desktop)
+  // Single Web Client ID & Facebook App ID with zero device key hashes / SHA-1.
+  // ===========================================================================
+
+  static async socialAuthorize(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const providerParam = String(req.params.provider || '').toLowerCase();
+      const role = (req.query.role as string) || SocialAccountType.CUSTOMER;
+      const platform = (req.query.platform as string) || 'android';
+      const sessionKey = (req.query.session_key as string) || (req.query.sessionKey as string) || crypto.randomBytes(16).toString('hex');
+
+      if (role === 'ADMIN' || role === 'admin') {
+        throw new AppError('غير مسموح باستخدام تسجيل الدخول الاجتماعي لحسابات الإدارة.', 403);
+      }
+
+      const state = crypto.randomBytes(24).toString('hex');
+      const oauthState = {
+        sessionKey,
+        role: role.toUpperCase() === 'SELLER' ? SocialAccountType.SELLER : SocialAccountType.CUSTOMER,
+        platform,
+        provider: providerParam.toUpperCase(),
+      };
+
+      await redis.set(`oauth_state:${state}`, JSON.stringify(oauthState), 600);
+
+      // Resolve callback URL dynamically
+      const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+      const host = req.headers['x-forwarded-host'] || req.get('host');
+      const callbackUrl = `${protocol}://${host}${config.apiPrefix}/auth/social/${providerParam}/callback`;
+
+      if (providerParam === 'google') {
+        if (!config.oauth.google.clientId) {
+          throw new AppError('معرف عميل Google غير مهيأ على الخادم.', 500);
+        }
+        const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+        authUrl.searchParams.set('client_id', config.oauth.google.clientId);
+        authUrl.searchParams.set('redirect_uri', callbackUrl);
+        authUrl.searchParams.set('response_type', 'code');
+        authUrl.searchParams.set('scope', 'openid email profile');
+        authUrl.searchParams.set('state', state);
+        authUrl.searchParams.set('prompt', 'select_account');
+
+        res.redirect(authUrl.toString());
+      } else if (providerParam === 'facebook') {
+        if (!config.oauth.facebook.appId) {
+          throw new AppError('معرف تطبيق Facebook غير مهيأ على الخادم.', 500);
+        }
+        const authUrl = new URL('https://www.facebook.com/v20.0/dialog/oauth');
+        authUrl.searchParams.set('client_id', config.oauth.facebook.appId);
+        authUrl.searchParams.set('redirect_uri', callbackUrl);
+        authUrl.searchParams.set('scope', 'email,public_profile');
+        authUrl.searchParams.set('state', state);
+        authUrl.searchParams.set('response_type', 'code');
+
+        res.redirect(authUrl.toString());
+      } else {
+        throw new AppError(`مزود تسجيل الدخول غير مدعوم: ${providerParam}`, 400);
+      }
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async socialCallback(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const providerParam = String(req.params.provider || '').toLowerCase();
+      const { code, state, error, error_description } = req.query as {
+        code?: string;
+        state?: string;
+        error?: string;
+        error_description?: string;
+      };
+
+      if (!state) {
+        res.status(400).send(renderOAuthResultHtml(false, 'طلب غير صالح: معلمة الحالة مفقودة'));
+        return;
+      }
+
+      const cachedStateStr = await redis.get(`oauth_state:${state}`);
+      if (!cachedStateStr) {
+        res.status(400).send(renderOAuthResultHtml(false, 'انتهت صلاحية جلسة تسجيل الدخول، يرجى المحاولة مجدداً'));
+        return;
+      }
+
+      const oauthState = JSON.parse(cachedStateStr);
+      await redis.del(`oauth_state:${state}`);
+
+      if (error) {
+        const isCancelled = error === 'access_denied' || error.includes('cancel');
+        await redis.set(
+          `social_session:${oauthState.sessionKey}`,
+          JSON.stringify({ status: isCancelled ? 'cancelled' : 'error', error: error_description || error }),
+          300
+        );
+        res.send(renderOAuthResultHtml(false, isCancelled ? 'تم إلغاء عملية تسجيل الدخول' : (error_description || error), oauthState.sessionKey));
+        return;
+      }
+
+      if (!code) {
+        res.status(400).send(renderOAuthResultHtml(false, 'لم يتم استلام رمز التفويض من المزود'));
+        return;
+      }
+
+      // Compute callbackUrl matching authorize
+      const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+      const host = req.headers['x-forwarded-host'] || req.get('host');
+      const callbackUrl = `${protocol}://${host}${config.apiPrefix}/auth/social/${providerParam}/callback`;
+
+      let credentialToken = '';
+
+      if (providerParam === 'google') {
+        const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            code,
+            client_id: config.oauth.google.clientId,
+            client_secret: config.oauth.google.clientSecret,
+            redirect_uri: callbackUrl,
+            grant_type: 'authorization_code',
+          }),
+        });
+
+        if (!tokenRes.ok) {
+          const errData = await tokenRes.json().catch(() => ({}));
+          console.error('[Google OAuth Token Error]', errData);
+          throw new AppError('فشل تبادل رمز الدخول مع مزود Google.', 401);
+        }
+
+        const tokenData = (await tokenRes.json()) as any;
+        credentialToken = tokenData.id_token || tokenData.access_token;
+      } else if (providerParam === 'facebook') {
+        const fbUrl = `https://graph.facebook.com/v20.0/oauth/access_token?client_id=${config.oauth.facebook.appId}&redirect_uri=${encodeURIComponent(callbackUrl)}&client_secret=${config.oauth.facebook.appSecret}&code=${encodeURIComponent(code)}`;
+        const tokenRes = await fetch(fbUrl);
+
+        if (!tokenRes.ok) {
+          const errData = await tokenRes.json().catch(() => ({}));
+          console.error('[Facebook OAuth Token Error]', errData);
+          throw new AppError('فشل تبادل رمز الدخول مع مزود Facebook.', 401);
+        }
+
+        const tokenData = (await tokenRes.json()) as any;
+        credentialToken = tokenData.access_token;
+      } else {
+        throw new AppError(`مزود غير مدعوم: ${providerParam}`, 400);
+      }
+
+      // Authenticate through existing SOUQNA pipeline
+      const result = await socialAuthService.authenticateSocialLogin({
+        provider: providerParam === 'google' ? SocialProvider.GOOGLE : SocialProvider.FACEBOOK,
+        credential: credentialToken,
+        applicationType: oauthState.role,
+        platform: oauthState.platform,
+      });
+
+      // Cache verified session for client poll and exchange
+      await redis.set(
+        `social_session:${oauthState.sessionKey}`,
+        JSON.stringify({ status: 'success', data: result }),
+        300
+      );
+      await redis.set(
+        `social_session_verified:${oauthState.sessionKey}`,
+        JSON.stringify(result),
+        300
+      );
+
+      res.send(renderOAuthResultHtml(true, 'تم تسجيل الدخول بنجاح!', oauthState.sessionKey, result.accessToken, result.refreshToken));
+    } catch (error: any) {
+      console.error('[Social OAuth Callback Error]', error);
+      res.status(500).send(renderOAuthResultHtml(false, error.message || 'حدث خطأ أثناء إتمام تسجيل الدخول'));
+    }
+  }
+
+  static async getSocialSession(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { sessionKey } = req.params;
+      if (!sessionKey) {
+        throw new AppError('Session key is required.', 400);
+      }
+
+      const cached = await redis.get(`social_session:${sessionKey}`);
+      if (!cached) {
+        ResponseUtil.success(res, { status: 'pending' }, 'Session is waiting for completion');
+        return;
+      }
+
+      const parsed = JSON.parse(cached);
+      if (parsed.status === 'success') {
+        await redis.del(`social_session:${sessionKey}`);
+        ResponseUtil.success(res, parsed, 'Social login completed successfully');
+      } else if (parsed.status === 'cancelled') {
+        await redis.del(`social_session:${sessionKey}`);
+        ResponseUtil.success(res, { status: 'cancelled' }, 'User cancelled login');
+      } else {
+        await redis.del(`social_session:${sessionKey}`);
+        throw new AppError(parsed.error || 'فشل تسجيل الدخول الاجتماعي', 400);
+      }
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async cancelSocialSession(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { sessionKey } = req.params;
+      if (sessionKey) {
+        await redis.set(`social_session:${sessionKey}`, JSON.stringify({ status: 'cancelled' }), 60);
+      }
+      ResponseUtil.success(res, null, 'Session cancelled');
     } catch (error) {
       next(error);
     }
@@ -795,6 +1029,97 @@ export class AuthController {
       next(error);
     }
   }
+}
+
+function renderOAuthResultHtml(
+  success: boolean,
+  message: string,
+  sessionKey?: string,
+  accessToken?: string,
+  refreshToken?: string
+): string {
+  const deepLink = sessionKey
+    ? `souqnaa://auth/callback?sessionKey=${encodeURIComponent(sessionKey)}&status=${success ? 'success' : 'error'}`
+    : 'souqnaa://auth/callback';
+
+  return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>سوقناا — ${success ? 'تم تسجيل الدخول' : 'تنبيه'}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Cairo", sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      background: #F8FAFC;
+      color: #0F172A;
+      padding: 16px;
+    }
+    .card {
+      background: white;
+      border-radius: 20px;
+      padding: 36px 28px;
+      text-align: center;
+      max-width: 420px;
+      width: 100%;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01);
+      border: 1px solid #E2E8F0;
+    }
+    .icon {
+      width: 64px;
+      height: 64px;
+      background: ${success ? '#ECFDF5' : '#FEF2F2'};
+      color: ${success ? '#10B981' : '#EF4444'};
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 20px;
+      font-size: 32px;
+      font-weight: bold;
+    }
+    h1 { font-size: 20px; margin: 0 0 10px; color: #0F172A; font-weight: 700; }
+    p { font-size: 14px; color: #64748B; margin: 0 0 24px; line-height: 1.6; }
+    .btn {
+      display: block;
+      background: ${success ? '#0F766E' : '#475569'};
+      color: white;
+      text-decoration: none;
+      padding: 14px 20px;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 15px;
+      transition: background 0.2s;
+    }
+    .btn:hover { background: ${success ? '#0D655E' : '#334155'}; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">${success ? '✓' : '!'}</div>
+    <h1>${success ? 'تم تسجيل الدخول بنجاح!' : 'لم تكتمل عملية تسجيل الدخول'}</h1>
+    <p>${message}<br>${success ? 'جاري العودة إلى تطبيق سوقناا تلقائياً...' : 'يرجى العودة إلى التطبيق للمحاولة مجدداً.'}</p>
+    <a class="btn" href="${deepLink}" id="launchAppBtn">العودة إلى تطبيق سوقناا</a>
+  </div>
+  <script>
+    try {
+      if (window.opener) {
+        window.opener.postMessage({ type: 'SOUQNA_OAUTH_RESULT', success: ${success}, sessionKey: '${sessionKey || ''}' }, '*');
+        setTimeout(function() { window.close(); }, 800);
+      }
+    } catch (_) {}
+    setTimeout(function() {
+      window.location.href = "${deepLink}";
+    }, 400);
+  </script>
+</body>
+</html>`;
 }
 
 

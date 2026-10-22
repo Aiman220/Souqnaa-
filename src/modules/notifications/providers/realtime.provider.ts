@@ -25,6 +25,7 @@ export class RealtimeWebSocketProvider implements NotificationProvider {
         id: params.notificationId,
         category: params.category,
         priority: params.priority,
+        type: (params.data?.eventType as string) || (params.category === 'REFUND' ? 'REFUND_DISPUTED' : 'SYSTEM'),
         titleAr: params.content.titleAr,
         titleEn: params.content.titleEn,
         bodyAr: params.content.bodyAr,
@@ -33,6 +34,7 @@ export class RealtimeWebSocketProvider implements NotificationProvider {
         imageUrl: params.content.imageUrl,
         entityType: params.entityType,
         entityId: params.entityId,
+        data: params.data || {},
         createdAt: new Date().toISOString(),
       };
 

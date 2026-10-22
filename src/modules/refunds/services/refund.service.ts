@@ -843,45 +843,56 @@ export class RefundService {
         include: { items: true, evidence: true, customerDecisions: true, statusHistory: true, order: true, seller: true },
       });
 
-      // Notify Seller & Admin
-      const orderNumber = refund.order?.orderNumber || refund.refundNumber;
-      if (refund.seller.userId) {
-        await tx.notification.create({
-          data: {
-            userId: refund.seller.userId,
-            recipientType: 'SELLER',
-            category: 'REFUND',
-            priority: 'HIGH',
-            titleAr: `اعتراض العميل على القرار للطلب #${orderNumber} ⚠️`,
-            titleEn: `Customer Disputed Decision for order #${orderNumber} ⚠️`,
-            bodyAr: `قام العميل بتصعيد النزاع للطلب #${orderNumber} وتم إحالته إلى إدارة المنصة للتحكيم.`,
-            bodyEn: `Customer opened a dispute for order #${orderNumber}`,
-            type: NotificationType.REFUND_DISPUTED,
-            data: JSON.stringify({ refundId: refund.id, orderId: refund.orderId, orderNumber, refundNumber: refund.refundNumber }),
-            deepLink: `souqnaa://seller/refunds/${refund.id}`,
-            status: 'SENT',
-            isRead: false,
-          },
-        });
-      }
-
       return res;
     });
 
     if (updated.seller?.userId) {
-      notificationDispatcher.dispatch(
+      await notificationDispatcher.dispatch(
         NotificationEventFactory.disputeEvent({
           eventType: 'DISPUTE_SELLER_NOTIFIED',
           recipientId: updated.seller.userId,
           disputeId: updated.id,
           orderId: updated.orderId,
           orderNumber: updated.order?.orderNumber || updated.refundNumber,
+          refundId: updated.id,
           reason: disputeReason,
           deadline: '48h',
           recipientRole: 'SELLER',
         })
       ).catch(() => {});
+
+      // Targeted socket alerts for seller
+      const socketSvc = SocketService.get();
+      if (socketSvc) {
+        socketSvc.emitToUser(updated.seller.userId, 'dispute:created', {
+          disputeId: updated.id,
+          refundId: updated.id,
+          orderId: updated.orderId,
+          orderNumber: updated.order?.orderNumber || updated.refundNumber,
+          disputeReason,
+          status: updated.status,
+        });
+        socketSvc.emitToUser(updated.seller.userId, 'refund:disputed', {
+          refundId: updated.id,
+          orderId: updated.orderId,
+          status: updated.status,
+        });
+      }
     }
+
+    // Notify Customer of successful dispute registration
+    notificationDispatcher.dispatch(
+      NotificationEventFactory.disputeEvent({
+        eventType: 'DISPUTE_CREATED',
+        recipientId: customerId,
+        disputeId: updated.id,
+        orderId: updated.orderId,
+        orderNumber: updated.order?.orderNumber || updated.refundNumber,
+        refundId: updated.id,
+        reason: disputeReason,
+        recipientRole: 'CUSTOMER',
+      })
+    ).catch(() => {});
 
     try {
       SocketService.get()?.emitGlobal('dispute:created', {

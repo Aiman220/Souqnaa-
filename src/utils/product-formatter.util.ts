@@ -86,7 +86,9 @@ export function formatProductForClient(product: any, campaignPresentation?: any)
   let reviewCount = 0;
   if (product.ratingSummary && typeof product.ratingSummary.averageRating === 'number') {
     rating = product.ratingSummary.averageRating;
-    reviewCount = product.ratingSummary.totalReviews || 0;
+    reviewCount = (product.ratingSummary.ratingCount > 0
+      ? product.ratingSummary.ratingCount
+      : product.ratingSummary.reviewCount) || (product.ratingSummary as any).totalReviews || 0;
   } else if (Array.isArray(product.productReviews) && product.productReviews.length > 0) {
     reviewCount = product.productReviews.length;
     const sum = product.productReviews.reduce((acc: number, r: any) => acc + (Number(r.rating) || 0), 0);
@@ -94,6 +96,23 @@ export function formatProductForClient(product: any, campaignPresentation?: any)
   } else if (typeof product.rating === 'number') {
     rating = product.rating;
     reviewCount = typeof product.reviewCount === 'number' ? product.reviewCount : 0;
+  }
+
+  // Safety fallbacks if rating/reviewCount are still 0 but exists in product record or reviews array
+  if (reviewCount === 0) {
+    if (typeof product.reviewCount === 'number' && product.reviewCount > 0) {
+      reviewCount = product.reviewCount;
+    } else if (Array.isArray(product.productReviews) && product.productReviews.length > 0) {
+      reviewCount = product.productReviews.length;
+    }
+  }
+  if (rating === 0) {
+    if (typeof product.rating === 'number' && product.rating > 0) {
+      rating = product.rating;
+    } else if (Array.isArray(product.productReviews) && product.productReviews.length > 0) {
+      const sum = product.productReviews.reduce((acc: number, r: any) => acc + (Number(r.rating) || 0), 0);
+      rating = Math.round((sum / product.productReviews.length) * 10) / 10;
+    }
   }
 
   const rawSold = product.soldCount ?? product.sold_count ?? product.unitsSold ?? product.totalSold;

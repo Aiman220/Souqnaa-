@@ -39,6 +39,9 @@ export class FcmPushProvider implements NotificationProvider {
         return 'souqna_payments_channel';
       case 'REFUND':
       case 'REFUNDS':
+      case 'DISPUTE':
+      case 'DISPUTES':
+      case 'REFUND_DISPUTED':
         return 'souqna_refunds_channel';
       case 'CHAT':
       case 'SUPPORT':

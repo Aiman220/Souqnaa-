@@ -12,6 +12,8 @@ import {
 import { SocketService } from '../../services/websocket/socket.service';
 import { notificationDispatcher } from '../notifications/services/notification-dispatcher';
 import { NotificationEventFactory } from '../notifications/events/domain-events';
+import { adminNotificationRouter } from '../notifications/services/admin-notification-router.service';
+import { NotificationCategory, NotificationPriority } from '../notifications/notification.types';
 import { CustomerWalletService } from '../wallet/customer-wallet.service';
 import { RefundService } from '../refunds/services/refund.service';
 import { redis } from '../../database/redis';
@@ -278,32 +280,6 @@ export class DisputeService {
         },
       });
 
-      // Persistent In-App Notification for Seller
-      if (targetSeller.userId) {
-        await tx.notification.create({
-          data: {
-            userId: targetSeller.userId,
-            recipientType: 'SELLER',
-            category: 'REFUND',
-            priority: 'HIGH',
-            titleAr: `نزاع جديد يتطلب ردك للطلب #${order.orderNumber} ⚠️`,
-            titleEn: `Dispute opened for order #${order.orderNumber} ⚠️`,
-            bodyAr: `فتح العميل نزاعاً على الطلب #${order.orderNumber}. يرجى مراجعة التفاصيل والرد خلال 48 ساعة. السبب: ${reason}`,
-            bodyEn: `Customer opened a dispute on order #${order.orderNumber}. Reason: ${reason}`,
-            type: NotificationType.REFUND_DISPUTED,
-            data: JSON.stringify({
-              disputeId: dispute.id,
-              orderId: order.id,
-              orderNumber: order.orderNumber,
-              refundId: refundReq?.id,
-            }),
-            deepLink: `souqnaa://seller/refunds/${dispute.id}`,
-            status: 'SENT',
-            isRead: false,
-          },
-        });
-      }
-
       return { dispute, order, targetSeller, refundReq };
     });
 
@@ -340,7 +316,27 @@ export class DisputeService {
         socket.emitGlobal('dispute:created', {
           orderId: order.id,
           disputeId: dispute.id,
+          refundId: finalRefundReq?.id,
         });
+
+        // Targeted alerts for seller
+        if (targetSeller.userId) {
+          socket.emitToUser(targetSeller.userId, 'dispute:created', {
+            disputeId: dispute.id,
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            refundId: finalRefundReq?.id,
+            reason,
+            status: dispute.status,
+            createdAt: dispute.createdAt,
+          });
+          socket.emitToUser(targetSeller.userId, 'refund:disputed', {
+            disputeId: dispute.id,
+            orderId: order.id,
+            refundId: finalRefundReq?.id,
+            status: 'ADMIN_REVIEW',
+          });
+        }
       }
     } catch (sockErr) {
       console.error('[DisputeService] Socket broadcast error:', sockErr);
@@ -380,6 +376,27 @@ export class DisputeService {
           )
         );
       }
+
+      // Notify authorized administrators via RBAC
+      dispatches.push(
+        adminNotificationRouter.routeAndDispatch({
+          eventType: 'DISPUTE_CREATED',
+          category: NotificationCategory.REFUND,
+          priority: NotificationPriority.HIGH,
+          titleAr: `نزاع جديد على الطلب #${order.orderNumber}`,
+          titleEn: `New dispute on order #${order.orderNumber}`,
+          messageAr: `تم فتح نزاع جديد للطلب #${order.orderNumber} بسبب: ${reason}`,
+          messageEn: `New dispute opened for order #${order.orderNumber} for reason: ${reason}`,
+          referenceId: dispute.id,
+          data: {
+            disputeId: dispute.id,
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            reason,
+            deepLink: `souqnaa://admin/disputes/${dispute.id}`,
+          },
+        })
+      );
 
       await Promise.allSettled(dispatches);
     } catch (notifErr) {
@@ -1405,6 +1422,23 @@ export class DisputeService {
                 })
               );
             }
+
+            // Notify authorized administrators via RBAC upon auto-escalation
+            adminNotificationRouter.routeAndDispatch({
+              eventType: 'DISPUTE_ESCALATED',
+              category: NotificationCategory.REFUND,
+              priority: NotificationPriority.P0_CRITICAL,
+              titleAr: `تصعيد نزاع تلقائياً: الطلب #${dispute.orderId}`,
+              titleEn: `Dispute Auto-Escalated: Order #${dispute.orderId}`,
+              messageAr: `تم تصعيد النزاع للإدارة بعد تجاوز مهلة الـ 48 ساعة دون استجابة المتجر.`,
+              messageEn: `Dispute auto-escalated to admin after 48h deadline exceeded without seller response.`,
+              referenceId: dispute.id,
+              data: {
+                disputeId: dispute.id,
+                orderId: dispute.orderId,
+                deepLink: `souqnaa://admin/disputes/${dispute.id}`,
+              },
+            }).catch((err) => console.error('[DisputeService] Admin dispute escalation notify error:', err));
 
             // Real-time broadcast
             try {
