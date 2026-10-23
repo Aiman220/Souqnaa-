@@ -5,7 +5,13 @@
  */
 
 import { prisma } from '../../../database/prisma';
-import { FirstOrderAbuseEvaluation, FirstOrderShippingConfigDto } from '../first-order-shipping.types';
+import {
+  FirstOrderAbuseEvaluation,
+  FirstOrderShippingConfigDto,
+  DeviceIntegrityStatus,
+} from '../first-order-shipping.types';
+import { IntegrityEvidenceInput, DeviceIntegrityEvaluationResult } from '../../integrity/integrity.types';
+import { AppIntegrityService } from '../../integrity/app-integrity.service';
 
 export class FirstOrderPromotionAbuseService {
   /**
@@ -23,19 +29,27 @@ export class FirstOrderPromotionAbuseService {
     ipAddress?: string;
     userAgent?: string;
     deviceId?: string;
+    integrityEvidence?: IntegrityEvidenceInput;
+    integrityEvaluation?: DeviceIntegrityEvaluationResult;
   }): Promise<FirstOrderAbuseEvaluation> {
     const { customerId, config } = params;
 
-    const user = await prisma.user.findUnique({
-      where: { id: customerId },
-      include: {
-        addresses: {
-          take: 5,
+    let user = null;
+    try {
+      user = await prisma.user.findUnique({
+        where: { id: customerId },
+        include: {
+          addresses: {
+            take: 5,
+          },
         },
-      },
-    });
+      });
+    } catch (dbErr: any) {
+      console.warn(`[FirstOrderAbuse] Database query exception, proceeding with fallback: ${dbErr?.message}`);
+    }
 
     if (!user) {
+      const earlyIntegrityStatus = params.integrityEvaluation?.status ?? DeviceIntegrityStatus.UNAVAILABLE;
       return {
         abuseSuspected: true,
         riskScore: 100,
@@ -47,7 +61,8 @@ export class FirstOrderPromotionAbuseService {
           priorOrdersCount: 0,
           matchingPhoneCount: 0,
           matchingAddressCount: 0,
-          deviceIntegrityOk: false,
+          deviceIntegrityStatus: earlyIntegrityStatus,
+          deviceIntegrityOk: earlyIntegrityStatus === DeviceIntegrityStatus.VERIFIED,
         },
       };
     }
@@ -146,6 +161,37 @@ export class FirstOrderPromotionAbuseService {
       }
     }
 
+    // 7. Authoritative App & Device Integrity Evaluation (§AR-2.5)
+    // Replaced fabricated deviceIntegrityOk: true with typed verifiable evidence
+    let deviceIntegrityStatus = DeviceIntegrityStatus.UNAVAILABLE;
+
+    if (params.integrityEvaluation) {
+      deviceIntegrityStatus = params.integrityEvaluation.status;
+      riskScore += params.integrityEvaluation.riskScoreModifier;
+      if (params.integrityEvaluation.status === DeviceIntegrityStatus.REJECTED) {
+        reasons.push('DEVICE_INTEGRITY_REJECTED');
+      }
+    } else if (params.integrityEvidence && params.integrityEvidence.challenge) {
+      try {
+        const evalResult = await AppIntegrityService.verifyIntegrityEvidence({
+          evidence: params.integrityEvidence,
+          expectedAppType: 'customer',
+          expectedOperation: 'FIRST_ORDER_PROMOTION',
+          userId: customerId,
+        });
+        deviceIntegrityStatus = evalResult.status;
+        riskScore += evalResult.riskScoreModifier;
+        if (evalResult.status === DeviceIntegrityStatus.REJECTED) {
+          reasons.push('DEVICE_INTEGRITY_REJECTED');
+        }
+      } catch (_) {
+        deviceIntegrityStatus = DeviceIntegrityStatus.INVALID;
+        riskScore += 20;
+        reasons.push('DEVICE_INTEGRITY_EVALUATION_ERROR');
+      }
+    }
+
+    // Risk decisions remain server-authoritative
     const clampedRiskScore = Math.min(100, Math.max(0, riskScore));
     const abuseSuspected = config.abuseProtectionEnabled && clampedRiskScore >= this.MAX_TOLERABLE_RISK_SCORE;
 
@@ -160,7 +206,8 @@ export class FirstOrderPromotionAbuseService {
         priorOrdersCount,
         matchingPhoneCount,
         matchingAddressCount,
-        deviceIntegrityOk: true,
+        deviceIntegrityStatus,
+        deviceIntegrityOk: deviceIntegrityStatus === DeviceIntegrityStatus.VERIFIED,
       },
     };
   }

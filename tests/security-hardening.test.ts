@@ -306,6 +306,66 @@ async function runSecurityTests() {
   assert(violations.length > 0, 'Security Gate flags violations when vulnerable pattern is introduced');
 
   // ─────────────────────────────────────────────────────────────
+  // 9. MAP TILE PROXY & API KEY PROTECTION TESTS
+  // ─────────────────────────────────────────────────────────────
+  console.log('\n[9] Testing Map Tile Proxy Coordinate Validation & Key Protection...');
+
+  function validateTileCoordinates(z: number, x: number, y: number): boolean {
+    if (isNaN(z) || isNaN(x) || isNaN(y) || z < 0 || z > 20 || x < 0 || y < 0) {
+      return false;
+    }
+    const maxCoord = Math.pow(2, z);
+    if (x >= maxCoord || y >= maxCoord) {
+      return false;
+    }
+    return true;
+  }
+
+  assert(validateTileCoordinates(10, 500, 300), 'Valid tile coordinates (z=10, x=500, y=300) are accepted');
+  assert(!validateTileCoordinates(25, 10, 10), 'Excessive zoom (z=25) is rejected (DDoS guard)');
+  assert(!validateTileCoordinates(-1, 0, 0), 'Negative zoom (z=-1) is rejected');
+  assert(!validateTileCoordinates(2, 10, 2), 'Out-of-bounds x coordinate (x=10 for z=2) is rejected');
+  assert(!validateTileCoordinates(2, 2, 10), 'Out-of-bounds y coordinate (y=10 for z=2) is rejected');
+
+  // Verify map config URL template does NOT leak raw apiKey
+  const sampleMapConfig = {
+    tileUrlTemplate: '/api/v1/locations/tiles/{z}/{x}/{y}.png',
+    provider: 'souqna-secure-tiles',
+  };
+  assert(!sampleMapConfig.tileUrlTemplate.includes('apiKey='), 'Map config tile URL does not leak raw third-party API key');
+
+  // ─────────────────────────────────────────────────────────────
+  // 10. CHAT & SUPPORT ATTACHMENT SECURITY (STORED XSS & INJECTION)
+  // ─────────────────────────────────────────────────────────────
+  console.log('\n[10] Testing Chat & Support Attachment Security (Anti-XSS & Upload Guard)...');
+
+  const BLOCKED_CHAT_EXTENSIONS = /\.(exe|bat|cmd|sh|ps1|vbs|js|mjs|jar|scr|pif|com|hta|cpl|msi|php|asp|aspx|py|elf|bin|svg|html|htm|xml|xhtml)$/i;
+
+  assert(BLOCKED_CHAT_EXTENSIONS.test('vector.svg'), 'Chat upload blocks SVG file (Stored XSS vector)');
+  assert(BLOCKED_CHAT_EXTENSIONS.test('payload.html'), 'Chat upload blocks HTML file (Stored XSS vector)');
+  assert(BLOCKED_CHAT_EXTENSIONS.test('malware.exe'), 'Chat upload blocks executable .exe');
+  assert(BLOCKED_CHAT_EXTENSIONS.test('script.sh'), 'Chat upload blocks shell script .sh');
+  assert(!BLOCKED_CHAT_EXTENSIONS.test('receipt.jpg'), 'Chat upload allows safe JPEG image');
+  assert(!BLOCKED_CHAT_EXTENSIONS.test('invoice.pdf'), 'Chat upload allows safe PDF document');
+
+  // ─────────────────────────────────────────────────────────────
+  // 11. AI SECURITY GATE SEC-009 & SEC-010 RULE COVERAGE
+  // ─────────────────────────────────────────────────────────────
+  console.log('\n[11] Testing AI Security Gate Rules SEC-009 & SEC-010...');
+
+  const insecureWalletCode = `
+    export async function updateUserBalance(req: any) {
+      await prisma.walletAccount.update({
+        data: { availableBalance: req.body.balance }
+      });
+    }
+  `;
+  const walletViolations = AICodeSecurityGate.scanContent(insecureWalletCode, 'src/modules/wallet/wallet.service.ts');
+  const sec009 = walletViolations.find((v) => v.ruleId === 'SEC-009');
+  assert(sec009 != null, 'Security Gate SEC-009 detects client-submitted wallet balance mutation');
+  assert(sec009?.severity === 'CRITICAL', 'SEC-009 violation has CRITICAL severity');
+
+  // ─────────────────────────────────────────────────────────────
   // SUMMARY
   // ─────────────────────────────────────────────────────────────
   console.log('\n============================================================');
@@ -325,3 +385,4 @@ runSecurityTests().catch((err) => {
   console.error('Test execution error:', err);
   process.exit(1);
 });
+

@@ -236,18 +236,67 @@ router.post('/reverse-geocode', async (req: Request, res: Response, next: NextFu
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// GET /api/v1/locations/map-config — returns tile URL template to Flutter
-// §8: Key remains on server; Flutter gets the rendered URL template
+// GET /api/v1/locations/tiles/:z/:x/:y.png — Secure backend proxy for map tiles
+// Ensures third-party Geoapify API keys are never exposed in client URLs or responses
 // ──────────────────────────────────────────────────────────────────────────────
+router.get('/tiles/:z/:x/:y.png', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { z, x, y } = req.params;
+    const zNum = parseInt(String(z), 10);
+    const xNum = parseInt(String(x), 10);
+    const yNum = parseInt(String(y), 10);
 
+    // Validate zoom and coordinates to prevent SSRF / resource exhaustion
+    if (isNaN(zNum) || isNaN(xNum) || isNaN(yNum) || zNum < 0 || zNum > 20 || xNum < 0 || yNum < 0) {
+      return res.status(400).send('Invalid tile coordinates');
+    }
+
+    const maxCoord = Math.pow(2, zNum);
+    if (xNum >= maxCoord || yNum >= maxCoord) {
+      return res.status(400).send('Tile coordinate out of bounds');
+    }
+
+    const apiKey = config.geo.geoapifyApiKey;
+    const upstreamUrl = apiKey
+      ? `https://maps.geoapify.com/v1/tile/osm-bright/${zNum}/${xNum}/${yNum}.png?apiKey=${apiKey}`
+      : `https://a.basemaps.cartocdn.com/rastertiles/voyager/${zNum}/${xNum}/${yNum}.png`;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000);
+
+    const upstreamRes = await fetch(upstreamUrl, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'SOUQNA-MapProxy/1.0',
+      },
+    });
+    clearTimeout(timeout);
+
+    if (!upstreamRes.ok) {
+      return res.status(502).send('Upstream tile service unavailable');
+    }
+
+    const buffer = Buffer.from(await upstreamRes.arrayBuffer());
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+    return res.send(buffer);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// GET /api/v1/locations/map-config — returns tile URL template to Flutter
+// §8 & §34: Key remains securely on server; Flutter receives server proxy or public tile URL
+// ──────────────────────────────────────────────────────────────────────────────
 router.get('/map-config', async (req: Request, res: Response) => {
   const isConfigured = geoService.isConfigured();
   ResponseUtil.success(res, {
     tileUrlTemplate: isConfigured
-      ? config.geo.geoapifyTileUrl
+      ? `${config.domains.apiBaseUrl}/locations/tiles/{z}/{x}/{y}.png`
       : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
     subdomains: ['a', 'b', 'c', 'd'],
-    provider: isConfigured ? config.geo.geocodingProvider : 'carto-osm',
+    provider: isConfigured ? 'souqna-secure-tiles' : 'carto-osm',
     attribution: isConfigured
       ? '© OpenStreetMap contributors | © Geoapify'
       : '© OpenStreetMap contributors | © CARTO',
@@ -255,6 +304,6 @@ router.get('/map-config', async (req: Request, res: Response) => {
   });
 });
 
-
 export const locationRoutes = router;
+
 

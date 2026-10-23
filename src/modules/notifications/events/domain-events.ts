@@ -88,7 +88,7 @@ export class NotificationEventFactory {
       params.eventType === 'SELLER_CANCELLATION_REQUESTED';
     return {
       eventId: randomUUID(),
-      idempotencyKey: `seller_order_${params.orderId}_${params.recipientId}_${params.eventType}_${Date.now()}`,
+      idempotencyKey: `seller_order_${params.orderId}_${params.recipientId}_${params.eventType}`,
       eventType: params.eventType,
       category: NotificationCategory.ORDER,
       priority: isUrgent ? NotificationPriority.URGENT : NotificationPriority.HIGH,
@@ -291,7 +291,7 @@ export class NotificationEventFactory {
 
     return {
       eventId: randomUUID(),
-      idempotencyKey: `dispute_${params.disputeId}_${params.recipientId}_${params.eventType}_${Date.now()}`,
+      idempotencyKey: `dispute_${params.disputeId}_${params.recipientId}_${params.eventType}`,
       eventType: params.eventType,
       category: NotificationCategory.REFUND,
       priority: isUrgent ? NotificationPriority.URGENT : NotificationPriority.HIGH,
@@ -345,7 +345,7 @@ export class NotificationEventFactory {
   }): DomainNotificationEvent {
     return {
       eventId: randomUUID(),
-      idempotencyKey: `wallet_${params.recipientId}_${params.eventType}_${Date.now()}`,
+      idempotencyKey: `wallet_${params.recipientId}_${params.eventType}_${params.referenceId || params.amount}`,
       eventType: params.eventType,
       category: NotificationCategory.WALLET,
       priority: NotificationPriority.HIGH,
@@ -380,7 +380,7 @@ export class NotificationEventFactory {
   }): DomainNotificationEvent {
     return {
       eventId: randomUUID(),
-      idempotencyKey: `reward_${params.recipientId}_${params.eventType}_${Date.now()}`,
+      idempotencyKey: `reward_${params.recipientId}_${params.eventType}_${params.coinsAmount}_${params.missionTitle || 'mission'}`,
       eventType: params.eventType,
       category: NotificationCategory.REWARDS,
       priority: NotificationPriority.NORMAL,
@@ -458,7 +458,7 @@ export class NotificationEventFactory {
   }): DomainNotificationEvent {
     return {
       eventId: randomUUID(),
-      idempotencyKey: `camp_${params.campaignId}_${params.recipientId}_${params.eventType}_${Date.now()}`,
+      idempotencyKey: `camp_${params.campaignId}_${params.recipientId}_${params.eventType}`,
       eventType: params.eventType,
       category:
         params.eventType.includes('FLASH_SALE')
@@ -581,7 +581,7 @@ export class NotificationEventFactory {
   }): DomainNotificationEvent {
     return {
       eventId: randomUUID(),
-      idempotencyKey: `sec_${params.recipientId}_${params.eventType}_${Date.now()}`,
+      idempotencyKey: `sec_${params.recipientId}_${params.eventType}_${params.ipAddress || 'event'}`,
       eventType: params.eventType,
       category: NotificationCategory.SECURITY,
       priority: NotificationPriority.URGENT,
@@ -752,7 +752,7 @@ export class NotificationEventFactory {
   }): DomainNotificationEvent {
     return {
       eventId: randomUUID(),
-      idempotencyKey: `review_${params.productId}_${params.recipientId}_${params.eventType}_${params.reviewId || Date.now()}`,
+      idempotencyKey: `review_${params.productId}_${params.recipientId}_${params.eventType}_${params.reviewId || 'review'}`,
       eventType: params.eventType,
       category: NotificationCategory.REVIEW,
       priority: NotificationPriority.NORMAL,

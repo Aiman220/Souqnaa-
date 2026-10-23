@@ -19,18 +19,28 @@ const router = Router();
 router.use(authenticate);
 router.use(chatLimiter);
 
-const BLOCKED_EXTENSIONS = /\.(exe|bat|cmd|sh|ps1|vbs|js|mjs|jar|scr|pif|com|hta|cpl|msi|php|asp|aspx|py|elf|bin)$/i;
+const BLOCKED_EXTENSIONS = /\.(exe|bat|cmd|sh|ps1|vbs|js|mjs|jar|scr|pif|com|hta|cpl|msi|php|asp|aspx|py|elf|bin|svg|html|htm|xml|xhtml)$/i;
 
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
   fileFilter: (req, file, cb) => {
-    if (BLOCKED_EXTENSIONS.test(file.originalname || '')) {
-      return cb(new AppError('Executable or script attachments are not allowed for security reasons', 400));
+    const ext = (file.originalname || '').toLowerCase();
+    const mime = (file.mimetype || '').toLowerCase();
+
+    if (
+      BLOCKED_EXTENSIONS.test(ext) ||
+      mime.includes('html') ||
+      mime.includes('xml') ||
+      mime.includes('javascript') ||
+      mime.includes('svg')
+    ) {
+      return cb(new AppError('Executable, script, HTML, or SVG attachments are not allowed for security reasons', 400));
     }
     cb(null, true);
   },
 });
+
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 

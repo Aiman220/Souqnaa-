@@ -93,43 +93,43 @@ export class StatementPdfService {
       summaryHtml = `
         <div class="summary-grid">
           <div class="summary-box">
-            <span class="label">الرصيد الافتتاحي (Opening Balance)</span>
+            <span class="label">الرصيد الافتتاحي — Opening Balance</span>
             <span class="value">${this.formatAmount(s.openingBalance, snapshot.currency)}</span>
           </div>
           <div class="summary-box highlight-positive">
-            <span class="label">إجمالي المبيعات (Gross Sales)</span>
+            <span class="label">إجمالي المبيعات — Gross Sales</span>
             <span class="value">${this.formatAmount(s.grossSales, snapshot.currency)}</span>
           </div>
           <div class="summary-box">
-            <span class="label">خصومات المنتجات (Discounts)</span>
+            <span class="label">خصومات المنتجات — Discounts</span>
             <span class="value text-danger">-${this.formatAmount(s.productDiscounts, snapshot.currency)}</span>
           </div>
           <div class="summary-box">
-            <span class="label">المبالغ المسترجعة (Refunds)</span>
+            <span class="label">المبالغ المسترجعة — Refunds</span>
             <span class="value text-danger">-${this.formatAmount(s.refunds, snapshot.currency)}</span>
           </div>
           <div class="summary-box">
-            <span class="label">الضريبة المحصلة (Tax Collected)</span>
+            <span class="label">الضريبة المحصلة — Tax Collected</span>
             <span class="value">${this.formatAmount(s.tax, snapshot.currency)}</span>
           </div>
           <div class="summary-box">
-            <span class="label">عمولة المنصة (Platform Commission)</span>
+            <span class="label">عمولة المنصة — Platform Commission</span>
             <span class="value text-danger">-${this.formatAmount(s.platformCommission, snapshot.currency)}</span>
           </div>
           <div class="summary-box">
-            <span class="label">بدلات التوصيل (Delivery Fees)</span>
+            <span class="label">بدلات التوصيل — Delivery Fees</span>
             <span class="value">${this.formatAmount(s.deliveryAdjustments, snapshot.currency)}</span>
           </div>
           <div class="summary-box">
-            <span class="label">السحوبات المنفذة (Withdrawals)</span>
+            <span class="label">السحوبات المنفذة — Withdrawals</span>
             <span class="value text-danger">-${this.formatAmount(s.withdrawals, snapshot.currency)}</span>
           </div>
           <div class="summary-box highlight-total">
-            <span class="label">صافي الحركة (Net Activity)</span>
+            <span class="label">صافي الحركة — Net Activity</span>
             <span class="value">${this.formatAmount(s.netActivity, snapshot.currency)}</span>
           </div>
           <div class="summary-box highlight-closing">
-            <span class="label">الرصيد الختامي (Closing Balance)</span>
+            <span class="label">الرصيد الختامي — Closing Balance</span>
             <span class="value">${this.formatAmount(s.closingBalance, snapshot.currency)}</span>
           </div>
         </div>
@@ -138,15 +138,15 @@ export class StatementPdfService {
       tableHeadersHtml = `
         <tr>
           <th style="width: 50px;">#</th>
-          <th>التاريخ (Date)</th>
-          <th>المرجع (Reference)</th>
-          <th>النوع (Type)</th>
-          <th>البيان (Description)</th>
-          <th>المبلغ الإجمالي (Gross)</th>
-          <th>الخصم (Disc.)</th>
-          <th>الضريبة (Tax)</th>
-          <th>العمولة (Comm.)</th>
-          <th>الصافي (Net)</th>
+          <th>التاريخ — Date</th>
+          <th>المرجع — Reference</th>
+          <th>النوع — Type</th>
+          <th>البيان — Description</th>
+          <th>المبلغ الإجمالي — Gross</th>
+          <th>الخصم — Disc.</th>
+          <th>الضريبة — Tax</th>
+          <th>العمولة — Comm.</th>
+          <th>الصافي — Net</th>
         </tr>
       `;
 
@@ -170,23 +170,23 @@ export class StatementPdfService {
       summaryHtml = `
         <div class="summary-grid">
           <div class="summary-box">
-            <span class="label">رقم التسوية (Settlement ID)</span>
+            <span class="label">رقم التسوية — Settlement ID</span>
             <span class="value font-mono">${s.settlementNumber}</span>
           </div>
           <div class="summary-box highlight-positive">
-            <span class="label">إجمالي مبيعات التسوية (Gross Sales)</span>
+            <span class="label">إجمالي مبيعات التسوية — Gross Sales</span>
             <span class="value">${this.formatAmount(s.grossSales, snapshot.currency)}</span>
           </div>
           <div class="summary-box">
-            <span class="label">خصومات المبيعات (Discounts)</span>
+            <span class="label">خصومات المبيعات — Discounts</span>
             <span class="value text-danger">-${this.formatAmount(s.productDiscounts, snapshot.currency)}</span>
           </div>
           <div class="summary-box">
-            <span class="label">الاسترجاعات (Refunds)</span>
+            <span class="label">الاسترجاعات — Refunds</span>
             <span class="value text-danger">-${this.formatAmount(s.refunds, snapshot.currency)}</span>
           </div>
           <div class="summary-box">
-            <span class="label">عمولة المنصة (Platform Commission)</span>
+            <span class="label">عمولة المنصة — Platform Commission</span>
             <span class="value text-danger">-${this.formatAmount(s.platformCommission, snapshot.currency)}</span>
           </div>
           <div class="summary-box">
@@ -194,7 +194,7 @@ export class StatementPdfService {
             <span class="value">${this.formatAmount(s.taxAdjustments, snapshot.currency)}</span>
           </div>
           <div class="summary-box highlight-closing full-width">
-            <span class="label">صافي مبلغ التسوية المستحق للبائع (NET SETTLEMENT PAYOUT)</span>
+            <span class="label">صافي مبلغ التسوية المستحق للبائع — NET SETTLEMENT PAYOUT</span>
             <span class="value grand-total">${this.formatAmount(s.netSettlement, snapshot.currency)}</span>
           </div>
         </div>
@@ -203,14 +203,14 @@ export class StatementPdfService {
       tableHeadersHtml = `
         <tr>
           <th style="width: 50px;">#</th>
-          <th>تاريخ الطلب (Date)</th>
-          <th>رقم الطلب (Order ID)</th>
-          <th>إجمالي الطلب (Gross)</th>
-          <th>الخصم (Discount)</th>
-          <th>المسترجع (Refund)</th>
-          <th>الضريبة (Tax)</th>
-          <th>العمولة (Comm.)</th>
-          <th>صافي التاجر (Net Seller Payout)</th>
+          <th>تاريخ الطلب — Date</th>
+          <th>رقم الطلب — Order ID</th>
+          <th>إجمالي الطلب — Gross</th>
+          <th>الخصم — Discount</th>
+          <th>المسترجع — Refund</th>
+          <th>الضريبة — Tax</th>
+          <th>العمولة — Comm.</th>
+          <th>صافي التاجر — Net Seller Payout</th>
         </tr>
       `;
 
@@ -234,23 +234,23 @@ export class StatementPdfService {
       summaryHtml = `
         <div class="summary-grid">
           <div class="summary-box">
-            <span class="label">إجمالي المبيعات (Gross Sales)</span>
+            <span class="label">إجمالي المبيعات — Gross Sales</span>
             <span class="value">${this.formatAmount(s.grossSales, snapshot.currency)}</span>
           </div>
           <div class="summary-box">
-            <span class="label">المبيعات المؤهلة (Eligible Sales)</span>
+            <span class="label">المبيعات المؤهلة — Eligible Sales</span>
             <span class="value">${this.formatAmount(s.eligibleSales, snapshot.currency)}</span>
           </div>
           <div class="summary-box">
-            <span class="label">وعاء احتساب العمولة (Commission Base)</span>
+            <span class="label">وعاء احتساب العمولة — Commission Base</span>
             <span class="value">${this.formatAmount(s.commissionBase, snapshot.currency)}</span>
           </div>
           <div class="summary-box">
-            <span class="label">متوسط نسبة العمولة (Effective Rate)</span>
+            <span class="label">متوسط نسبة العمولة — Effective Rate</span>
             <span class="value font-bold">${ratePct}%</span>
           </div>
           <div class="summary-box highlight-closing full-width">
-            <span class="label">إجمالي عمولة المنصة المستحقة (TOTAL PLATFORM COMMISSION)</span>
+            <span class="label">إجمالي عمولة المنصة المستحقة — TOTAL PLATFORM COMMISSION</span>
             <span class="value grand-total">${this.formatAmount(s.totalCommission, snapshot.currency)}</span>
           </div>
         </div>
@@ -259,13 +259,13 @@ export class StatementPdfService {
       tableHeadersHtml = `
         <tr>
           <th style="width: 50px;">#</th>
-          <th>التاريخ (Date)</th>
-          <th>رقم الطلب (Order ID)</th>
-          <th>البيان (Description)</th>
-          <th>قيمة المبيعات (Sale Amount)</th>
-          <th>وعاء العمولة (Base)</th>
-          <th>النسبة (Rate)</th>
-          <th>مبلغ العمولة (Commission)</th>
+          <th>التاريخ — Date</th>
+          <th>رقم الطلب — Order ID</th>
+          <th>البيان — Description</th>
+          <th>قيمة المبيعات — Sale Amount</th>
+          <th>وعاء العمولة — Base</th>
+          <th>النسبة — Rate</th>
+          <th>مبلغ العمولة — Commission</th>
         </tr>
       `;
 
@@ -290,31 +290,31 @@ export class StatementPdfService {
       summaryHtml = `
         <div class="summary-grid">
           <div class="summary-box">
-            <span class="label">المبيعات الخاضعة للضريبة (Gross Taxable Sales)</span>
+            <span class="label">المبيعات الخاضعة للضريبة — Gross Taxable Sales</span>
             <span class="value">${this.formatAmount(s.grossTaxableSales, snapshot.currency)}</span>
           </div>
           <div class="summary-box">
-            <span class="label">المبيعات المعفاة (Tax-Exempt Sales)</span>
+            <span class="label">المبيعات المعفاة — Tax-Exempt Sales</span>
             <span class="value">${this.formatAmount(s.taxExemptSales, snapshot.currency)}</span>
           </div>
           <div class="summary-box">
-            <span class="label">المبيعات الصفرية (Zero-Rated Sales)</span>
+            <span class="label">المبيعات الصفرية — Zero-Rated Sales</span>
             <span class="value">${this.formatAmount(s.zeroRatedSales, snapshot.currency)}</span>
           </div>
           <div class="summary-box">
-            <span class="label">الوعاء الضريبي (Taxable Amount)</span>
+            <span class="label">الوعاء الضريبي — Taxable Amount</span>
             <span class="value">${this.formatAmount(s.taxableAmount, snapshot.currency)}</span>
           </div>
           <div class="summary-box">
-            <span class="label">إجمالي الضريبة المحصلة (Tax Collected)</span>
+            <span class="label">إجمالي الضريبة المحصلة — Tax Collected</span>
             <span class="value">${this.formatAmount(s.taxCollected, snapshot.currency)}</span>
           </div>
           <div class="summary-box">
-            <span class="label">ضريبة المسترجعات (Tax Refunded)</span>
+            <span class="label">ضريبة المسترجعات — Tax Refunded</span>
             <span class="value text-danger">-${this.formatAmount(s.taxRefunded, snapshot.currency)}</span>
           </div>
           <div class="summary-box highlight-closing full-width">
-            <span class="label">صافي الضريبة للإقرار (NET TAX PAYABLE)</span>
+            <span class="label">صافي الضريبة للإقرار — NET TAX PAYABLE</span>
             <span class="value grand-total">${this.formatAmount(s.netTax, snapshot.currency)}</span>
           </div>
         </div>
@@ -323,13 +323,13 @@ export class StatementPdfService {
       tableHeadersHtml = `
         <tr>
           <th style="width: 50px;">#</th>
-          <th>التاريخ (Date)</th>
-          <th>المرجع (Ref / Order)</th>
-          <th>البيان (Tax Description)</th>
-          <th>الولاية الضريبية (Jurisdiction)</th>
-          <th>النسبة (Rate)</th>
-          <th>الوعاء الضريبي (Taxable)</th>
-          <th>مبلغ الضريبة (Tax Amount)</th>
+          <th>التاريخ — Date</th>
+          <th>المرجع — Ref / Order</th>
+          <th>البيان — Tax Description</th>
+          <th>الولاية الضريبية — Jurisdiction</th>
+          <th>النسبة — Rate</th>
+          <th>الوعاء الضريبي — Taxable</th>
+          <th>مبلغ الضريبة — Tax Amount</th>
         </tr>
       `;
 
@@ -793,10 +793,10 @@ export class StatementPdfService {
       <span class="toolbar-stmt-num">${snapshot.statementNumber}</span>
     </div>
     <div class="toolbar-actions">
-      <button type="button" class="t-btn t-btn-primary" onclick="window.print();">🖨️ طباعة المستند</button>
-      <button type="button" class="t-btn t-btn-secondary" onclick="window.print();">📥 حفظ كـ PDF</button>
-      ${exportUrl ? `<a href="${exportUrl}" class="t-btn t-btn-secondary" download>📊 تصدير Excel / CSV</a>` : ''}
-      <button type="button" class="t-btn t-btn-secondary" onclick="window.close();">✕ إغلاق</button>
+      <button type="button" class="t-btn t-btn-primary" onclick="window.print();">طباعة المستند</button>
+      <button type="button" class="t-btn t-btn-secondary" onclick="window.print();">حفظ كـ PDF</button>
+      ${exportUrl ? `<a href="${exportUrl}" class="t-btn t-btn-secondary" download>تصدير Excel / CSV</a>` : ''}
+      <button type="button" class="t-btn t-btn-secondary" onclick="window.close();">إغلاق</button>
     </div>
   </div>
   <div class="page-container">
@@ -818,45 +818,50 @@ export class StatementPdfService {
     <!-- Metadata Grid -->
     <div class="info-card-grid">
       <div class="info-col">
-        <h3>بيانات التاجر والمتجر (Seller Details)</h3>
+        <h3>بيانات التاجر والمتجر — Seller Details</h3>
         <div class="info-row">
           <span class="info-label">اسم المتجر / البائع:</span>
           <span class="info-val">${snapshot.metadata?.storeName || 'متجر معتمد'}</span>
         </div>
+        ${(snapshot.metadata?.storeEmail || snapshot.metadata?.sellerEmail || snapshot.metadata?.email) ? `
+        <div class="info-row">
+          <span class="info-label">البريد الإلكتروني:</span>
+          <span class="info-val" dir="ltr">${snapshot.metadata?.storeEmail || snapshot.metadata?.sellerEmail || snapshot.metadata?.email}</span>
+        </div>` : ''}
         ${snapshot.metadata?.sellerCrNumber ? `
         <div class="info-row">
-          <span class="info-label">رقم السجل التجاري (CR):</span>
+          <span class="info-label">رقم السجل التجاري — CR:</span>
           <span class="info-val font-mono">${snapshot.metadata.sellerCrNumber}</span>
         </div>` : ''}
         ${snapshot.metadata?.sellerTaxNumber ? `
         <div class="info-row">
-          <span class="info-label">الرقم الضريبي (Tax ID):</span>
+          <span class="info-label">الرقم الضريبي — Tax ID:</span>
           <span class="info-val font-mono">${snapshot.metadata.sellerTaxNumber}</span>
         </div>` : ''}
       </div>
       <div class="info-col">
-        <h3>بيانات الكشف المالي (Statement Specs)</h3>
+        <h3>بيانات الكشف المالي — Statement Specs</h3>
         <div class="info-row">
-          <span class="info-label">فترة الكشف (Period):</span>
+          <span class="info-label">فترة الكشف — Period:</span>
           <span class="info-val">${periodText.ar}</span>
         </div>
         <div class="info-row">
-          <span class="info-label">العملة المعتمدة (Currency):</span>
+          <span class="info-label">العملة المعتمدة — Currency:</span>
           <span class="info-val">ر.ي</span>
         </div>
         <div class="info-row">
-          <span class="info-label">الولاية الضريبية (Jurisdiction):</span>
-          <span class="info-val">الجمهورية اليمنية (YEMEN_GENERAL)</span>
+          <span class="info-label">الولاية الضريبية — Jurisdiction:</span>
+          <span class="info-val">الجمهورية اليمنية — YEMEN_GENERAL</span>
         </div>
       </div>
     </div>
 
     <!-- Summary Box -->
-    <div class="section-title">ملخص الأرقام والمؤشرات المالية (Financial Summary)</div>
+    <div class="section-title">ملخص الأرقام والمؤشرات المالية — Financial Summary</div>
     ${summaryHtml}
 
     <!-- Table of Lines -->
-    <div class="section-title">سجل العمليات والبنود التفصيلية (Itemized Transactions)</div>
+    <div class="section-title">سجل العمليات والبنود التفصيلية — Itemized Transactions</div>
     <div class="table-container">
       <table>
         <thead>

@@ -95,7 +95,7 @@ router.get('/home', async (req: Request, res: Response, next: NextFunction) => {
 // GET /api/v1/campaigns/:id
 router.get('/campaigns/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const campaign = await campaignService.getCampaignById(String(req.params.id));
+    const campaign = await campaignService.getCampaignLandingPage(String(req.params.id));
     ResponseUtil.success(res, campaign);
   } catch (error) {
     next(error);

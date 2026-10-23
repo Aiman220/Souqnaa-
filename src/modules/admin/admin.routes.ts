@@ -4923,7 +4923,7 @@ router.post('/notifications/broadcast', async (req: Request, res: Response, next
     const { titleAr, titleEn, bodyAr, bodyEn, target, scheduledAt } = req.body;
     if (!titleAr || !bodyAr) throw new AppError('عنوان ونص الإشعار بالعربية مطلوبان', 400);
 
-    const targetAudience = target || 'ALL';
+    const targetAudience = target || 'CUSTOMERS';
     const isScheduled = scheduledAt && new Date(scheduledAt).getTime() > Date.now();
 
     if (isScheduled) {

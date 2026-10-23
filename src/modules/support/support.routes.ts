@@ -91,6 +91,9 @@ router.get('/faqs', async (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
+import path from 'path';
+import { ALLOWED_EXTENSIONS, ALLOWED_MIME_TYPES } from '../upload/upload.routes';
+
 // ==========================================
 // AUTHENTICATED SUPPORT ROUTES
 // ==========================================
@@ -99,6 +102,21 @@ router.use(authenticate);
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 }, // 25MB
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const mime = (file.mimetype || '').toLowerCase();
+
+    if (!ALLOWED_EXTENSIONS.has(ext) || !ALLOWED_MIME_TYPES.has(mime)) {
+      return cb(
+        new AppError(
+          'نوع الملف غير مدعوم لأسباب أمنية. يسمح فقط بالصور (JPG, PNG, WebP) ومقاطع الفيديو ومستندات PDF.',
+          400,
+          'UNSUPPORTED_FILE_TYPE'
+        )
+      );
+    }
+    cb(null, true);
+  },
 });
 
 // ==========================================

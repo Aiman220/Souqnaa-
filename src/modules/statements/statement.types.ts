@@ -146,8 +146,12 @@ export interface StatementSnapshotDto {
     sellerCrNumber?: string | null;
     sellerTaxNumber?: string | null;
     sellerName?: string;
+    storeEmail?: string;
+    sellerEmail?: string;
+    email?: string;
     verificationHash?: string;
     qrPayload?: string;
+    [key: string]: any;
   };
   createdAt: Date;
 }

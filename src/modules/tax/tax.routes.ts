@@ -486,13 +486,6 @@ adminRouter.get('/reports', authenticate, authorize('ADMIN'), async (req: Reques
  */
 adminRouter.get(
   '/reports/export',
-  async (req: Request, res: Response, next: NextFunction) => {
-    // Support query param token for direct browser file download
-    if (req.query.token && !req.headers.authorization) {
-      req.headers.authorization = `Bearer ${req.query.token}`;
-    }
-    next();
-  },
   authenticate,
   authorize('ADMIN'),
   async (req: Request, res: Response, next: NextFunction) => {

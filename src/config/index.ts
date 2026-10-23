@@ -3,6 +3,31 @@ import path from 'path';
 
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
+/**
+ * Validates and retrieves mandatory cryptographic secrets from environment variables.
+ * Fails safely without printing secret values to logs or console.
+ */
+export function resolveMandatoryJwtSecret(envVarName: string, minLength = 32): string {
+  const secret = process.env[envVarName]?.trim();
+  if (!secret) {
+    throw new Error(`[Configuration Error] Mandatory secret ${envVarName} is not set in environment.`);
+  }
+  const disallowedInsecureDefaults = [
+    'souqna_super_jwt_secret_2026',
+    'souqna_super_refresh_secret_2026',
+    'your_jwt_secret_min_32_characters_here',
+    'your_jwt_refresh_secret_min_32_characters_here',
+    'change_me',
+  ];
+  if (disallowedInsecureDefaults.includes(secret)) {
+    throw new Error(`[Configuration Error] Secret ${envVarName} contains an insecure default placeholder.`);
+  }
+  if (secret.length < minLength) {
+    throw new Error(`[Configuration Error] Secret ${envVarName} must be at least ${minLength} characters for cryptographic security.`);
+  }
+  return secret;
+}
+
 export const config = {
   env: process.env.NODE_ENV || 'development',
   port: parseInt(process.env.PORT || '4000', 10),
@@ -82,9 +107,13 @@ export const config = {
   },
 
   jwt: {
-    secret: process.env.JWT_SECRET || 'souqna_super_jwt_secret_2026',
+    get secret(): string {
+      return resolveMandatoryJwtSecret('JWT_SECRET');
+    },
     expiresIn: process.env.JWT_EXPIRES_IN || '30d',
-    refreshSecret: process.env.JWT_REFRESH_SECRET || 'souqna_super_refresh_secret_2026',
+    get refreshSecret(): string {
+      return resolveMandatoryJwtSecret('JWT_REFRESH_SECRET');
+    },
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '90d',
   },
 
@@ -154,5 +183,28 @@ export const config = {
     conversationsPerHour: parseInt(process.env.CHAT_RATE_LIMIT_CONVERSATIONS_PER_HOUR || '30', 10),
     uploadsPerHour: parseInt(process.env.CHAT_RATE_LIMIT_UPLOADS_PER_HOUR || '50', 10),
     reportsPerHour: parseInt(process.env.CHAT_RATE_LIMIT_REPORTS_PER_HOUR || '15', 10),
+  },
+
+  appVersion: {
+    enforcementMode: (process.env.APP_VERSION_ENFORCEMENT_MODE || 'enforcing') as
+      'enforcing' | 'observe_only' | 'disabled',
+    allowLegacyWithoutVersion: process.env.ALLOW_LEGACY_WITHOUT_VERSION !== 'false',
+  },
+
+  appIntegrity: {
+    enabled: process.env.APP_INTEGRITY_ENABLED === 'true',
+    enforcementMode: (process.env.APP_INTEGRITY_ENFORCEMENT_MODE || 'observe_only') as
+      'enforcing' | 'observe_only' | 'disabled',
+    challengeTtlSeconds: parseInt(process.env.APP_INTEGRITY_CHALLENGE_TTL || '300', 10),
+    googlePlay: {
+      enabled: process.env.PLAY_INTEGRITY_ENABLED === 'true',
+      packageNames: (process.env.PLAY_INTEGRITY_PACKAGES || 'com.souqnaa.app,com.souqnaa.seller,com.souqnaa.admin').split(','),
+      cloudProjectNumber: process.env.PLAY_INTEGRITY_PROJECT_NUMBER || '',
+    },
+    appleAppAttest: {
+      enabled: process.env.APP_ATTEST_ENABLED === 'true',
+      appIds: (process.env.APP_ATTEST_APP_IDS || 'com.souqnaa.app,com.souqnaa.seller,com.souqnaa.admin').split(','),
+      production: process.env.APP_ATTEST_ENVIRONMENT === 'production',
+    },
   },
 };

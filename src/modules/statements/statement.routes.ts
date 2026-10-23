@@ -141,7 +141,7 @@ sellerStatementsRouter.get('/statements/:id/pdf', async (req: Request, res: Resp
       action: StatementAuditAction.STATEMENT_DOWNLOADED,
     });
 
-    const exportUrl = `/api/v1/seller/statements/${statementId}/export?token=${encodeURIComponent(String(req.query.token || ''))}`;
+    const exportUrl = `/api/v1/seller/statements/${statementId}/export`;
     const autoPrint = req.query.autoPrint === 'true';
     const html = await StatementPdfService.renderStatementHtml(snapshot, { autoPrint, exportUrl });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -387,7 +387,7 @@ sellerStatementsRouter.get('/settlement-statements/:id/pdf', async (req: Request
       action: StatementAuditAction.STATEMENT_DOWNLOADED,
     });
 
-    const exportUrl = `/api/v1/seller/settlement-statements/${statement.id}/export?token=${encodeURIComponent(String(req.query.token || ''))}`;
+    const exportUrl = `/api/v1/seller/settlement-statements/${statement.id}/export`;
     const autoPrint = req.query.autoPrint === 'true';
     const html = await StatementPdfService.renderStatementHtml(snapshot, { autoPrint, exportUrl });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -525,7 +525,7 @@ sellerStatementsRouter.get('/commission-statements/:id/pdf', async (req: Request
       action: StatementAuditAction.STATEMENT_DOWNLOADED,
     });
 
-    const exportUrl = `/api/v1/seller/commission-statements/${statementId}/export?token=${encodeURIComponent(String(req.query.token || ''))}`;
+    const exportUrl = `/api/v1/seller/commission-statements/${statementId}/export`;
     const autoPrint = req.query.autoPrint === 'true';
     const html = await StatementPdfService.renderStatementHtml(snapshot, { autoPrint, exportUrl });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -661,7 +661,7 @@ sellerStatementsRouter.get('/tax-statements/:id/pdf', async (req: Request, res: 
       action: StatementAuditAction.STATEMENT_DOWNLOADED,
     });
 
-    const exportUrl = `/api/v1/seller/tax-statements/${statementId}/export?token=${encodeURIComponent(String(req.query.token || ''))}`;
+    const exportUrl = `/api/v1/seller/tax-statements/${statementId}/export`;
     const autoPrint = req.query.autoPrint === 'true';
     const html = await StatementPdfService.renderStatementHtml(snapshot, { autoPrint, exportUrl });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -925,7 +925,7 @@ adminStatementsRouter.get('/statements/:id/pdf', async (req: Request, res: Respo
       action: StatementAuditAction.STATEMENT_DOWNLOADED,
     });
 
-    const exportUrl = `/api/v1/admin/statements/${statementId}/export?token=${encodeURIComponent(String(req.query.token || ''))}`;
+    const exportUrl = `/api/v1/admin/statements/${statementId}/export`;
     const autoPrint = req.query.autoPrint === 'true';
     const html = await StatementPdfService.renderStatementHtml(snapshot, { autoPrint, exportUrl });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');

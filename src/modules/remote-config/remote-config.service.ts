@@ -1033,6 +1033,25 @@ export class RemoteConfigService {
       },
     });
 
+    // If appVersion was updated, sync active AppVersionPolicy in database
+    if (updates.appVersion) {
+      try {
+        const cleanVer = updates.appVersion.trim();
+        const match = cleanVer.match(/(\d+\.\d+(?:\.\d+)?)/);
+        const buildMatch = cleanVer.match(/Build\s*(\d+)/i) || cleanVer.match(/\+(\d+)/);
+        const verNumber = match ? match[1] : cleanVer;
+        const buildNumber = buildMatch ? parseInt(buildMatch[1], 10) : 100;
+
+        await prisma.appVersionPolicy.updateMany({
+          where: { active: true },
+          data: {
+            latestVersion: verNumber,
+            ...(buildMatch && { latestBuild: buildNumber }),
+          },
+        });
+      } catch (_) {}
+    }
+
     this.invalidateCache();
     this.broadcastConfigUpdate({ key: 'branding', action: 'UPDATE_BRANDING', version: newVersion });
     return updated;

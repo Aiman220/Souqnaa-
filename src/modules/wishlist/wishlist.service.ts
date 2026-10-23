@@ -323,6 +323,7 @@ export class WishlistService {
         images: { where: { isPrimary: true } },
         store: true,
         variants: true,
+        inventory: true,
       },
     });
 
@@ -390,6 +391,50 @@ export class WishlistService {
           variant: true,
         },
       });
+    }
+
+    // Stock alert state tracking:
+    // Only track restock alerts if enabled for this item
+    if (item.backInStockAlertEnabled) {
+      let isCurrentlyInStock = false;
+      if (targetVariant) {
+        isCurrentlyInStock = targetVariant.stockQuantity > 0;
+      } else if (product.inventory) {
+        isCurrentlyInStock = (product.inventory.quantity - product.inventory.reserved) > 0;
+      }
+
+      if (!isCurrentlyInStock) {
+        // Product is currently out of stock. Create/ensure a PENDING alert exists so
+        // the user will be alerted once the product is back in stock.
+        const existingPending = await prisma.wishlistAlert.findFirst({
+          where: {
+            wishlistItemId: item.id,
+            alertType: WishlistAlertType.BACK_IN_STOCK,
+            status: WishlistAlertStatus.PENDING,
+          },
+        });
+        if (!existingPending) {
+          await prisma.wishlistAlert.create({
+            data: {
+              wishlistItemId: item.id,
+              userId,
+              alertType: WishlistAlertType.BACK_IN_STOCK,
+              status: WishlistAlertStatus.PENDING,
+              triggeredAt: new Date(),
+            },
+          });
+        }
+      } else {
+        // Product IS ALREADY in stock. Ensure no stale PENDING alerts exist
+        // so that false "back in stock" alerts will never fire.
+        await prisma.wishlistAlert.deleteMany({
+          where: {
+            wishlistItemId: item.id,
+            alertType: WishlistAlertType.BACK_IN_STOCK,
+            status: WishlistAlertStatus.PENDING,
+          },
+        });
+      }
     }
 
     return item;
@@ -705,6 +750,18 @@ export class WishlistService {
       },
     });
 
+    if (prefs.backInStockAlertEnabled === false) {
+      // User disabled stock alert: dismiss any pending restock alerts
+      await prisma.wishlistAlert.updateMany({
+        where: {
+          wishlistItemId: itemId,
+          alertType: WishlistAlertType.BACK_IN_STOCK,
+          status: WishlistAlertStatus.PENDING,
+        },
+        data: { status: WishlistAlertStatus.DISMISSED },
+      });
+    }
+
     return updated;
   }
 
@@ -822,7 +879,8 @@ export class WishlistService {
   }
 
   /**
-   * Scan wishlist items and notify when an out-of-stock product returns to stock
+   * Scan wishlist items and notify when an out-of-stock product returns to stock.
+   * Only triggers when an item transitions from out-of-stock (PENDING alert) to in-stock.
    */
   static async evaluateStockAlerts(productId?: string, variantId?: string) {
     const whereClause: any = {
@@ -854,30 +912,72 @@ export class WishlistService {
         inStock = (item.product.inventory.quantity - item.product.inventory.reserved) > 0;
       }
 
-      if (!inStock) continue;
+      if (!inStock) {
+        // Product is currently OUT OF STOCK.
+        // Record a PENDING alert if not already present so when restocked, customer gets notified.
+        const existingPending = await prisma.wishlistAlert.findFirst({
+          where: {
+            wishlistItemId: item.id,
+            alertType: WishlistAlertType.BACK_IN_STOCK,
+            status: WishlistAlertStatus.PENDING,
+          },
+        });
 
-      // Check if we already sent a BACK_IN_STOCK alert in the last 48 hours
-      const recentAlert = await prisma.wishlistAlert.findFirst({
+        if (!existingPending) {
+          await prisma.wishlistAlert.create({
+            data: {
+              wishlistItemId: item.id,
+              userId: item.wishlist.userId,
+              alertType: WishlistAlertType.BACK_IN_STOCK,
+              status: WishlistAlertStatus.PENDING,
+              triggeredAt: new Date(),
+            },
+          });
+        }
+        continue;
+      }
+
+      // Product IS in stock (inStock == true).
+      // Crucial: Only notify if there is an active PENDING alert (meaning it was previously OUT OF STOCK).
+      // If no PENDING alert exists, this product was already in stock — DO NOT send false alerts!
+      const pendingAlert = await prisma.wishlistAlert.findFirst({
         where: {
           wishlistItemId: item.id,
           alertType: WishlistAlertType.BACK_IN_STOCK,
-          triggeredAt: { gte: new Date(Date.now() - 48 * 60 * 60 * 1000) },
+          status: WishlistAlertStatus.PENDING,
         },
       });
 
-      if (recentAlert) continue;
+      if (!pendingAlert) {
+        continue;
+      }
+
+      // Check if we already sent a notification in the last 24 hours to prevent spam
+      const recentNotified = await prisma.wishlistAlert.findFirst({
+        where: {
+          wishlistItemId: item.id,
+          alertType: WishlistAlertType.BACK_IN_STOCK,
+          status: WishlistAlertStatus.NOTIFIED,
+          notifiedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        },
+      });
+
+      if (recentNotified) {
+        await prisma.wishlistAlert.update({
+          where: { id: pendingAlert.id },
+          data: { status: WishlistAlertStatus.DISMISSED },
+        });
+        continue;
+      }
 
       const userId = item.wishlist.userId;
       const productName = item.product.nameAr || item.product.nameEn;
 
-      // Create alert record
-      const alert = await prisma.wishlistAlert.create({
+      // Update the pending alert record to NOTIFIED
+      await prisma.wishlistAlert.update({
+        where: { id: pendingAlert.id },
         data: {
-          wishlistItemId: item.id,
-          userId,
-          alertType: WishlistAlertType.BACK_IN_STOCK,
           status: WishlistAlertStatus.NOTIFIED,
-          triggeredAt: new Date(),
           notifiedAt: new Date(),
         },
       });

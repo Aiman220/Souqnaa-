@@ -233,8 +233,8 @@ export class SellerOrderPrintService {
     // Payment mapping
     const rawMethod = (payment.method || parentOrder.paymentMethod || 'CASH_ON_DELIVERY').toUpperCase();
     const paymentMethodMap: Record<string, { ar: string; en: string }> = {
-      CASH_ON_DELIVERY: { ar: 'الدفع عند الاستلام (COD)', en: 'Cash on Delivery (COD)' },
-      COD: { ar: 'الدفع عند الاستلام (COD)', en: 'Cash on Delivery (COD)' },
+      CASH_ON_DELIVERY: { ar: 'الدفع عند الاستلام — نقداً', en: 'Cash on Delivery' },
+      COD: { ar: 'الدفع عند الاستلام — نقداً', en: 'Cash on Delivery' },
       WALLET: { ar: 'المحفظة الإلكترونية', en: 'SOUQNAA Wallet' },
       CREDIT_CARD: { ar: 'بطاقة مصرفية / فيزا', en: 'Credit / Debit Card' },
       ELECTRONIC_PAYMENT: { ar: 'دفع إلكتروني', en: 'Electronic Payment' },
@@ -246,42 +246,42 @@ export class SellerOrderPrintService {
 
     const rawPayStatus = (payment.status || 'PENDING').toUpperCase();
     const paymentStatusMap: Record<string, { ar: string; en: string }> = {
-      PAID: { ar: 'مدفوع بالكامل ✓', en: 'PAID' },
-      COMPLETED: { ar: 'مدفوع بالكامل ✓', en: 'PAID' },
-      SUCCESS: { ar: 'مدفوع بالكامل ✓', en: 'PAID' },
-      PENDING: { ar: 'غير مدفوع (بانتظار التحصيل)', en: 'UNPAID (Pending)' },
+      PAID: { ar: 'مدفوع بالكامل', en: 'PAID' },
+      COMPLETED: { ar: 'مدفوع بالكامل', en: 'PAID' },
+      SUCCESS: { ar: 'مدفوع بالكامل', en: 'PAID' },
+      PENDING: { ar: 'غير مدفوع — بانتظار التحصيل', en: 'UNPAID' },
       FAILED: { ar: 'فشلت عملية الدفع', en: 'FAILED' },
       PARTIALLY_PAID: { ar: 'مدفوع جزئياً', en: 'PARTIALLY PAID' },
       REFUNDED: { ar: 'مسترد بالكامل', en: 'REFUNDED' },
     };
     const paymentStatus = paymentStatusMap[rawPayStatus] || { ar: rawPayStatus, en: rawPayStatus };
 
-    // Order status mapping with authoritative labels, icons, and status theme colors
+    // Order status mapping with authoritative labels, NO emojis/icons
     const rawOrderStatus = (sellerOrder.status || 'PENDING').toUpperCase();
     const orderStatusMap: Record<string, { ar: string; en: string; icon: string; color: string; bg: string }> = {
-      PENDING: { ar: 'قيد الانتظار والمراجعة', en: 'PENDING', icon: '⏳', color: '#d97706', bg: '#fef3c7' },
-      CONFIRMED: { ar: 'مؤكد وجاري التجهيز', en: 'CONFIRMED', icon: '✓', color: '#0284c7', bg: '#e0f2fe' },
-      PROCESSING: { ar: 'قيد التجهيز والتغليف', en: 'PROCESSING', icon: '📦', color: '#7c3aed', bg: '#ede9fe' },
-      READY_TO_SHIP: { ar: 'جاهز للشحن والتسليم', en: 'READY_TO_SHIP', icon: '📦', color: '#0d9488', bg: '#ccfbf1' },
-      READY_FOR_SHIPMENT: { ar: 'جاهز للشحن والتسليم', en: 'READY_TO_SHIP', icon: '📦', color: '#0d9488', bg: '#ccfbf1' },
-      SHIPPED: { ar: 'تم الشحن مع المندوب', en: 'SHIPPED', icon: '🚚', color: '#0284c7', bg: '#e0f2fe' },
-      DELIVERED: { ar: 'تم التسليم بنجاح ✓', en: 'DELIVERED', icon: '✓', color: '#16a34a', bg: '#dcfce7' },
-      CANCELLED_BY_CUSTOMER: { ar: 'ملغي من قبل العميل', en: 'CANCELLED_BY_CUSTOMER', icon: '✕', color: '#dc2626', bg: '#fee2e2' },
-      CANCELLED_BY_SELLER: { ar: 'ملغي من قبل المتجر', en: 'CANCELLED_BY_SELLER', icon: '✕', color: '#dc2626', bg: '#fee2e2' },
-      REJECTED_BY_SELLER: { ar: 'مرفوض من المتجر', en: 'REJECTED_BY_SELLER', icon: '✕', color: '#dc2626', bg: '#fee2e2' },
-      CANCELLED_BY_ADMIN: { ar: 'ملغي من قبل الإدارة', en: 'CANCELLED_BY_ADMIN', icon: '✕', color: '#dc2626', bg: '#fee2e2' },
-      CANCELLED: { ar: 'ملغي', en: 'CANCELLED', icon: '✕', color: '#dc2626', bg: '#fee2e2' },
-      CANCELLATION_REQUESTED: { ar: 'طلب إلغاء قيد المراجعة', en: 'CANCELLATION_REQUESTED', icon: '⏳', color: '#d97706', bg: '#fef3c7' },
-      RETURN_REQUESTED: { ar: 'طلب إرجاع قيد المراجعة', en: 'RETURN_REQUESTED', icon: '↩', color: '#ea580c', bg: '#ffedd5' },
-      RETURN_APPROVED: { ar: 'تمت الموافقة على الإرجاع', en: 'RETURN_APPROVED', icon: '✓', color: '#16a34a', bg: '#dcfce7' },
-      RETURNED: { ar: 'تم استلام المرتجع', en: 'RETURNED', icon: '↩', color: '#475569', bg: '#f1f5f9' },
-      REFUND_PENDING: { ar: 'استرداد المبلغ قيد التنفيذ', en: 'REFUND_PENDING', icon: '💳', color: '#0d9488', bg: '#ccfbf1' },
-      REFUNDED: { ar: 'تم الاسترداد بالكامل ✓', en: 'REFUNDED', icon: '✓', color: '#0d9488', bg: '#ccfbf1' },
+      PENDING: { ar: 'قيد الانتظار والمراجعة', en: 'PENDING', icon: '', color: '#d97706', bg: '#fef3c7' },
+      CONFIRMED: { ar: 'مؤكد وجاري التجهيز', en: 'CONFIRMED', icon: '', color: '#0284c7', bg: '#e0f2fe' },
+      PROCESSING: { ar: 'قيد التجهيز والتغليف', en: 'PROCESSING', icon: '', color: '#7c3aed', bg: '#ede9fe' },
+      READY_TO_SHIP: { ar: 'جاهز للشحن والتسليم', en: 'READY_TO_SHIP', icon: '', color: '#0d9488', bg: '#ccfbf1' },
+      READY_FOR_SHIPMENT: { ar: 'جاهز للشحن والتسليم', en: 'READY_TO_SHIP', icon: '', color: '#0d9488', bg: '#ccfbf1' },
+      SHIPPED: { ar: 'تم الشحن مع المندوب', en: 'SHIPPED', icon: '', color: '#0284c7', bg: '#e0f2fe' },
+      DELIVERED: { ar: 'تم التسليم بنجاح', en: 'DELIVERED', icon: '', color: '#16a34a', bg: '#dcfce7' },
+      CANCELLED_BY_CUSTOMER: { ar: 'ملغي من قبل العميل', en: 'CANCELLED_BY_CUSTOMER', icon: '', color: '#dc2626', bg: '#fee2e2' },
+      CANCELLED_BY_SELLER: { ar: 'ملغي من قبل المتجر', en: 'CANCELLED_BY_SELLER', icon: '', color: '#dc2626', bg: '#fee2e2' },
+      REJECTED_BY_SELLER: { ar: 'مرفوض من المتجر', en: 'REJECTED_BY_SELLER', icon: '', color: '#dc2626', bg: '#fee2e2' },
+      CANCELLED_BY_ADMIN: { ar: 'ملغي من قبل الإدارة', en: 'CANCELLED_BY_ADMIN', icon: '', color: '#dc2626', bg: '#fee2e2' },
+      CANCELLED: { ar: 'ملغي', en: 'CANCELLED', icon: '', color: '#dc2626', bg: '#fee2e2' },
+      CANCELLATION_REQUESTED: { ar: 'طلب إلغاء قيد المراجعة', en: 'CANCELLATION_REQUESTED', icon: '', color: '#d97706', bg: '#fef3c7' },
+      RETURN_REQUESTED: { ar: 'طلب إرجاع قيد المراجعة', en: 'RETURN_REQUESTED', icon: '', color: '#ea580c', bg: '#ffedd5' },
+      RETURN_APPROVED: { ar: 'تمت الموافقة على الإرجاع', en: 'RETURN_APPROVED', icon: '', color: '#16a34a', bg: '#dcfce7' },
+      RETURNED: { ar: 'تم استلام المرتجع', en: 'RETURNED', icon: '', color: '#475569', bg: '#f1f5f9' },
+      REFUND_PENDING: { ar: 'استرداد المبلغ قيد التنفيذ', en: 'REFUND_PENDING', icon: '', color: '#0d9488', bg: '#ccfbf1' },
+      REFUNDED: { ar: 'تم الاسترداد بالكامل', en: 'REFUNDED', icon: '', color: '#0d9488', bg: '#ccfbf1' },
     };
     const orderStatus = orderStatusMap[rawOrderStatus] || {
       ar: rawOrderStatus,
       en: rawOrderStatus,
-      icon: rawOrderStatus === 'DELIVERED' ? '✓' : (rawOrderStatus.includes('CANCEL') ? '✕' : 'ℹ'),
+      icon: '',
       color: rawOrderStatus === 'DELIVERED' ? '#16a34a' : (rawOrderStatus.includes('CANCEL') ? '#dc2626' : '#64748b'),
       bg: rawOrderStatus === 'DELIVERED' ? '#dcfce7' : (rawOrderStatus.includes('CANCEL') ? '#fee2e2' : '#f1f5f9'),
     };
@@ -387,7 +387,7 @@ export class SellerOrderPrintService {
     let walletReleaseDate = '';
 
     if (isExplicitlySettled) {
-      walletReleaseStatus = 'تم التحويل للمحفظة ✓';
+      walletReleaseStatus = 'تم التحويل للمحفظة';
       const settlementRecord = sellerOrder.settlementItems?.[0]?.settlement;
       const settlementTimestamp = settlementRecord?.processedAt || settlementRecord?.settlementDate;
       const paidDate = settlementTimestamp
@@ -589,9 +589,10 @@ export class SellerOrderPrintService {
   private static renderA4Invoice(d: PrintDocumentData, autoPrint: boolean): string {
     const printScript = this.getSharedPrintScript(autoPrint);
 
+    const storeInitial = SellerOrderPrintService.escapeHtml((d.store.name || 'S').trim().charAt(0).toUpperCase());
     const storeLogoHtml = d.store.logo
-      ? `<img class="store-avatar" src="${d.store.logo}" alt="${d.store.name}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" /><div class="store-avatar-fallback" style="display:none;">🏪</div>`
-      : `<div class="store-avatar-fallback">🏪</div>`;
+      ? `<img class="store-avatar" src="${d.store.logo}" alt="${d.store.name}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" /><div class="store-avatar-fallback" style="display:none;">${storeInitial}</div>`
+      : `<div class="store-avatar-fallback">${storeInitial}</div>`;
 
     const souqnaLogoHtml = d.souqnaLogoDataUri
       ? `<img class="souqnaa-logo-img" src="${d.souqnaLogoDataUri}" alt="سوقناا SOUQNAA" />`
@@ -785,7 +786,12 @@ export class SellerOrderPrintService {
     }
     .verified-icon {
       color: #0284c7;
-      font-size: 13px;
+      font-size: 10.5px;
+      font-weight: 700;
+      background: #e0f2fe;
+      border: 1px solid #bae6fd;
+      border-radius: 4px;
+      padding: 1px 5px;
     }
     .store-sub {
       font-size: 11px;
@@ -1121,8 +1127,8 @@ export class SellerOrderPrintService {
 </head>
 <body>
   <div class="no-print">
-    <button id="doPrintBtn" type="button" class="btn btn-primary" onclick="triggerPrint();">🖨️ طباعة الفاتورة (Print / PDF)</button>
-    <button id="closeWinBtn" type="button" class="btn btn-secondary" onclick="window.close();">✕ إغلاق النافذة</button>
+    <button id="doPrintBtn" type="button" class="btn btn-primary" onclick="triggerPrint();">طباعة الفاتورة — Print / PDF</button>
+    <button id="closeWinBtn" type="button" class="btn btn-secondary" onclick="window.close();">إغلاق النافذة</button>
   </div>
 
   <div class="sheet">
@@ -1136,7 +1142,7 @@ export class SellerOrderPrintService {
         <div class="brand-meta">
           <div class="brand-title">سوقناا</div>
           <div class="brand-tagline">منصة التجارة والتسوق الإلكتروني الرائدة</div>
-          <div class="official-badge">✓ وثيقة شراء ومبيعات رسمية</div>
+          <div class="official-badge">وثيقة شراء ومبيعات رسمية</div>
         </div>
       </div>
 
@@ -1146,9 +1152,10 @@ export class SellerOrderPrintService {
         <div class="store-details">
           <div class="store-name-row">
             <span class="store-name">${d.store.name}</span>
-            ${d.store.isVerified ? '<span class="verified-icon" title="متجر موثق">✓</span>' : ''}
+            ${d.store.isVerified ? '<span class="verified-icon" title="متجر موثق">موثق</span>' : ''}
           </div>
           ${d.store.phone ? `<div class="store-sub">هاتف: <span dir="ltr">${d.store.phone}</span></div>` : ''}
+          ${d.store.email ? `<div class="store-sub">البريد: <span dir="ltr">${d.store.email}</span></div>` : ''}
           ${d.store.address ? `<div class="store-sub">${d.store.address}</div>` : ''}
         </div>
       </div>
@@ -1162,7 +1169,7 @@ export class SellerOrderPrintService {
         <div class="hero-main-order">الطلب الرئيسي: ${d.mainOrderNumber}</div>
       </div>
       <div class="hero-badges-group">
-        <div class="status-pill" style="background: ${d.orderStatusBg}; color: ${d.orderStatusColor}; font-weight: 800;">${d.orderStatusIcon} ${d.orderStatusAr}</div>
+        <div class="status-pill" style="background: ${d.orderStatusBg}; color: ${d.orderStatusColor}; font-weight: 800;">${d.orderStatusAr}</div>
         <div class="status-pill ${d.paymentStatusAr.includes('مدفوع') ? 'paid' : 'pending'}">${d.paymentStatusAr}</div>
         <div class="status-pill method">${d.paymentMethodAr}</div>
       </div>
@@ -1171,18 +1178,18 @@ export class SellerOrderPrintService {
     <!-- Metadata Grid -->
     <div class="meta-grid">
       <div class="meta-card">
-        <h3>📅 بيانات الطلب والتسليم</h3>
+        <h3>بيانات الطلب والتسليم</h3>
         <div class="meta-row"><span class="lbl">تاريخ ووقت الشراء:</span><span class="val">${d.orderDateFormattedAr}</span></div>
-        <div class="meta-row"><span class="lbl">حالة معالجة الطلب:</span><span class="val" style="color:${d.orderStatusColor}; font-weight:800;">${d.orderStatusIcon} ${d.orderStatusAr}</span></div>
+        <div class="meta-row"><span class="lbl">حالة معالجة الطلب:</span><span class="val" style="color:${d.orderStatusColor}; font-weight:800;">${d.orderStatusAr}</span></div>
         <div class="meta-row"><span class="lbl">طريقة الدفع المختارة:</span><span class="val">${d.paymentMethodAr}</span></div>
       </div>
 
       <div class="meta-card">
-        <h3>👤 بيانات المستلم والشحن</h3>
+        <h3>بيانات المستلم والشحن</h3>
         <div class="meta-row"><span class="lbl">اسم العميل المستلم:</span><span class="val">${d.customer.name}</span></div>
         <div class="meta-row"><span class="lbl">رقم هاتف التواصل:</span><span class="val" dir="ltr">${d.customer.phone}</span></div>
         <div class="meta-row"><span class="lbl">عنوان التوصيل:</span><span class="val">${d.customer.deliveryAddress.formatted}</span></div>
-        ${d.customer.deliveryAddress.plusCode ? `<div class="meta-row"><span class="lbl">رمز الموقع (Plus Code):</span><span class="val" dir="ltr" style="font-family: monospace; font-weight: 700; color: #0284c7;">📍 ${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
+        ${d.customer.deliveryAddress.plusCode ? `<div class="meta-row"><span class="lbl">رمز الموقع:</span><span class="val" dir="ltr" style="font-family: monospace; font-weight: 700; color: #0284c7;">${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
         ${d.deliveryNotes ? `<div class="meta-row" style="margin-top: 4px; padding-top: 4px; border-top: 0.5px dashed #cbd5e1;"><span class="lbl" style="color:#ea580c; font-weight:700;">ملاحظات التوصيل:</span><span class="val" style="color:#0f172a; font-weight:700;">${d.deliveryNotes}</span></div>` : ''}
       </div>
     </div>
@@ -1194,7 +1201,7 @@ export class SellerOrderPrintService {
           <tr>
             <th style="width: 35px;" class="center">#</th>
             <th>المنتج والمواصفات</th>
-            <th style="width: 110px;">الرمز (SKU)</th>
+            <th style="width: 110px;">الرمز — SKU</th>
             <th style="width: 60px;" class="center">الكمية</th>
             <th style="width: 105px;">سعر الوحدة</th>
             <th style="width: 85px;">الخصم</th>
@@ -1229,7 +1236,7 @@ export class SellerOrderPrintService {
       <div class="qr-security-card">
         ${d.qrCodeDataUri ? `<img src="${d.qrCodeDataUri}" alt="QR Verification" />` : ''}
         <div class="qr-info-text">
-          <strong>رمز التحقق الرقمي المعتمد (QR)</strong>
+          <strong>رمز التحقق الرقمي المعتمد — QR</strong>
           <div>امسح الرمز للتحقق الفوري من صحة الفاتورة ومطابقة بيانات الشحنة مع خوادم سوقناا.</div>
           <div class="qr-hash">${d.qrPayload.slice(0, 48)}...</div>
         </div>
@@ -1311,8 +1318,8 @@ export class SellerOrderPrintService {
   <title>إيصال_${d.sellerOrderNumber}</title>
   <style>
     @page {
-      size: 80mm auto;
-      margin: 2mm 3mm;
+      size: 80mm;
+      margin: 0;
     }
     * { box-sizing: border-box; }
     body {
@@ -1388,15 +1395,29 @@ export class SellerOrderPrintService {
       display: block;
     }
     @media print {
+      @page {
+        size: 80mm;
+        margin: 0;
+      }
+      html, body {
+        width: 80mm;
+        margin: 0;
+        padding: 0;
+        background: #fff;
+      }
       .no-print { display: none !important; }
-      body { width: 72mm; padding: 0; }
+      body {
+        width: 72mm;
+        margin: 0 auto;
+        padding: 2mm 0 6mm 0;
+      }
     }
   </style>
 </head>
 <body>
   <div class="no-print" style="display: flex; justify-content: center; gap: 8px;">
-    <button id="doPrintBtn" type="button" class="btn" onclick="triggerPrint();">🖨️ طباعة الإيصال الحراري 80mm</button>
-    <button id="closeWinBtn" type="button" class="btn" style="background: #64748b;" onclick="window.close();">✕ إغلاق</button>
+    <button id="doPrintBtn" type="button" class="btn" onclick="triggerPrint();">طباعة الإيصال الحراري 80mm</button>
+    <button id="closeWinBtn" type="button" class="btn" style="background: #64748b;" onclick="window.close();">إغلاق</button>
   </div>
 
   ${souqnaLogoHtml}
@@ -1407,7 +1428,7 @@ export class SellerOrderPrintService {
   <div class="row tight"><span>رقم طلب البائع:</span><span class="bold" dir="ltr">${d.sellerOrderNumber}</span></div>
   <div class="row tight"><span>الطلب الرئيسي:</span><span class="bold" dir="ltr">${d.mainOrderNumber}</span></div>
   <div class="row tight"><span>التاريخ:</span><span>${d.orderDateFormattedAr || d.orderDateFormattedEn}</span></div>
-  <div class="row tight"><span>حالة الطلب:</span><span class="bold" style="color: ${d.orderStatusColor};">${d.orderStatusIcon} ${d.orderStatusAr}</span></div>
+  <div class="row tight"><span>حالة الطلب:</span><span class="bold" style="color: ${d.orderStatusColor};">${d.orderStatusAr}</span></div>
   <div class="divider"></div>
 
   <table>
@@ -1446,7 +1467,7 @@ export class SellerOrderPrintService {
   <div class="row tight"><span>العميل:</span><span>${d.customer.name}</span></div>
   <div class="row tight"><span>الهاتف:</span><span dir="ltr">${d.customer.phone}</span></div>
   <div class="row tight"><span>العنوان:</span><span>${d.customer.deliveryAddress.cityName} - ${d.customer.deliveryAddress.neighborhood || d.customer.deliveryAddress.street || ''}</span></div>
-  ${d.customer.deliveryAddress.plusCode ? `<div class="row tight"><span>Plus Code:</span><span dir="ltr" class="bold" style="font-family: monospace; color: #0284c7;">📍 ${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
+  ${d.customer.deliveryAddress.plusCode ? `<div class="row tight"><span>Plus Code:</span><span dir="ltr" class="bold" style="font-family: monospace; color: #0284c7;">${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
   ${d.deliveryNotes ? `<div class="row tight"><span>ملاحظات:</span><span class="bold">${d.deliveryNotes}</span></div>` : ''}
 
   <div class="divider"></div>
@@ -1477,8 +1498,8 @@ export class SellerOrderPrintService {
   <title>إيصال_58mm_${d.sellerOrderNumber}</title>
   <style>
     @page {
-      size: 58mm auto;
-      margin: 1mm 2mm;
+      size: 58mm;
+      margin: 0;
     }
     * { box-sizing: border-box; }
     body {
@@ -1543,15 +1564,29 @@ export class SellerOrderPrintService {
       display: block;
     }
     @media print {
+      @page {
+        size: 58mm;
+        margin: 0;
+      }
+      html, body {
+        width: 58mm;
+        margin: 0;
+        padding: 0;
+        background: #fff;
+      }
       .no-print { display: none !important; }
-      body { width: 48mm; padding: 0; }
+      body {
+        width: 48mm;
+        margin: 0 auto;
+        padding: 2mm 0 5mm 0;
+      }
     }
   </style>
 </head>
 <body>
   <div class="no-print" style="display: flex; justify-content: center; gap: 6px;">
-    <button id="doPrintBtn" type="button" class="btn" onclick="triggerPrint();">🖨️ طباعة 58mm</button>
-    <button id="closeWinBtn" type="button" class="btn" style="background: #64748b;" onclick="window.close();">✕ إغلاق</button>
+    <button id="doPrintBtn" type="button" class="btn" onclick="triggerPrint();">طباعة 58mm</button>
+    <button id="closeWinBtn" type="button" class="btn" style="background: #64748b;" onclick="window.close();">إغلاق</button>
   </div>
 
   <div class="center bold" style="font-size: 13px;">سوقناا • SOUQNAA</div>
@@ -1561,7 +1596,7 @@ export class SellerOrderPrintService {
   <div class="row"><span>طلب المتجر:</span><span class="bold" dir="ltr">${d.sellerOrderNumber}</span></div>
   <div class="row"><span>الرئيسي:</span><span dir="ltr">${d.mainOrderNumber}</span></div>
   <div class="row"><span>التاريخ:</span><span>${d.orderDateFormattedAr || d.orderDateISO.slice(0, 10)}</span></div>
-  <div class="row"><span>حالة الطلب:</span><span class="bold">${d.orderStatusIcon} ${d.orderStatusAr}</span></div>
+  <div class="row"><span>حالة الطلب:</span><span class="bold">${d.orderStatusAr}</span></div>
   <div class="divider"></div>
 
   ${d.items
@@ -1778,8 +1813,8 @@ export class SellerOrderPrintService {
 </head>
 <body>
   <div class="no-print">
-    <button id="doPrintBtn" type="button" class="btn btn-primary" onclick="triggerPrint();">🖨️ طباعة بوليصة التجهيز (Packing Slip)</button>
-    <button id="closeWinBtn" type="button" class="btn btn-secondary" onclick="window.close();">✕ إغلاق النافذة</button>
+    <button id="doPrintBtn" type="button" class="btn btn-primary" onclick="triggerPrint();">طباعة بوليصة التجهيز — Packing Slip</button>
+    <button id="closeWinBtn" type="button" class="btn btn-secondary" onclick="window.close();">إغلاق النافذة</button>
   </div>
 
   <div class="sheet">
@@ -1789,7 +1824,7 @@ export class SellerOrderPrintService {
         ${souqnaLogoHtml}
         <div>
           <div style="font-weight: 900; font-size: 16px; color:#0f172a;">بوليصة تجهيز وتعبئة الشحنة</div>
-          <div class="badge">📦 PACKING SLIP • قسم المستودع والتغليف</div>
+          <div class="badge">PACKING SLIP • قسم المستودع والتغليف</div>
           <div style="margin-top: 4px; font-size: 12px; color: #475569;">المتجر: <strong>${d.store.name}</strong></div>
         </div>
       </div>
@@ -1809,10 +1844,10 @@ export class SellerOrderPrintService {
         <div>اسم العميل المستلم: <strong>${d.customer.name}</strong></div>
         <div>رقم هاتف التواصل: <strong dir="ltr">${d.customer.phone}</strong></div>
         <div style="grid-column: span 2;">عنوان التوصيل: <strong>${d.customer.deliveryAddress.formatted}</strong></div>
-        ${d.customer.deliveryAddress.plusCode ? `<div style="grid-column: span 2;">رمز الموقع الرقمي (Plus Code): <strong dir="ltr" style="font-family: monospace; color: #0284c7;">📍 ${d.customer.deliveryAddress.plusCode}</strong></div>` : ''}
+        ${d.customer.deliveryAddress.plusCode ? `<div style="grid-column: span 2;">رمز الموقع الرقمي: <strong dir="ltr" style="font-family: monospace; color: #0284c7;">${d.customer.deliveryAddress.plusCode}</strong></div>` : ''}
         ${d.deliveryNotes ? `
         <div style="grid-column: span 2; margin-top: 6px; padding: 8px 12px; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 6px;">
-          <strong style="color: #ea580c; font-size: 11.5px;">📝 ملاحظات وتعليمات التوصيل (مُدخلة من العميل في شاشة الدفع):</strong>
+          <strong style="color: #ea580c; font-size: 11.5px;">ملاحظات وتعليمات التوصيل:</strong>
           <div style="font-size: 12px; font-weight: bold; color: #0f172a; margin-top: 3px;">${d.deliveryNotes}</div>
         </div>
         ` : ''}
@@ -1825,7 +1860,7 @@ export class SellerOrderPrintService {
           <tr>
             <th style="width: 40px; text-align: center;">#</th>
             <th>اسم المنتج ومواصفاته</th>
-            <th style="width: 130px;">الرمز (SKU)</th>
+            <th style="width: 130px;">الرمز — SKU</th>
             <th style="width: 80px; text-align: center;">الكمية</th>
             <th style="width: 100px; text-align: center;">فحص المستودع</th>
           </tr>
@@ -1857,11 +1892,11 @@ export class SellerOrderPrintService {
       <div>
         <div class="check-item">
           <span class="check-box-cell" style="width: 18px; height: 18px;"></span>
-          <span>تم فحص جودة ومطابقة المنتجات وتواريخ الصلاحية (Checked)</span>
+          <span>تم فحص جودة ومطابقة المنتجات وتواريخ الصلاحية — Checked</span>
         </div>
         <div class="check-item">
           <span class="check-box-cell" style="width: 18px; height: 18px;"></span>
-          <span>تم التغليف المحكم ووضع ملصق الشحنة الآمن (Packed)</span>
+          <span>تم التغليف المحكم ووضع ملصق الشحنة الآمن — Packed</span>
         </div>
       </div>
       ${d.qrCodeDataUri ? `<img src="${d.qrCodeDataUri}" style="width: 85px; height: 85px; border-radius: 6px; background:#fff; padding:4px;" alt="QR" />` : ''}
@@ -1891,7 +1926,7 @@ export class SellerOrderPrintService {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
   <title>بوصلة_تجهيز_80مم_${d.sellerOrderNumber}</title>
   <style>
-    @page { size: 80mm auto; margin: 2mm 3mm; }
+    @page { size: 80mm; margin: 0; }
     * { box-sizing: border-box; }
     body {
       font-family: 'Courier New', Courier, monospace, 'Cairo', sans-serif;
@@ -1909,15 +1944,20 @@ export class SellerOrderPrintService {
     .center { text-align: center; }
     .bold { font-weight: bold; }
     .divider { border-top: 1px dashed #000; margin: 6px 0; }
-    @media print { .no-print { display: none !important; } }
+    @media print {
+      @page { size: 80mm; margin: 0; }
+      html, body { width: 80mm; margin: 0; padding: 0; background: #fff; }
+      .no-print { display: none !important; }
+      body { width: 72mm; margin: 0 auto; padding: 2mm 0 6mm 0; }
+    }
   </style>
 </head>
 <body>
   <div class="no-print">
-    <button id="doPrintBtn" type="button" class="btn" onclick="triggerPrint();">🖨️ طباعة بوصلة التجهيز (80 مم)</button>
+    <button id="doPrintBtn" type="button" class="btn" onclick="triggerPrint();">طباعة بوصلة التجهيز — 80 مم</button>
   </div>
   <div class="center bold" style="font-size: 14px;">سوقناا • بوصلة تجهيز</div>
-  <div class="center" style="font-size: 10px;">PACKING SLIP (80MM - NO FINANCIALS)</div>
+  <div class="center" style="font-size: 10px;">PACKING SLIP — 80MM — NO FINANCIALS</div>
   <div class="divider"></div>
 
   <div>المتجر: <span class="bold">${d.store.name}</span></div>
@@ -1929,7 +1969,7 @@ export class SellerOrderPrintService {
   <div>العميل: <span class="bold">${d.customer.name}</span></div>
   <div>الهاتف: <span dir="ltr">${d.customer.phone}</span></div>
   <div>العنوان: <span>${d.customer.deliveryAddress.formatted}</span></div>
-  ${d.customer.deliveryAddress.plusCode ? `<div>Plus Code: <span class="bold" dir="ltr" style="font-family: monospace; color: #0284c7;">📍 ${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
+  ${d.customer.deliveryAddress.plusCode ? `<div>رمز الموقع: <span class="bold" dir="ltr" style="font-family: monospace; color: #0284c7;">${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
   ${d.deliveryNotes ? `<div>ملاحظات التوصيل: <span class="bold">${d.deliveryNotes}</span></div>` : ''}
   <div class="divider"></div>
 
@@ -1947,8 +1987,8 @@ export class SellerOrderPrintService {
     .join('')}
 
   <div class="divider"></div>
-  <div>[  ] فحص الجودة (Checked)</div>
-  <div>[  ] تم التغليف والإغلاق (Packed)</div>
+  <div>[  ] فحص الجودة — Checked</div>
+  <div>[  ] تم التغليف والإغلاق — Packed</div>
   <div class="divider"></div>
   ${d.qrCodeDataUri ? `<img src="${d.qrCodeDataUri}" style="width: 80px; height: 80px; display: block; margin: 0 auto;" alt="QR" />` : ''}
   <div class="center" style="font-size: 9px; font-family: monospace;">${d.qrPayload.slice(0, 30)}</div>
@@ -1970,7 +2010,7 @@ export class SellerOrderPrintService {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
   <title>بوصلة_تجهيز_58مم_${d.sellerOrderNumber}</title>
   <style>
-    @page { size: 58mm auto; margin: 1mm 2mm; }
+    @page { size: 58mm; margin: 0; }
     * { box-sizing: border-box; }
     body {
       font-family: 'Courier New', Courier, monospace, 'Cairo', sans-serif;
@@ -1988,15 +2028,20 @@ export class SellerOrderPrintService {
     .center { text-align: center; }
     .bold { font-weight: bold; }
     .divider { border-top: 1px dashed #000; margin: 4px 0; }
-    @media print { .no-print { display: none !important; } }
+    @media print {
+      @page { size: 58mm; margin: 0; }
+      html, body { width: 58mm; margin: 0; padding: 0; background: #fff; }
+      .no-print { display: none !important; }
+      body { width: 48mm; margin: 0 auto; padding: 2mm 0 5mm 0; }
+    }
   </style>
 </head>
 <body>
   <div class="no-print">
-    <button id="doPrintBtn" type="button" class="btn" onclick="triggerPrint();">🖨️ طباعة بوصلة التجهيز (58 مم)</button>
+    <button id="doPrintBtn" type="button" class="btn" onclick="triggerPrint();">طباعة بوصلة التجهيز — 58 مم</button>
   </div>
   <div class="center bold" style="font-size: 12px;">سوقناا • بوصلة تجهيز</div>
-  <div class="center" style="font-size: 8.5px;">PACKING SLIP (58MM)</div>
+  <div class="center" style="font-size: 8.5px;">PACKING SLIP — 58MM</div>
   <div class="divider"></div>
 
   <div>المتجر: <span class="bold">${d.store.name}</span></div>
@@ -2008,7 +2053,7 @@ export class SellerOrderPrintService {
   <div>العميل: <span class="bold">${d.customer.name}</span></div>
   <div>الهاتف: <span dir="ltr">${d.customer.phone}</span></div>
   <div>العنوان: <span>${d.customer.deliveryAddress.formatted}</span></div>
-  ${d.customer.deliveryAddress.plusCode ? `<div>Plus Code: <span class="bold" dir="ltr" style="font-family: monospace; color: #0284c7;">📍 ${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
+  ${d.customer.deliveryAddress.plusCode ? `<div>رمز الموقع: <span class="bold" dir="ltr" style="font-family: monospace; color: #0284c7;">${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
   ${d.deliveryNotes ? `<div>ملاحظات: <span class="bold">${d.deliveryNotes}</span></div>` : ''}
   <div class="divider"></div>
 
@@ -2026,8 +2071,8 @@ export class SellerOrderPrintService {
     .join('')}
 
   <div class="divider"></div>
-  <div>[  ] فحص الجودة (Quality OK)</div>
-  <div>[  ] تم التغليف والإغلاق (Packed)</div>
+  <div>[  ] فحص الجودة — Quality OK</div>
+  <div>[  ] تم التغليف والإغلاق — Packed</div>
   <div class="divider"></div>
   ${d.qrCodeDataUri ? `<img src="${d.qrCodeDataUri}" style="width: 70px; height: 70px; display: block; margin: 4px auto;" alt="QR" />` : ''}
   <div class="center" style="font-size: 8px; font-family: monospace;">${d.qrPayload.slice(0, 26)}</div>
@@ -2055,7 +2100,7 @@ export class SellerOrderPrintService {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
   <title>كشف_حساب_حراري_80مم_${d.sellerOrderNumber}</title>
   <style>
-    @page { size: 80mm auto; margin: 2mm 3mm; }
+    @page { size: 80mm; margin: 0; }
     * { box-sizing: border-box; }
     body {
       font-family: 'Courier New', Courier, monospace, 'Cairo', sans-serif;
@@ -2075,23 +2120,28 @@ export class SellerOrderPrintService {
     .divider { border-top: 1px dashed #000; margin: 6px 0; }
     .row { display: flex; justify-content: space-between; margin: 3px 0; }
     .highlight-net { background: #f0fdf4; border: 1px solid #16a34a; padding: 4px; border-radius: 4px; font-weight: bold; font-size: 12px; margin: 6px 0; }
-    @media print { .no-print { display: none !important; } }
+    @media print {
+      @page { size: 80mm; margin: 0; }
+      html, body { width: 80mm; margin: 0; padding: 0; background: #fff; }
+      .no-print { display: none !important; }
+      body { width: 72mm; margin: 0 auto; padding: 2mm 0 6mm 0; }
+    }
   </style>
 </head>
 <body>
   <div class="no-print">
-    <button id="doPrintBtn" type="button" class="btn" onclick="triggerPrint();">🖨️ طباعة كشف الحساب المالي (80 مم)</button>
+    <button id="doPrintBtn" type="button" class="btn" onclick="triggerPrint();">طباعة كشف الحساب المالي — 80 مم</button>
   </div>
   <div class="center bold" style="font-size: 13.5px;">سوقناا • كشف حساب مالي</div>
-  <div class="center" style="font-size: 9.5px;">SELLER ORDER FINANCIAL STATEMENT (80MM)</div>
+  <div class="center" style="font-size: 9.5px;">SELLER ORDER FINANCIAL STATEMENT — 80MM</div>
   <div class="divider"></div>
 
   <div>المتجر: <span class="bold">${d.store.name}</span></div>
   <div>طلب المتجر: <span class="bold" dir="ltr">${d.sellerOrderNumber}</span></div>
   <div>الطلب الرئيسي: <span dir="ltr">${d.mainOrderNumber}</span></div>
   <div>التاريخ: <span>${d.orderDateFormattedAr}</span></div>
-  <div>حالة الطلب: <span class="bold" style="color: ${d.orderStatusColor};">${d.orderStatusIcon} ${d.orderStatusAr}</span></div>
-  <div>طريقة دفع العميل: <span>${d.paymentMethodAr} (${d.paymentStatusAr})</span></div>
+  <div>حالة الطلب: <span class="bold" style="color: ${d.orderStatusColor};">${d.orderStatusAr}</span></div>
+  <div>طريقة دفع العميل: <span>${d.paymentMethodAr} — ${d.paymentStatusAr}</span></div>
   <div class="divider"></div>
 
   <div class="bold" style="margin-bottom: 4px;">تسوية مبيعات الطلب للمتجر:</div>
@@ -2100,7 +2150,7 @@ export class SellerOrderPrintService {
     <span class="bold">${SellerOrderPrintService.formatNumber(fin.sellerGrossAmount)} ${d.totals.currency}</span>
   </div>
   <div class="row">
-    <span>عمولة المنصة (${fin.commissionRate ?? 10}%):</span>
+    <span>عمولة المنصة — ${fin.commissionRate ?? 10}%:</span>
     <span style="color: #dc2626;">-${SellerOrderPrintService.formatNumber(fin.platformCommission)} ${d.totals.currency}</span>
   </div>
   ${fin.discountContribution > 0 ? `
@@ -2127,7 +2177,7 @@ export class SellerOrderPrintService {
 
   <div class="row">
     <span>حالة استحقاق المحفظة:</span>
-    <span class="bold" style="color: ${fin.walletReleaseStatus.includes('✓') || fin.walletReleaseStatus.includes('مكتمل') ? '#16a34a' : '#d97706'};">${fin.walletReleaseStatus}</span>
+    <span class="bold" style="color: ${fin.walletReleaseStatus.includes('مكتمل') ? '#16a34a' : '#d97706'};">${fin.walletReleaseStatus}</span>
   </div>
   ${fin.walletReleaseDate ? `
   <div class="row">
@@ -2158,7 +2208,7 @@ export class SellerOrderPrintService {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
   <title>كشف_حساب_حراري_58مم_${d.sellerOrderNumber}</title>
   <style>
-    @page { size: 58mm auto; margin: 1mm 2mm; }
+    @page { size: 58mm; margin: 0; }
     * { box-sizing: border-box; }
     body {
       font-family: 'Courier New', Courier, monospace, 'Cairo', sans-serif;
@@ -2178,21 +2228,26 @@ export class SellerOrderPrintService {
     .divider { border-top: 1px dashed #000; margin: 4px 0; }
     .row { display: flex; justify-content: space-between; margin: 2px 0; }
     .highlight-net { background: #f0fdf4; border: 1px solid #16a34a; padding: 3px; border-radius: 4px; font-weight: bold; font-size: 11px; margin: 4px 0; }
-    @media print { .no-print { display: none !important; } }
+    @media print {
+      @page { size: 58mm; margin: 0; }
+      html, body { width: 58mm; margin: 0; padding: 0; background: #fff; }
+      .no-print { display: none !important; }
+      body { width: 48mm; margin: 0 auto; padding: 2mm 0 5mm 0; }
+    }
   </style>
 </head>
 <body>
   <div class="no-print">
-    <button id="doPrintBtn" type="button" class="btn" onclick="triggerPrint();">🖨️ طباعة كشف الحساب (58 مم)</button>
+    <button id="doPrintBtn" type="button" class="btn" onclick="triggerPrint();">طباعة كشف الحساب — 58 مم</button>
   </div>
   <div class="center bold" style="font-size: 12px;">سوقناا • كشف حساب مالي</div>
-  <div class="center" style="font-size: 8px;">ORDER STATEMENT (58MM)</div>
+  <div class="center" style="font-size: 8px;">ORDER STATEMENT — 58MM</div>
   <div class="divider"></div>
 
   <div>المتجر: <span class="bold">${d.store.name}</span></div>
   <div>الطلب: <span class="bold" dir="ltr">${d.sellerOrderNumber}</span></div>
   <div>التاريخ: <span>${d.orderDateFormattedAr}</span></div>
-  <div>الحالة: <span class="bold">${d.orderStatusIcon} ${d.orderStatusAr}</span></div>
+  <div>الحالة: <span class="bold">${d.orderStatusAr}</span></div>
   <div class="divider"></div>
 
   <div class="row">
@@ -2387,8 +2442,8 @@ export class SellerOrderPrintService {
 </head>
 <body>
   <div class="no-print">
-    <button id="doPrintBtn" type="button" class="btn btn-primary" onclick="triggerPrint();">🖨️ طباعة كشف حساب المتجر (Statement)</button>
-    <button id="closeWinBtn" type="button" class="btn btn-secondary" onclick="window.close();">✕ إغلاق النافذة</button>
+    <button id="doPrintBtn" type="button" class="btn btn-primary" onclick="triggerPrint();">طباعة كشف حساب المتجر — Statement</button>
+    <button id="closeWinBtn" type="button" class="btn btn-secondary" onclick="window.close();">إغلاق النافذة</button>
   </div>
 
   <div class="sheet">
@@ -2398,7 +2453,7 @@ export class SellerOrderPrintService {
         ${souqnaLogoHtml}
         <div>
           <div style="font-weight: 900; font-size: 16px; color:#0f172a;">كشف حساب ومستحقات المتجر المالية</div>
-          <div class="badge">💼 SELLER FINANCIAL STATEMENT • وثيقة تسوية داخلية</div>
+          <div class="badge">SELLER FINANCIAL STATEMENT • وثيقة تسوية داخلية</div>
           <div style="margin-top: 4px; font-size: 12px; color: #475569;">المتجر: <strong>${d.store.name}</strong></div>
         </div>
       </div>
@@ -2408,16 +2463,16 @@ export class SellerOrderPrintService {
           <div style="font-size: 11px; font-weight: bold; color: #64748b;">رقم طلب المتجر:</div>
           <div style="font-size: 16px; font-weight: 900; color: #FF6B00; font-family: 'Inter', monospace;">${d.sellerOrderNumber}</div>
           <div style="font-size: 12px; font-weight: 700; color: #64748b; font-family: 'Inter', monospace;">الرئيسي: ${d.mainOrderNumber}</div>
-          <div style="margin-top: 6px; display: inline-block; background: ${d.orderStatusBg}; color: ${d.orderStatusColor}; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 800;">${d.orderStatusIcon} ${d.orderStatusAr}</div>
+          <div style="margin-top: 6px; display: inline-block; background: ${d.orderStatusBg}; color: ${d.orderStatusColor}; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 800;">${d.orderStatusAr}</div>
         </div>
       </div>
     </div>
 
     <div class="info-grid">
       <div>تاريخ الطلب: <strong>${d.orderDateFormattedAr}</strong></div>
-      <div>حالة الطلب: <strong style="color: ${d.orderStatusColor};">${d.orderStatusIcon} ${d.orderStatusAr}</strong></div>
-      <div>طريقة دفع العميل: <strong>${d.paymentMethodAr}</strong> (${d.paymentStatusAr})</div>
-      <div>حالة استحقاق المحفظة: <strong style="color: ${fin.walletReleaseStatus.includes('✓') || fin.walletReleaseStatus.includes('مكتمل') ? '#059669' : '#d97706'};">${fin.walletReleaseStatus}</strong></div>
+      <div>حالة الطلب: <strong style="color: ${d.orderStatusColor};">${d.orderStatusAr}</strong></div>
+      <div>طريقة دفع العميل: <strong>${d.paymentMethodAr}</strong> — ${d.paymentStatusAr}</div>
+      <div>حالة استحقاق المحفظة: <strong style="color: ${fin.walletReleaseStatus.includes('مكتمل') ? '#059669' : '#d97706'};">${fin.walletReleaseStatus}</strong></div>
       ${fin.walletReleaseDate ? `<div>موعد تحرير الرصيد المتوقع: <strong>${fin.walletReleaseDate}</strong></div>` : ''}
     </div>
 
@@ -2425,25 +2480,25 @@ export class SellerOrderPrintService {
       <table class="statement-table">
         <thead>
           <tr>
-            <th>البند المالي (Financial Item)</th>
-            <th style="width: 140px; text-align: left;">المبلغ (${d.totals.currency})</th>
+            <th>البند المالي</th>
+            <th style="width: 140px; text-align: left;">المبلغ — ${d.totals.currency}</th>
             <th style="width: 220px;">التوضيح المحاسبي</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td>إجمالي قيمة مبيعات المتجر (Seller Gross Amount)</td>
+            <td>إجمالي قيمة مبيعات المتجر</td>
             <td style="text-align: left; font-weight: bold;">${SellerOrderPrintService.formatNumber(fin.sellerGrossAmount)}</td>
             <td>قيمة منتجات المتجر المباعة للعميل</td>
           </tr>
           <tr>
-            <td>عمولة منصة سوقناا (Platform Commission)</td>
+            <td>عمولة منصة سوقناا</td>
             <td style="text-align: left; color: #dc2626; font-weight: bold;">-${SellerOrderPrintService.formatNumber(fin.platformCommission)}</td>
-            <td>النسبة المتفق عليها لخدمات المنصة والبوابة (${fin.commissionRate ?? 10}%)</td>
+            <td>النسبة المتفق عليها لخدمات المنصة والبوابة — ${fin.commissionRate ?? 10}%</td>
           </tr>
           ${fin.discountContribution > 0
         ? `<tr>
-              <td>مساهمة المتجر في الخصم (Seller Discount)</td>
+              <td>مساهمة المتجر في الخصم</td>
               <td style="text-align: left; color: #dc2626; font-weight: bold;">-${SellerOrderPrintService.formatNumber(fin.discountContribution)}</td>
               <td>الخصم الترويجي الممول من المتجر</td>
             </tr>`
@@ -2451,7 +2506,7 @@ export class SellerOrderPrintService {
       }
           ${fin.platformFundedDiscount > 0
         ? `<tr>
-              <td>خصم ممول من المنصة (Platform Subsidized)</td>
+              <td>خصم ممول من المنصة</td>
               <td style="text-align: left; color: #059669; font-weight: bold;">+${SellerOrderPrintService.formatNumber(fin.platformFundedDiscount)}</td>
               <td>تعويض المنصة للمتجر عن عروض سوقناا</td>
             </tr>`
@@ -2459,14 +2514,14 @@ export class SellerOrderPrintService {
       }
           ${fin.refundDeduction > 0
         ? `<tr>
-              <td>استقطاعات المرتجعات (Refund Deduction)</td>
+              <td>استقطاعات المرتجعات</td>
               <td style="text-align: left; color: #dc2626; font-weight: bold;">-${SellerOrderPrintService.formatNumber(fin.refundDeduction)}</td>
               <td>تسوية المنتجات المسترجعة أو التالفة</td>
             </tr>`
         : ''
       }
           <tr class="net-row">
-            <td>صافي مستحقات المتجر للأرباح (Net Seller Payout)</td>
+            <td>صافي مستحقات المتجر للأرباح</td>
             <td style="text-align: left;">${SellerOrderPrintService.formatNumber(fin.netSellerAmount)}</td>
             <td>المبلغ الصافي المستحق التحويل لمحفظة المتجر</td>
           </tr>
@@ -2475,7 +2530,7 @@ export class SellerOrderPrintService {
     </div>
 
     <div style="margin-top: 20px; padding: 12px 14px; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; font-size: 11.5px; color: #475569;">
-      📌 ملاحظة هامة: هذا الكشف يوضح بدقة الحسابات المالية الخاصة بمتجركم فقط لهذا الطلب، ولا يتم إرفاقه للعميل مع الشحنة للحفاظ على سرية تسويات المتجر مع المنصة.
+      ملاحظة هامة: هذا الكشف يوضح بدقة الحسابات المالية الخاصة بمتجركم فقط لهذا الطلب، ولا يتم إرفاقه للعميل مع الشحنة للحفاظ على سرية تسويات المتجر مع المنصة.
     </div>
 
     <div style="margin-top: 36px; display: flex; justify-content: space-between; font-size: 11px; color: #64748b;">

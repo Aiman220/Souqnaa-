@@ -44,8 +44,7 @@ export class AICodeSecurityGate {
         line.includes('interface') ||
         line.includes('DEFAULT') ||
         line.includes('test_') ||
-        line.includes('sec_test_') ||
-        line.includes('souqna_super'),
+        line.includes('sec_test_'),
     },
     // 2. Client-Authoritative Financial Values
     {
@@ -131,7 +130,26 @@ export class AICodeSecurityGate {
       message: 'Maintenance or privileged config route registered without admin auth middleware.',
       pattern: /app\.(?:post|put|delete)\([^)]*config\/maintenance(?![^;]*requireAdmin)/i,
     },
+    // 9. Client-Controlled Direct Wallet Balance Mutation
+    {
+      id: 'SEC-009',
+      category: 'FINANCIAL',
+      severity: 'CRITICAL',
+      message: 'Direct balance mutation from client input detected without ledger engine.',
+      pattern: /availableBalance:\s*(?:req\.body\.(?:balance|availableBalance))/i,
+      isFalsePositive: (line, filePath) => filePath.includes('test') || filePath.includes('schema'),
+    },
+    // 10. Third-Party Private Key Exposure in Public Responses
+    {
+      id: 'SEC-010',
+      category: 'SECRETS',
+      severity: 'HIGH',
+      message: 'Direct leakage of server-side API secret keys in client-facing responses.',
+      pattern: /ResponseUtil\.success\([^,]+,\s*\{[^}]*apiKey:\s*config\.geo\.geoapifyApiKey/i,
+      isFalsePositive: (_line, filePath) => filePath.includes('test'),
+    },
   ];
+
 
   /**
    * Scans a file or directory for security violations.

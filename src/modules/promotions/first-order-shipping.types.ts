@@ -10,10 +10,13 @@ import {
   FirstOrderEligibilityStatus,
 } from '@prisma/client';
 
+import { DeviceIntegrityStatus, IntegrityEvidenceInput } from '../integrity/integrity.types';
+
 export {
   ShippingPromotionCostBearer,
   PromotionReservationStatus,
   FirstOrderEligibilityStatus,
+  DeviceIntegrityStatus,
 };
 
 export interface FirstOrderShippingConfigDto {
@@ -50,6 +53,7 @@ export interface FirstOrderEligibilityInput {
   ipAddress?: string;
   userAgent?: string;
   deviceId?: string;
+  integrityEvidence?: IntegrityEvidenceInput;
 }
 
 export interface FirstOrderEligibilityResult {
@@ -77,6 +81,7 @@ export interface FirstOrderAbuseEvaluation {
     priorOrdersCount: number;
     matchingPhoneCount: number;
     matchingAddressCount: number;
+    deviceIntegrityStatus: DeviceIntegrityStatus;
     deviceIntegrityOk: boolean;
   };
 }

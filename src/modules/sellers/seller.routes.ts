@@ -30,6 +30,7 @@ import { SellerFinancialRiskService } from '../commission/seller-financial-risk.
 import { RefundService } from '../refunds/services/refund.service';
 import { notificationDispatcher } from '../notifications/services/notification-dispatcher';
 import { NotificationEventFactory } from '../notifications/events/domain-events';
+import { WishlistAlertsJob } from '../../services/jobs/wishlist-alerts.job';
 
 const router = Router();
 router.use(authenticate, requireSeller);
@@ -144,9 +145,9 @@ router.get('/me', async (req: Request, res: Response, next: NextFunction) => {
 // ── Seller Notifications Endpoints ───────────────────────────────────────────
 router.get('/me/notifications', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+    const cursor = (req.query.cursor as string | undefined)?.trim();
+    const isExplicitPage = req.query.page !== undefined && !cursor;
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 20));
-    const skip = (page - 1) * limit;
 
     const seller = await prisma.seller.findUnique({
       where: { userId: req.user!.userId },
@@ -160,23 +161,67 @@ router.get('/me/notifications', async (req: Request, res: Response, next: NextFu
       ],
     };
 
-    const [items, total, unreadCount] = await Promise.all([
-      prisma.notification.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take: limit,
-      }),
-      prisma.notification.count({ where }),
-      prisma.notification.count({
-        where: {
-          ...where,
-          isRead: false,
-        },
-      }),
-    ]);
+    let items: any[] = [];
+    let hasNext = false;
+    let nextCursor: string | null = null;
+    let total = 0;
+    let totalPages = 1;
+    let page = 1;
 
-    const totalPages = Math.ceil(total / limit);
+    if (cursor) {
+      // Fast cursor pagination
+      const fetched = await prisma.notification.findMany({
+        where,
+        take: limit + 1,
+        skip: 1,
+        cursor: { id: cursor },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      });
+      hasNext = fetched.length > limit;
+      if (hasNext) fetched.pop();
+      items = fetched;
+      nextCursor = hasNext && items.length > 0 ? items[items.length - 1].id : null;
+      total = items.length;
+      totalPages = hasNext ? 2 : 1;
+    } else if (isExplicitPage) {
+      // Legacy offset pagination
+      page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+      const skip = (page - 1) * limit;
+      const [fetchedItems, countTotal] = await Promise.all([
+        prisma.notification.findMany({
+          where,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          skip,
+          take: limit,
+        }),
+        prisma.notification.count({ where }),
+      ]);
+      items = fetchedItems;
+      total = countTotal;
+      totalPages = Math.ceil(total / limit) || 1;
+      hasNext = page < totalPages;
+      nextCursor = hasNext && items.length > 0 ? items[items.length - 1].id : null;
+    } else {
+      // Default page 1 without slow count scan
+      const fetched = await prisma.notification.findMany({
+        where,
+        take: limit + 1,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      });
+      hasNext = fetched.length > limit;
+      if (hasNext) fetched.pop();
+      items = fetched;
+      nextCursor = hasNext && items.length > 0 ? items[items.length - 1].id : null;
+      total = items.length;
+      totalPages = hasNext ? 2 : 1;
+    }
+
+    const unreadCount = await prisma.notification.count({
+      where: {
+        ...where,
+        isRead: false,
+      },
+    });
 
     ResponseUtil.success(res, {
       items,
@@ -186,7 +231,8 @@ router.get('/me/notifications', async (req: Request, res: Response, next: NextFu
       page,
       limit,
       totalPages,
-      hasNext: page < totalPages,
+      hasNext,
+      nextCursor,
     });
   } catch (error) {
     next(error);
@@ -201,16 +247,35 @@ router.patch('/me/notifications/:id/read', async (req: Request, res: Response, n
       select: { id: true },
     });
 
-    await prisma.notification.updateMany({
-      where: {
-        id,
-        OR: [
-          { userId: req.user!.userId },
-          ...(seller ? [{ userId: seller.id }] : []),
-        ],
-      },
+    const where: any = {
+      id,
+      OR: [
+        { userId: req.user!.userId },
+        ...(seller ? [{ userId: seller.id }] : []),
+      ],
+    };
+
+    const updateResult = await prisma.notification.updateMany({
+      where,
       data: { isRead: true, readAt: new Date() },
     });
+
+    if (updateResult.count > 0) {
+      try {
+        const remainingUnread = await prisma.notification.count({
+          where: {
+            OR: [
+              { userId: req.user!.userId },
+              ...(seller ? [{ userId: seller.id }] : []),
+            ],
+            isRead: false,
+          },
+        });
+        SocketService.get()?.emitNotificationBadge(req.user!.userId, remainingUnread);
+        SocketService.get()?.emitToUser(req.user!.userId, 'notification:read', { id, unreadCount: remainingUnread });
+      } catch (_) {}
+    }
+
     ResponseUtil.success(res, { success: true }, 'تم تحديث حالة الإشعار');
   } catch (error) {
     next(error);
@@ -234,6 +299,12 @@ router.patch('/me/notifications/read-all', async (req: Request, res: Response, n
       },
       data: { isRead: true, readAt: new Date() },
     });
+
+    try {
+      SocketService.get()?.emitNotificationBadge(req.user!.userId, 0);
+      SocketService.get()?.emitToUser(req.user!.userId, 'notification:read_all', {});
+    } catch (_) {}
+
     ResponseUtil.success(res, { success: true }, 'تم تحديد جميع الإشعارات كمقروءة');
   } catch (error) {
     next(error);
@@ -1589,6 +1660,9 @@ router.post('/me/inventory/adjust', async (req: Request, res: Response, next: Ne
       throw new AppError('كمية المخزون يجب أن تكون رقماً موجباً', 400);
     }
 
+    const prevInventory = await prisma.inventory.findUnique({ where: { productId } });
+    const prevAvailable = prevInventory ? Math.max(0, prevInventory.quantity - prevInventory.reserved) : 0;
+
     const inventory = await prisma.inventory.upsert({
       where: { productId },
       update: { quantity: parsedQty },
@@ -1600,6 +1674,11 @@ router.post('/me/inventory/adjust', async (req: Request, res: Response, next: Ne
 
     const available = Math.max(0, inventory.quantity - inventory.reserved);
     const status = available <= 0 ? 'Out' : available <= inventory.lowStockAlert ? 'Low' : 'Good';
+
+    // Trigger restock notification ONLY if product transitioned from out-of-stock (<=0) to in-stock (>0)
+    if (prevAvailable <= 0 && available > 0) {
+      WishlistAlertsJob.onProductStockRestocked(productId).catch(() => {});
+    }
 
     // Broadcast stock adjustment realtime
     try {
@@ -2468,8 +2547,8 @@ router.get('/me/returns', async (req: Request, res: Response, next: NextFunction
   }
 });
 
-// POST /me/returns/:id/approve or /me/orders/:id/approve-return
-router.post(['/me/returns/:id/approve', '/me/orders/:id/approve-return'], async (req: Request, res: Response, next: NextFunction) => {
+// POST /me/returns/:id/approve
+router.post('/me/returns/:id/approve', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const seller = await getSeller(req.user!.userId);
     const id = String(req.params.id);
@@ -2508,86 +2587,82 @@ router.post(['/me/returns/:id/approve', '/me/orders/:id/approve-return'], async 
       returnReq?.order?.sellerOrders?.find((s) => s.sellerId === seller.id)?.id ||
       id;
 
-    const result = await OrderStateMachine.transitionSellerOrder({
-      sellerOrderId,
-      targetStatus: SellerOrderStatus.RETURN_APPROVED,
-      changedBy: req.user!.userId,
-      changedByRole: 'SELLER',
-      reason: returnReq?.reason || 'موافقة المتجر على طلب الإرجاع',
-      note: 'تمت الموافقة على طلب الإرجاع وإرجاع كامل المبلغ لمحفظة العميل',
-    });
-
-    // Synchronize associated RefundRequest if present
+    // Check for associated RefundRequest first to execute full wallet credit
+    const parentOrderId = returnReq?.orderId || returnReq?.sellerOrder?.orderId;
     let activeRefund: any = null;
     try {
       activeRefund = await prisma.refundRequest.findFirst({
         where: {
           OR: [
             { sellerOrderId },
-            { orderId: result.sellerOrder.orderId },
+            ...(parentOrderId ? [{ orderId: parentOrderId }] : []),
           ],
           status: { in: [RefundStatus.UNDER_SELLER_REVIEW, RefundStatus.REQUESTED, RefundStatus.SELLER_REVIEW, RefundStatus.SUBMITTED] },
         },
       });
 
       if (activeRefund) {
-        await prisma.refundRequest.update({
-          where: { id: activeRefund.id },
-          data: {
-            status: RefundStatus.SELLER_ACCEPTED,
-            approvedAmount: activeRefund.requestedAmount,
-            sellerResponse: returnReq?.reason || 'موافقة المتجر على طلب الإرجاع',
-          },
-        });
-
-        await prisma.refundExecutionLock.upsert({
-          where: { refundId: activeRefund.id },
-          create: {
-            refundId: activeRefund.id,
-            destination: RefundDestination.CUSTOMER_WALLET,
-            status: 'COMPLETED',
-            completedAt: new Date(),
-          },
-          update: {
-            status: 'COMPLETED',
-            completedAt: new Date(),
-          },
+        await RefundService.sellerAccept(
+          activeRefund.id,
+          req.user!.userId,
+          returnReq?.reason || 'موافقة المتجر على طلب الإرجاع'
+        );
+      } else {
+        await OrderStateMachine.transitionSellerOrder({
+          sellerOrderId,
+          targetStatus: SellerOrderStatus.REFUNDED,
+          changedBy: req.user!.userId,
+          changedByRole: 'SELLER',
+          reason: returnReq?.reason || 'موافقة المتجر على طلب الإرجاع',
+          note: 'تمت الموافقة على طلب الإرجاع وإرجاع كامل المبلغ لمحفظة العميل',
         });
       }
     } catch (refErr) {
-      console.error('[SellerReturnAccept] Error auto-processing refund request:', refErr);
+      console.error('[SellerReturnAccept] Error processing refund request:', refErr);
+      await OrderStateMachine.transitionSellerOrder({
+        sellerOrderId,
+        targetStatus: SellerOrderStatus.REFUNDED,
+        changedBy: req.user!.userId,
+        changedByRole: 'SELLER',
+        reason: returnReq?.reason || 'موافقة المتجر على طلب الإرجاع',
+        note: 'تمت الموافقة على طلب الإرجاع وإرجاع كامل المبلغ لمحفظة العميل',
+      });
     }
 
+    const updated = await prisma.sellerOrder.findUnique({
+      where: { id: sellerOrderId },
+      include: {
+        order: {
+          include: {
+            user: { select: { id: true, firstName: true, lastName: true, phone: true, email: true } },
+            payment: true,
+          },
+        },
+        items: true,
+      },
+    });
+
     try {
+      const finalOrderId = updated?.orderId || parentOrderId;
       SocketService.get()?.emitGlobal('order:return_approved', {
         sellerOrderId,
-        orderId: result.sellerOrder.orderId,
+        orderId: finalOrderId,
       });
       SocketService.get()?.emitGlobal('order:status', {
-        orderId: result.sellerOrder.orderId,
-        status: 'RETURN_APPROVED',
+        orderId: finalOrderId,
+        status: 'REFUNDED',
       });
-
-      const orderData = await prisma.order.findUnique({
-        where: { id: result.sellerOrder.orderId },
-        select: { orderNumber: true, displayOrderNumber: true, userId: true },
+      SocketService.get()?.emitGlobal('REFUND_COMPLETED', {
+        orderId: finalOrderId,
       });
-      if (orderData?.userId) {
-        notificationDispatcher.dispatch(
-          NotificationEventFactory.refundEvent({
-            eventType: 'REFUND_ACCEPTED',
-            recipientId: orderData.userId,
-            refundId: activeRefund?.id || returnReq?.id || sellerOrderId,
-            refundNumber: activeRefund?.refundNumber || `RET-${sellerOrderId.slice(0, 8)}`,
-            orderId: result.sellerOrder.orderId,
-            orderNumber: orderData.orderNumber,
-            amount: activeRefund?.requestedAmount || result.sellerOrder.subtotal,
-          })
-        ).catch(() => {});
+      if (updated?.order?.userId) {
+        SocketService.get()?.emitGlobal('wallet:updated', {
+          userId: updated.order.userId,
+        });
       }
     } catch (_) {}
 
-    ResponseUtil.success(res, result.sellerOrder, 'تمت الموافقة على طلب الإرجاع واسترداد كامل المبلغ لمحفظة العميل بنجاح');
+    ResponseUtil.success(res, updated, 'تمت الموافقة على طلب الإرجاع واسترداد كامل المبلغ لمحفظة العميل بنجاح');
   } catch (error) {
     next(error);
   }
@@ -3393,53 +3468,7 @@ router.get('/me/customers', async (req: Request, res: Response, next: NextFuncti
 // They delegate to reviews.service.ts (createSellerResponse etc.)
 
 
-// ── 10. Notifications ──────────────────────────────────────────────────────────
-router.get('/me/notifications', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
-    const skip = (page - 1) * limit;
 
-    const [notifications, total] = await Promise.all([
-      prisma.notification.findMany({
-        where: { userId: req.user!.userId },
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take: limit,
-      }),
-      prisma.notification.count({ where: { userId: req.user!.userId } }),
-    ]);
-
-    ResponseUtil.success(res, {
-      notifications,
-      total,
-      page,
-      totalPages: Math.ceil(total / limit),
-      unreadCount: await prisma.notification.count({ where: { userId: req.user!.userId, isRead: false } }),
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.patch('/me/notifications/:id/read', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const id = String(req.params.id);
-    await prisma.notification.update({ where: { id, userId: req.user!.userId }, data: { isRead: true } });
-    ResponseUtil.success(res, null, 'تم تحديد الإشعار كمقروء');
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.patch('/me/notifications/read-all', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    await prisma.notification.updateMany({ where: { userId: req.user!.userId, isRead: false }, data: { isRead: true } });
-    ResponseUtil.success(res, null, 'تم تحديد جميع الإشعارات كمقروءة');
-  } catch (error) {
-    next(error);
-  }
-});
 
 // ── 11. Coupons ─────────────────────────────────────────────────────────────────
 router.get('/me/coupons', async (req: Request, res: Response, next: NextFunction) => {
@@ -3700,6 +3729,11 @@ router.patch('/me/products/:id/variants/:variantId', async (req: Request, res: R
 
     const { nameAr, nameEn, sku, price, compareAtPrice, stockQuantity, image } = req.body;
 
+    const prevVariant = stockQuantity !== undefined
+      ? await prisma.productVariant.findUnique({ where: { id: variantId } })
+      : null;
+    const prevQty = prevVariant?.stockQuantity ?? 0;
+
     const updated = await prisma.productVariant.update({
       where: { id: variantId },
       data: {
@@ -3712,6 +3746,10 @@ router.patch('/me/products/:id/variants/:variantId', async (req: Request, res: R
         image: image ?? undefined,
       },
     });
+
+    if (stockQuantity !== undefined && prevQty <= 0 && updated.stockQuantity > 0) {
+      WishlistAlertsJob.onProductStockRestocked(productId, variantId).catch(() => {});
+    }
 
     ResponseUtil.success(res, updated, 'تم تعديل المتغير بنجاح');
   } catch (error) {
@@ -3752,6 +3790,197 @@ router.patch('/me/orders/:id/status', async (req: Request, res: Response, next: 
       note,
     });
     ResponseUtil.success(res, result.sellerOrder, 'تم تحديث حالة الطلب بنجاح');
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── 15.1 Approve Return (Seller order return acceptance & financial refund) ──
+router.post('/me/orders/:id/approve-return', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const seller = await getSeller(req.user!.userId);
+    const id = String(req.params.id);
+    const { reason, note } = req.body;
+
+    // Locate the target seller order
+    const sellerOrder = await prisma.sellerOrder.findFirst({
+      where: {
+        OR: [{ id }, { orderId: id }],
+        sellerId: seller.id,
+      },
+      include: { order: true },
+    });
+
+    if (!sellerOrder) throw new AppError('الطلب غير موجود أو غير تابع لمتجرك', 404);
+
+    // Look for pending RefundRequest first
+    const refundRequest = await prisma.refundRequest.findFirst({
+      where: {
+        orderId: sellerOrder.orderId,
+        sellerId: seller.id,
+        status: {
+          in: [
+            RefundStatus.SUBMITTED,
+            RefundStatus.UNDER_SELLER_REVIEW,
+            RefundStatus.REQUESTED,
+            RefundStatus.SELLER_REVIEW,
+          ],
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (refundRequest) {
+      await RefundService.sellerAccept(refundRequest.id, req.user!.userId, reason || note || 'موافقة المتجر على طلب الإرجاع');
+    } else {
+      // Transition directly via OrderStateMachine to REFUNDED
+      await OrderStateMachine.transitionSellerOrder({
+        sellerOrderId: sellerOrder.id,
+        targetStatus: SellerOrderStatus.REFUNDED,
+        changedBy: req.user!.userId,
+        changedByRole: 'SELLER',
+        reason: reason || 'موافقة المتجر على طلب الإرجاع واسترداد كامل المبلغ للمحفظة',
+        note: note || 'تمت الموافقة على الإرجاع وإيداع المبلغ في محفظة العميل',
+      });
+    }
+
+    // Fetch the updated seller order
+    const updated = await prisma.sellerOrder.findUnique({
+      where: { id: sellerOrder.id },
+      include: {
+        order: {
+          include: {
+            user: { select: { firstName: true, lastName: true, phone: true, email: true } },
+            payment: true,
+          },
+        },
+        items: true,
+      },
+    });
+
+    // Realtime broadcast to connected clients
+    try {
+      SocketService.get()?.emitGlobal('order:return_approved', {
+        orderId: sellerOrder.orderId,
+        sellerOrderId: sellerOrder.id,
+      });
+      SocketService.get()?.emitGlobal('order:status', {
+        orderId: sellerOrder.orderId,
+        status: 'REFUNDED',
+      });
+      SocketService.get()?.emitGlobal('REFUND_COMPLETED', {
+        orderId: sellerOrder.orderId,
+      });
+      SocketService.get()?.emitGlobal('wallet:updated', {
+        userId: sellerOrder.order.userId,
+      });
+    } catch (_) {}
+
+    ResponseUtil.success(res, updated, 'تمت الموافقة على طلب الإرجاع وإيداع المبلغ في محفظة العميل بنجاح ✓');
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── 15.2 Reject Return (Seller order return rejection) ──────────────────────
+router.post('/me/orders/:id/reject-return', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const seller = await getSeller(req.user!.userId);
+    const id = String(req.params.id);
+    const { reason, rejectionReason, note } = req.body;
+    const finalReason = rejectionReason || reason || note;
+
+    if (!finalReason || finalReason.trim().length < 5) {
+      throw new AppError('سبب رفض الإرجاع إلزامي ويجب ألا يقل عن 5 أحرف', 400);
+    }
+
+    const sellerOrder = await prisma.sellerOrder.findFirst({
+      where: {
+        OR: [{ id }, { orderId: id }],
+        sellerId: seller.id,
+      },
+      include: { order: true },
+    });
+
+    if (!sellerOrder) throw new AppError('الطلب غير موجود أو غير تابع لمتجرك', 404);
+
+    const refundRequest = await prisma.refundRequest.findFirst({
+      where: {
+        orderId: sellerOrder.orderId,
+        sellerId: seller.id,
+        status: {
+          in: [
+            RefundStatus.SUBMITTED,
+            RefundStatus.UNDER_SELLER_REVIEW,
+            RefundStatus.REQUESTED,
+            RefundStatus.SELLER_REVIEW,
+          ],
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (refundRequest) {
+      await RefundService.sellerReject(refundRequest.id, req.user!.userId, finalReason);
+    } else {
+      await prisma.$transaction(async (tx) => {
+        await tx.returnRequest.updateMany({
+          where: { orderId: sellerOrder.orderId, status: ReturnRequestStatus.PENDING },
+          data: {
+            status: ReturnRequestStatus.REJECTED,
+            resolvedBy: req.user!.userId,
+            resolvedAt: new Date(),
+          },
+        });
+        await tx.sellerOrder.update({
+          where: { id: sellerOrder.id },
+          data: { status: SellerOrderStatus.DELIVERED },
+        });
+        await tx.order.update({
+          where: { id: sellerOrder.orderId },
+          data: { status: OrderStatus.DELIVERED },
+        });
+        await tx.orderStatusHistory.create({
+          data: {
+            orderId: sellerOrder.orderId,
+            sellerOrderId: sellerOrder.id,
+            fromStatus: 'RETURN_REQUESTED',
+            toStatus: 'DELIVERED',
+            status: OrderStatus.DELIVERED,
+            changedBy: req.user!.userId,
+            changedByRole: 'SELLER',
+            reason: finalReason,
+            note: `تم رفض طلب الإرجاع: ${finalReason}`,
+          },
+        });
+      });
+    }
+
+    const updated = await prisma.sellerOrder.findUnique({
+      where: { id: sellerOrder.id },
+      include: {
+        order: {
+          include: {
+            user: { select: { firstName: true, lastName: true, phone: true, email: true } },
+            payment: true,
+          },
+        },
+        items: true,
+      },
+    });
+
+    try {
+      SocketService.get()?.emitGlobal('order:return_rejected', {
+        orderId: sellerOrder.orderId,
+        sellerOrderId: sellerOrder.id,
+      });
+      SocketService.get()?.emitGlobal('order:status', {
+        orderId: sellerOrder.orderId,
+        status: 'DELIVERED',
+      });
+    } catch (_) {}
+
+    ResponseUtil.success(res, updated, 'تم تسجيل رفض طلب الإرجاع بنجاح');
   } catch (error) {
     next(error);
   }

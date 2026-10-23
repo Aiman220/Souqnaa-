@@ -203,18 +203,17 @@ describe('SOUQNA Universal Seller Order Print & Export Engine', () => {
       assert.equal(SellerOrderPrintService.formatAmount(2500, 'ر.ي'), '2,500.00 ر.ي');
     });
 
-    it('should render correct badge, icon, and colors for DELIVERED status without false waiting indicators', () => {
+    it('should render correct badge and colors for DELIVERED status without emojis or false waiting indicators', () => {
       const mockData = createMockPrintData('INVOICE', 'A4');
       mockData.orderStatusAr = 'تم التوصيل للعميل';
       mockData.orderStatusEn = 'DELIVERED';
-      mockData.orderStatusIcon = '✓';
       mockData.orderStatusColor = '#16a34a';
       mockData.orderStatusBg = '#dcfce7';
 
       const html = SellerOrderPrintService.renderHtmlDocument(mockData);
 
-      // Must display the delivered badge with checkmark icon and emerald color
-      assert.ok(html.includes('✓'), 'Must render checkmark icon for delivered status');
+      // Must display clean delivered status without icons/emojis
+      assert.ok(!html.includes('✓'), 'Must not render emojis or icons for status');
       assert.ok(html.includes('تم التوصيل للعميل'), 'Must render Arabic label for delivered status');
       assert.ok(html.includes('#16a34a') || html.includes('16a34a'), 'Must use emerald green text color');
       assert.ok(html.includes('#dcfce7') || html.includes('dcfce7'), 'Must use light green background');
@@ -223,36 +222,42 @@ describe('SOUQNA Universal Seller Order Print & Export Engine', () => {
       assert.ok(!html.includes('معلق لحين اكتمال التسليم'), 'Delivered order must never display pending delivery text');
     });
 
-    it('should render correct badge and icon for CANCELLED status', () => {
+    it('should render correct badge and colors for CANCELLED status without emojis', () => {
       const mockData = createMockPrintData('INVOICE', '80MM');
       mockData.orderStatusAr = 'ملغي';
       mockData.orderStatusEn = 'CANCELLED';
-      mockData.orderStatusIcon = '✕';
       mockData.orderStatusColor = '#dc2626';
       mockData.orderStatusBg = '#fee2e2';
 
       const html = SellerOrderPrintService.renderHtmlDocument(mockData);
 
-      assert.ok(html.includes('✕'), 'Must render X icon for cancelled status');
+      assert.ok(!html.includes('✕'), 'Must not render emojis or icons for cancelled status');
       assert.ok(html.includes('ملغي'), 'Must render Arabic cancelled label');
       assert.ok(html.includes('#dc2626') || html.includes('dc2626'), 'Must use red text color');
+      // Verify valid CSS page dimensions for 80mm
+      assert.ok(html.includes('size: 80mm;'), '80MM template must define valid CSS size: 80mm;');
     });
 
-    it('should render order status with icon across all 3 formats for STATEMENT', () => {
+    it('should render clean order status and valid physical page dimensions across all 3 formats for STATEMENT', () => {
       for (const format of paperFormats) {
         const mockData = createMockPrintData('STATEMENT', format);
         mockData.orderStatusAr = 'تم التوصيل للعميل';
         mockData.orderStatusEn = 'DELIVERED';
-        mockData.orderStatusIcon = '✓';
         mockData.orderStatusColor = '#16a34a';
         mockData.orderStatusBg = '#dcfce7';
         mockData.sellerFinancials.walletReleaseStatus = 'مكتمل التسليم — بانتظار دورة التسوية للمحفظة';
 
         const html = SellerOrderPrintService.renderHtmlDocument(mockData);
 
-        assert.ok(html.includes('✓'), `STATEMENT (${format}) must include status icon`);
+        assert.ok(!html.includes('✓'), `STATEMENT (${format}) must not include status icon`);
         assert.ok(html.includes('تم التوصيل للعميل'), `STATEMENT (${format}) must include status text`);
         assert.ok(html.includes('مكتمل التسليم — بانتظار دورة التسوية للمحفظة'), `STATEMENT (${format}) must show delivered wallet release text`);
+
+        if (format === '80MM') {
+          assert.ok(html.includes('size: 80mm;'), 'STATEMENT 80MM must specify @page size: 80mm;');
+        } else if (format === '58MM') {
+          assert.ok(html.includes('size: 58mm;'), 'STATEMENT 58MM must specify @page size: 58mm;');
+        }
       }
     });
   });

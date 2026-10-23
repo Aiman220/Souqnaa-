@@ -152,7 +152,7 @@ export class SocialAuthenticationService {
         ? UserRoleType.SELLER
         : UserRoleType.CUSTOMER;
 
-    // Per Section 20: DO NOT auto-merge by email!
+    // 4. Account Resolution & Safe Verified Auto-Linking
     let emailToUse =
       profile.email ||
       `${profile.provider.toLowerCase()}_${profile.providerUserId}@social.souqna.ye`;
@@ -160,16 +160,94 @@ export class SocialAuthenticationService {
     if (profile.email) {
       const existingUserByEmail = await prisma.user.findUnique({
         where: { email: profile.email },
+        include: {
+          seller: true,
+          customer: true,
+        },
       });
 
       if (existingUserByEmail) {
         if (existingUserByEmail.role === assignedRole) {
-          // If of the same role, safe account linking required: Don't hijack or auto-merge
-          throw new AppError(
-            'يوجد حساب مسجل بهذا البريد الإلكتروني. يرجى تسجيل الدخول أولاً برقم الهاتف أو كلمة المرور، ثم ربط حسابك الاجتماعي بأمان من الإعدادات.',
-            409,
-            'SOCIAL_ACCOUNT_LINK_REQUIRED'
-          );
+          // If of the same role and email is verified by identity provider (Google/Facebook),
+          // auto-link the social identity and authenticate immediately
+          if (profile.emailVerified) {
+            if (!existingUserByEmail.isActive) {
+              throw new AppError('تم تعطيل هذا الحساب. يرجى التواصل مع الدعم الفني.', 403, 'ACCOUNT_DISABLED');
+            }
+
+            // Link identity transactionally
+            await prisma.$transaction(async (tx) => {
+              const existingIdentity = await tx.socialIdentity.findUnique({
+                where: {
+                  provider_providerUserId_accountType: {
+                    provider: profile.provider,
+                    providerUserId: profile.providerUserId,
+                    accountType: input.applicationType,
+                  },
+                },
+              });
+
+              if (!existingIdentity) {
+                await tx.socialIdentity.create({
+                  data: {
+                    provider: profile.provider,
+                    providerUserId: profile.providerUserId,
+                    accountType: input.applicationType,
+                    userId: existingUserByEmail.id,
+                    providerEmail: profile.email,
+                    providerEmailVerified: true,
+                    displayName: profile.displayName,
+                    avatarUrl: profile.avatarUrl,
+                  },
+                });
+              }
+
+              const userUpdates: any = {};
+              if (!existingUserByEmail.isVerified) {
+                userUpdates.isVerified = true;
+              }
+              if (!existingUserByEmail.avatar && profile.avatarUrl) {
+                userUpdates.avatar = profile.avatarUrl;
+              }
+
+              if (Object.keys(userUpdates).length > 0) {
+                await tx.user.update({
+                  where: { id: existingUserByEmail.id },
+                  data: userUpdates,
+                });
+              }
+            });
+
+            // Issue SOUQNA session tokens
+            const tokens = JwtUtil.generateTokens({
+              userId: existingUserByEmail.id,
+              email: existingUserByEmail.email,
+              role: existingUserByEmail.role,
+            });
+
+            await redis.set(`refresh:${existingUserByEmail.id}`, tokens.refreshToken, 7 * 24 * 3600);
+
+            const requiresOnboarding =
+              existingUserByEmail.role === UserRoleType.SELLER && existingUserByEmail.seller
+                ? !existingUserByEmail.seller.isOnboarded
+                : false;
+
+            return {
+              accessToken: tokens.accessToken,
+              refreshToken: tokens.refreshToken,
+              expiresIn: tokens.expiresIn,
+              user: this.sanitizeUser(existingUserByEmail),
+              isNewAccount: false,
+              requiresOnboarding,
+            };
+          } else {
+            // Unverified email from provider cannot auto-merge
+            throw new AppError(
+              'البريد الإلكتروني غير مؤكد من مزود الخدمة. يرجى تسجيل الدخول أولاً برقم الهاتف أو كلمة المرور.',
+              409,
+              'SOCIAL_ACCOUNT_LINK_REQUIRED'
+            );
+          }
         } else {
           // Different domain (e.g. Existing CUSTOMER creates SELLER account or vice-versa)
           // Maintain strict account domain isolation without colliding on User.email @unique

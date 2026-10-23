@@ -220,6 +220,7 @@ export class FirstOrderFreeShippingEligibilityService {
         ipAddress: input.ipAddress,
         userAgent: input.userAgent,
         deviceId: input.deviceId,
+        integrityEvidence: input.integrityEvidence,
       });
 
       if (abuseEval.abuseSuspected) {

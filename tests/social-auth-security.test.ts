@@ -212,13 +212,14 @@ async function runSocialAuthSecurityTests() {
 
     // An attacker tries to login via social with the same email but different UID
     const attackerUid = `${testPrefix}attacker_google_999`;
-    const attackerGoogleProvider: ISocialAuthProvider = {
+    // 5.1. Unverified email must be rejected with 409
+    const unverifiedAttackerProvider: ISocialAuthProvider = {
       async verifyToken(): Promise<VerifiedSocialProfile> {
         return {
           provider: SocialProvider.GOOGLE,
           providerUserId: attackerUid,
-          email: preExistingEmail, // Matches existing user, but provider is not linked
-          emailVerified: true,
+          email: preExistingEmail,
+          emailVerified: false, // Unverified provider email!
           firstName: 'Attacker',
           lastName: 'Fake',
           displayName: 'Attacker Fake',
@@ -227,22 +228,56 @@ async function runSocialAuthSecurityTests() {
       },
     };
 
-    socialAuthService.setProviderAdapter(SocialProvider.GOOGLE, attackerGoogleProvider);
+    socialAuthService.setProviderAdapter(SocialProvider.GOOGLE, unverifiedAttackerProvider);
 
     try {
       await socialAuthService.authenticateSocialLogin({
         provider: SocialProvider.GOOGLE,
-        credential: 'mock_attacker_token',
+        credential: 'mock_unverified_token',
         applicationType: SocialAccountType.CUSTOMER,
         platform: 'web',
       });
-      assert(false, 'Unauthenticated social login matching existing email MUST NOT auto-merge');
+      assert(false, 'Unverified email matching existing user must be rejected');
     } catch (err: any) {
       assert(
         err instanceof AppError && err.code === 'SOCIAL_ACCOUNT_LINK_REQUIRED',
-        'Auto-merge rejected with SOCIAL_ACCOUNT_LINK_REQUIRED (409) preventing account takeover'
+        'Unverified social email rejected with SOCIAL_ACCOUNT_LINK_REQUIRED (409)'
       );
     }
+
+    // 5.2. Verified email must seamlessly auto-link and authenticate existing account
+    const verifiedGoogleProvider: ISocialAuthProvider = {
+      async verifyToken(): Promise<VerifiedSocialProfile> {
+        return {
+          provider: SocialProvider.GOOGLE,
+          providerUserId: `${testPrefix}verified_google_user`,
+          email: preExistingEmail,
+          emailVerified: true, // Verified by Google!
+          firstName: 'Existing',
+          lastName: 'Customer',
+          displayName: 'Existing Customer',
+          avatarUrl: 'https://cdn.souqna.ye/avatars/google.jpg',
+        };
+      },
+    };
+
+    socialAuthService.setProviderAdapter(SocialProvider.GOOGLE, verifiedGoogleProvider);
+
+    const autoLinkResult = await socialAuthService.authenticateSocialLogin({
+      provider: SocialProvider.GOOGLE,
+      credential: 'mock_verified_google_token',
+      applicationType: SocialAccountType.CUSTOMER,
+      platform: 'android',
+    });
+
+    assert(autoLinkResult.user.id === existingCustomer.id, 'Verified social login seamlessly resolved existing account');
+    assert(autoLinkResult.isNewAccount === false, 'Existing account marked as not new');
+    assert(typeof autoLinkResult.accessToken === 'string', 'Received valid SOUQNA session access token');
+
+    // Clean up auto-linked identity before section 6 tests
+    await prisma.socialIdentity.deleteMany({
+      where: { userId: existingCustomer.id },
+    });
 
     // ── 6. Authenticated Account Linking ──────────────────────────────────────
     console.log('\n--- 6. Authenticated Account Linking ---');

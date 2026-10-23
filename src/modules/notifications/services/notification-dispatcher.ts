@@ -65,7 +65,21 @@ export class NotificationDispatcher {
     // 2. Deduplication Check
     const isDuplicate = await notificationDeduplicationService.isDuplicate(event);
     if (isDuplicate) {
+      const effectiveKey = event.idempotencyKey || `${event.recipientId}_${event.eventType}_${event.entityId || ''}`;
+      let existingId: string | undefined;
+      try {
+        const existing = await prisma.notification.findFirst({
+          where: {
+            userId: event.recipientId,
+            idempotencyKey: effectiveKey,
+          },
+          select: { id: true },
+        });
+        existingId = existing?.id;
+      } catch (_) {}
+
       return {
+        notificationId: existingId,
         status: 'SUPPRESSED',
         channelsSent: [],
         channelsSuppressed: [],
@@ -143,6 +157,8 @@ export class NotificationDispatcher {
 
     // 7. Persist Canonical Notification in Database
     let savedNotificationId: string | undefined = undefined;
+    const effectiveIdempotencyKey = event.idempotencyKey || `${event.recipientId}_${event.eventType}_${event.entityId || ''}`;
+
     try {
       const saved = await prisma.notification.create({
         data: {
@@ -164,7 +180,7 @@ export class NotificationDispatcher {
           status: 'SENT',
           isRead: false,
           eventId: event.eventId,
-          idempotencyKey: event.idempotencyKey,
+          idempotencyKey: effectiveIdempotencyKey,
         },
       });
       savedNotificationId = saved.id;
@@ -172,6 +188,24 @@ export class NotificationDispatcher {
         `[NotificationDispatcher] [notification_persisted] notificationId=${saved.id} eventId=${event.eventId} channels=${JSON.stringify(allowedChannels)}`
       );
     } catch (err: any) {
+      if (err.code === 'P2002') {
+        console.warn(`[NotificationDispatcher] Duplicate notification suppressed by unique constraint: ${effectiveIdempotencyKey}`);
+        const existing = await prisma.notification.findFirst({
+          where: {
+            userId: event.recipientId,
+            idempotencyKey: effectiveIdempotencyKey,
+          },
+          select: { id: true },
+        });
+        return {
+          notificationId: existing?.id,
+          status: 'SUPPRESSED',
+          channelsSent: [],
+          channelsSuppressed: allowedChannels,
+          reason: 'Duplicate notification suppressed by unique constraint',
+          deliveries: [],
+        };
+      }
       console.error('[NotificationDispatcher] Failed to persist canonical notification:', err);
     }
 

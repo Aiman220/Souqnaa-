@@ -8,6 +8,7 @@ import {
 } from '@prisma/client';
 import { prisma } from '../../database/prisma';
 import { AppError } from '../../middleware/error.middleware';
+import { remoteConfigService } from '../remote-config/remote-config.service';
 import {
   AppConfigQuery,
   AppConfigResponseData,
@@ -40,8 +41,25 @@ export class AppLifecycleService {
       orderBy: { createdAt: 'desc' },
     });
 
-    const defaultLatestVersion = '1.0.0';
-    const defaultLatestBuild = 100;
+    let defaultLatestVersion = '1.80.37';
+    let defaultLatestBuild = 202610;
+
+    // Check app_branding_config for fallback version set from admin
+    try {
+      const brandingSetting = await prisma.systemSetting.findUnique({
+        where: { key: 'app_branding_config' },
+      });
+      if (brandingSetting && brandingSetting.value) {
+        const parsed = JSON.parse(brandingSetting.value);
+        if (parsed.appVersion) {
+          const match = parsed.appVersion.match(/(\d+\.\d+(?:\.\d+)?)/);
+          if (match) defaultLatestVersion = match[1];
+          const bMatch = parsed.appVersion.match(/Build\s*(\d+)/i) || parsed.appVersion.match(/\+(\d+)/);
+          if (bMatch) defaultLatestBuild = parseInt(bMatch[1], 10);
+        }
+      }
+    } catch (_) {}
+
     const defaultMinVersion = '1.0.0';
     const defaultMinBuild = 100;
 
@@ -331,6 +349,29 @@ export class AppLifecycleService {
         },
       });
     }
+
+    // Keep app_branding_config and RemoteConfig synchronized with latest published version
+    try {
+      const brandingSetting = await prisma.systemSetting.findUnique({
+        where: { key: 'app_branding_config' },
+      });
+      if (brandingSetting && brandingSetting.value) {
+        const parsed = JSON.parse(brandingSetting.value);
+        parsed.appVersion = `v ${release.version} (Build ${release.buildNumber})`;
+        await prisma.systemSetting.update({
+          where: { key: 'app_branding_config' },
+          data: { value: JSON.stringify(parsed) },
+        });
+      }
+    } catch (_) {}
+
+    // Real-time broadcast to all connected apps (Customer, Seller) via WebSocket
+    try {
+      remoteConfigService.broadcastConfigUpdate({
+        key: 'app_version',
+        action: 'RELEASE_PUBLISHED',
+      });
+    } catch (_) {}
   }
 
   // ==========================================
@@ -391,6 +432,31 @@ export class AppLifecycleService {
       JSON.stringify(updated),
       requestId
     );
+
+    this.clearPolicyCache();
+
+    if (dto.latestVersion) {
+      try {
+        const brandingSetting = await prisma.systemSetting.findUnique({
+          where: { key: 'app_branding_config' },
+        });
+        if (brandingSetting && brandingSetting.value) {
+          const parsed = JSON.parse(brandingSetting.value);
+          parsed.appVersion = `v ${dto.latestVersion}${dto.latestBuild ? ` (Build ${dto.latestBuild})` : ''}`;
+          await prisma.systemSetting.update({
+            where: { key: 'app_branding_config' },
+            data: { value: JSON.stringify(parsed) },
+          });
+        }
+      } catch (_) {}
+
+      try {
+        remoteConfigService.broadcastConfigUpdate({
+          key: 'app_version',
+          action: 'POLICY_UPDATED',
+        });
+      } catch (_) {}
+    }
 
     return updated;
   }
@@ -823,8 +889,8 @@ export class AppLifecycleService {
         appType: AppTypeEnum.CUSTOMER,
         platform: AppPlatformEnum.ANDROID,
         storeName: 'Google Play Store',
-        storeUrl: 'https://play.google.com/store/apps/details?id=com.souqna.customer',
-        packageIdentifier: 'com.souqna.customer',
+        storeUrl: 'https://play.google.com/store/apps/details?id=com.souqnaa.app',
+        packageIdentifier: 'com.souqnaa.app',
         active: true,
       },
       {
@@ -832,7 +898,7 @@ export class AppLifecycleService {
         platform: AppPlatformEnum.IOS,
         storeName: 'Apple App Store',
         storeUrl: 'https://apps.apple.com/app/souqna-customer/id1680000001',
-        bundleIdentifier: 'com.souqna.customer',
+        bundleIdentifier: 'com.souqnaa.app',
         active: true,
       },
       {
@@ -854,8 +920,8 @@ export class AppLifecycleService {
         appType: AppTypeEnum.SELLER,
         platform: AppPlatformEnum.ANDROID,
         storeName: 'Google Play Store',
-        storeUrl: 'https://play.google.com/store/apps/details?id=com.souqna.seller',
-        packageIdentifier: 'com.souqna.seller',
+        storeUrl: 'https://play.google.com/store/apps/details?id=com.souqnaa.seller',
+        packageIdentifier: 'com.souqnaa.seller',
         active: true,
       },
       {
@@ -863,7 +929,7 @@ export class AppLifecycleService {
         platform: AppPlatformEnum.IOS,
         storeName: 'Apple App Store',
         storeUrl: 'https://apps.apple.com/app/souqna-seller/id1680000002',
-        bundleIdentifier: 'com.souqna.seller',
+        bundleIdentifier: 'com.souqnaa.seller',
         active: true,
       },
       {
@@ -879,6 +945,37 @@ export class AppLifecycleService {
         platform: AppPlatformEnum.WEB,
         storeName: 'SOUQNA Seller Portal',
         storeUrl: 'https://seller.souqnaa.ye',
+        active: true,
+      },
+      {
+        appType: AppTypeEnum.ADMIN,
+        platform: AppPlatformEnum.ANDROID,
+        storeName: 'Google Play Store',
+        storeUrl: 'https://play.google.com/store/apps/details?id=com.souqnaa.admin',
+        packageIdentifier: 'com.souqnaa.admin',
+        active: true,
+      },
+      {
+        appType: AppTypeEnum.ADMIN,
+        platform: AppPlatformEnum.IOS,
+        storeName: 'Apple App Store',
+        storeUrl: 'https://apps.apple.com/app/souqna-admin/id1680000003',
+        bundleIdentifier: 'com.souqnaa.admin',
+        active: true,
+      },
+      {
+        appType: AppTypeEnum.ADMIN,
+        platform: AppPlatformEnum.WINDOWS,
+        storeName: 'Microsoft Store',
+        storeUrl: 'ms-windows-store://pdp/?productid=9NBLGGH4SOUQ3',
+        windowsAppIdentifier: '9NBLGGH4SOUQ3',
+        active: true,
+      },
+      {
+        appType: AppTypeEnum.ADMIN,
+        platform: AppPlatformEnum.WEB,
+        storeName: 'SOUQNA Admin Portal',
+        storeUrl: 'https://admin.souqnaa.ye',
         active: true,
       },
     ];
@@ -932,46 +1029,131 @@ export class AppLifecycleService {
   private getDefaultStoreLink(appType: AppTypeEnum, platform: AppPlatformEnum) {
     const isSeller = appType === AppTypeEnum.SELLER;
     switch (platform) {
-      case AppPlatformEnum.ANDROID:
+      case AppPlatformEnum.ANDROID: {
+        const androidPkg = isSeller
+          ? 'com.souqnaa.seller'
+          : (appType === AppTypeEnum.ADMIN ? 'com.souqnaa.admin' : 'com.souqnaa.app');
         return {
           name: 'Google Play Store',
-          url: isSeller
-            ? 'https://play.google.com/store/apps/details?id=com.souqna.seller'
-            : 'https://play.google.com/store/apps/details?id=com.souqna.customer',
-          packageIdentifier: isSeller ? 'com.souqna.seller' : 'com.souqna.customer',
+          url: `https://play.google.com/store/apps/details?id=${androidPkg}`,
+          packageIdentifier: androidPkg,
           bundleIdentifier: null,
           windowsAppIdentifier: null,
         };
-      case AppPlatformEnum.IOS:
+      }
+      case AppPlatformEnum.IOS: {
+        const iosBundle = isSeller
+          ? 'com.souqnaa.seller'
+          : (appType === AppTypeEnum.ADMIN ? 'com.souqnaa.admin' : 'com.souqnaa.app');
+        const iosAppId = isSeller
+          ? '1680000002'
+          : (appType === AppTypeEnum.ADMIN ? '1680000003' : '1680000001');
         return {
           name: 'Apple App Store',
-          url: isSeller
-            ? 'https://apps.apple.com/app/souqna-seller/id1680000002'
-            : 'https://apps.apple.com/app/souqna-customer/id1680000001',
+          url: `https://apps.apple.com/app/souqna-${appType.toLowerCase()}/id${iosAppId}`,
           packageIdentifier: null,
-          bundleIdentifier: isSeller ? 'com.souqna.seller' : 'com.souqna.customer',
+          bundleIdentifier: iosBundle,
           windowsAppIdentifier: null,
         };
-      case AppPlatformEnum.WINDOWS:
+      }
+      case AppPlatformEnum.WINDOWS: {
+        const winId = isSeller
+          ? '9NBLGGH4SOUQ2'
+          : (appType === AppTypeEnum.ADMIN ? '9NBLGGH4SOUQ3' : '9NBLGGH4SOUQ1');
         return {
           name: 'Microsoft Store',
-          url: isSeller
-            ? 'ms-windows-store://pdp/?productid=9NBLGGH4SOUQ2'
-            : 'ms-windows-store://pdp/?productid=9NBLGGH4SOUQ1',
+          url: `ms-windows-store://pdp/?productid=${winId}`,
           packageIdentifier: null,
           bundleIdentifier: null,
-          windowsAppIdentifier: isSeller ? '9NBLGGH4SOUQ2' : '9NBLGGH4SOUQ1',
+          windowsAppIdentifier: winId,
         };
+      }
       case AppPlatformEnum.WEB:
-      default:
+      default: {
+        const webUrl = isSeller
+          ? 'https://seller.souqnaa.ye'
+          : (appType === AppTypeEnum.ADMIN ? 'https://admin.souqnaa.ye' : 'https://souqnaa.ye');
         return {
           name: 'SOUQNA Web',
-          url: isSeller ? 'https://seller.souqnaa.ye' : 'https://souqnaa.ye',
+          url: webUrl,
           packageIdentifier: null,
           bundleIdentifier: null,
           windowsAppIdentifier: null,
         };
+      }
     }
+  }
+
+  // ==========================================
+  // VERSION ENFORCEMENT POLICY RESOLUTION (§AR-2.4)
+  // ==========================================
+  private policyCache = new Map<string, { data: any; expiry: number }>();
+
+  async getActiveVersionPolicy(
+    appType: AppTypeEnum,
+    platform: AppPlatformEnum,
+    environment = ReleaseChannelEnum.PRODUCTION
+  ): Promise<{
+    minimumSupportedVersion: string;
+    minimumSupportedBuild: number;
+    latestVersion: string;
+    latestBuild: number;
+    forceUpdateEnabled: boolean;
+    storeUrl: string;
+  }> {
+    const cacheKey = `${appType}:${platform}:${environment}`;
+    const cached = this.policyCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && cached.expiry > now) {
+      return cached.data;
+    }
+
+    try {
+      const policy = await prisma.appVersionPolicy.findFirst({
+        where: {
+          appType,
+          platform,
+          environment,
+          active: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      const storeLink = await prisma.appStoreLink.findFirst({
+        where: {
+          appType,
+          platform,
+          active: true,
+        },
+      });
+
+      const fallbackStore = this.getDefaultStoreLink(appType, platform);
+      const result = {
+        minimumSupportedVersion: policy?.minimumSupportedVersion ?? '1.0.0',
+        minimumSupportedBuild: policy?.minimumSupportedBuild ?? 100,
+        latestVersion: policy?.latestVersion ?? '1.80.37',
+        latestBuild: policy?.latestBuild ?? 202610,
+        forceUpdateEnabled: policy?.forceUpdateEnabled ?? true,
+        storeUrl: storeLink?.storeUrl ?? fallbackStore.url,
+      };
+
+      this.policyCache.set(cacheKey, { data: result, expiry: now + 30000 });
+      return result;
+    } catch {
+      const fallbackStore = this.getDefaultStoreLink(appType, platform);
+      return {
+        minimumSupportedVersion: '1.0.0',
+        minimumSupportedBuild: 100,
+        latestVersion: '1.80.37',
+        latestBuild: 202610,
+        forceUpdateEnabled: true,
+        storeUrl: fallbackStore.url,
+      };
+    }
+  }
+
+  clearPolicyCache(): void {
+    this.policyCache.clear();
   }
 }
 

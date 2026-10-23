@@ -433,12 +433,22 @@ router.put('/:id', authenticate, requireSeller, async (req: Request, res: Respon
     });
 
     if (stockQuantity !== undefined) {
+      const parsedQty = parseInt(String(stockQuantity), 10);
+      const prevInventory = await prisma.inventory.findUnique({
+        where: { productId: id },
+      });
+      const prevAvailable = prevInventory ? Math.max(0, prevInventory.quantity - prevInventory.reserved) : 0;
+
       await prisma.inventory.upsert({
         where: { productId: id },
-        update: { quantity: parseInt(String(stockQuantity), 10) },
-        create: { productId: id, quantity: parseInt(String(stockQuantity), 10) },
+        update: { quantity: parsedQty },
+        create: { productId: id, quantity: parsedQty, reserved: 0 },
       });
-      WishlistAlertsJob.onProductStockRestocked(id).catch(() => {});
+
+      const newAvailable = Math.max(0, parsedQty - (prevInventory?.reserved || 0));
+      if (prevAvailable <= 0 && newAvailable > 0) {
+        WishlistAlertsJob.onProductStockRestocked(id).catch(() => {});
+      }
     }
 
     if (price !== undefined) {

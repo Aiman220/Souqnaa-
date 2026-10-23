@@ -353,7 +353,7 @@ export class NotificationTemplateService {
       titleEn: 'Special Offers 🌟',
       bodyAr: 'عروض حصرية لجميع عملاء سوقناا تبدأ الآن!',
       bodyEn: 'Exclusive offers starting now!',
-      deepLinkPattern: 'souqnaa://campaigns/{{campaignId}}',
+      deepLinkPattern: 'souqnaa://home',
     },
 
     // ── Price Drop & Stock Alerts ───────────────────────────────────────────

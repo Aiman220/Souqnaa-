@@ -1367,6 +1367,52 @@ export class RefundService {
             where: { id: payment.id },
             data: { status: newStatus },
           });
+
+          // Synchronize Order and SellerOrder status to REFUNDED upon full refund
+          if (newStatus === PaymentStatus.REFUNDED) {
+            await tx.order.update({
+              where: { id: refund.orderId },
+              data: { status: OrderStatus.REFUNDED },
+            });
+
+            if (refund.sellerOrderId) {
+              await tx.sellerOrder.update({
+                where: { id: refund.sellerOrderId },
+                data: { status: SellerOrderStatus.REFUNDED },
+              });
+            } else {
+              await tx.sellerOrder.updateMany({
+                where: { orderId: refund.orderId },
+                data: { status: SellerOrderStatus.REFUNDED },
+              });
+            }
+
+            await tx.returnRequest.updateMany({
+              where: {
+                orderId: refund.orderId,
+                status: ReturnRequestStatus.PENDING,
+              },
+              data: {
+                status: ReturnRequestStatus.APPROVED,
+                refundAmount: approvedAmount,
+                resolvedAt: new Date(),
+              },
+            });
+
+            await tx.orderStatusHistory.create({
+              data: {
+                orderId: refund.orderId,
+                sellerOrderId: refund.sellerOrderId || null,
+                fromStatus: 'RETURN_APPROVED',
+                toStatus: 'REFUNDED',
+                status: OrderStatus.REFUNDED,
+                changedBy: adminUserId || refund.customerId,
+                changedByRole: adminUserId ? 'ADMIN' : 'SYSTEM',
+                reason: 'اكتمال الاسترداد المالي وإيداع كامل المبلغ في محفظة العميل',
+                note: `تم استرداد كامل المبلغ إلى محفظة العميل الداخلية وإغلاق دورة الطلب والمرتجع بنجاح`,
+              },
+            });
+          }
         }
       }
 
@@ -1428,12 +1474,29 @@ export class RefundService {
         },
       });
 
-      // 3. Update payment status if exists
+      // 3. Update payment and order statuses if exists
       if (refund.orderId) {
         await tx.payment.updateMany({
           where: { orderId: refund.orderId },
           data: { status: PaymentStatus.REFUNDED },
         });
+
+        await tx.order.update({
+          where: { id: refund.orderId },
+          data: { status: OrderStatus.REFUNDED },
+        });
+
+        if (refund.sellerOrderId) {
+          await tx.sellerOrder.update({
+            where: { id: refund.sellerOrderId },
+            data: { status: SellerOrderStatus.REFUNDED },
+          });
+        } else {
+          await tx.sellerOrder.updateMany({
+            where: { orderId: refund.orderId },
+            data: { status: SellerOrderStatus.REFUNDED },
+          });
+        }
       }
     }
 

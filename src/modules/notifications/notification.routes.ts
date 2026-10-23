@@ -22,15 +22,16 @@ router.use(authenticate);
 // 1. NOTIFICATION CENTER (CUSTOMER / SELLER / ADMIN)
 // ==============================================================================
 
-// GET /api/v1/notifications — Paginated, filterable notifications
+// GET /api/v1/notifications — Paginated, filterable notifications (cursor & offset supported)
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+    const cursor = (req.query.cursor as string | undefined)?.trim();
+    const isExplicitPage = req.query.page !== undefined && !cursor;
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 25));
-    const skip = (page - 1) * limit;
 
     const category = req.query.category as string | undefined;
     const priority = req.query.priority as string | undefined;
+    const recipientType = req.query.recipientType as string | undefined;
     const unreadOnly = req.query.unread === 'true';
 
     const userFilter: any = req.user!.role === 'ADMIN'
@@ -38,6 +39,9 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       : { userId: req.user!.userId };
 
     const where: any = { ...userFilter };
+    if (recipientType && recipientType !== 'ALL') {
+      where.recipientType = recipientType;
+    }
     if (category && category !== 'ALL') {
       where.category = category;
     }
@@ -59,29 +63,75 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       }
     }
 
-    const [items, total, unreadCount] = await Promise.all([
-      prisma.notification.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take: limit,
-      }),
-      prisma.notification.count({ where }),
-      prisma.notification.count({
-        where: { ...userFilter, isRead: false },
-      }),
-    ]);
+    let items: any[] = [];
+    let hasNext = false;
+    let nextCursor: string | null = null;
+    let total = 0;
+    let totalPages = 1;
+    let page = 1;
 
-    const totalPages = Math.ceil(total / limit);
+    if (cursor) {
+      // High-performance cursor-based pagination
+      const fetched = await prisma.notification.findMany({
+        where,
+        take: limit + 1,
+        skip: 1,
+        cursor: { id: cursor },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      });
+      hasNext = fetched.length > limit;
+      if (hasNext) fetched.pop();
+      items = fetched;
+      nextCursor = hasNext && items.length > 0 ? items[items.length - 1].id : null;
+      total = items.length;
+      totalPages = hasNext ? 2 : 1;
+    } else if (isExplicitPage) {
+      // Legacy offset-based pagination
+      page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+      const skip = (page - 1) * limit;
+      const [fetchedItems, countTotal] = await Promise.all([
+        prisma.notification.findMany({
+          where,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          skip,
+          take: limit,
+        }),
+        prisma.notification.count({ where }),
+      ]);
+      items = fetchedItems;
+      total = countTotal;
+      totalPages = Math.ceil(total / limit) || 1;
+      hasNext = page < totalPages;
+      nextCursor = hasNext && items.length > 0 ? items[items.length - 1].id : null;
+    } else {
+      // First page in cursor-friendly mode (avoids slow count({ where }) scan)
+      const fetched = await prisma.notification.findMany({
+        where,
+        take: limit + 1,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      });
+      hasNext = fetched.length > limit;
+      if (hasNext) fetched.pop();
+      items = fetched;
+      nextCursor = hasNext && items.length > 0 ? items[items.length - 1].id : null;
+      total = items.length;
+      totalPages = hasNext ? 2 : 1;
+    }
+
+    const unreadCount = await prisma.notification.count({
+      where: { ...userFilter, isRead: false },
+    });
 
     ResponseUtil.success(res, {
       items,
+      notifications: items,
       total,
       unreadCount,
       page,
       limit,
       totalPages,
-      hasNext: page < totalPages,
+      hasNext,
+      nextCursor,
     });
   } catch (error) {
     next(error);

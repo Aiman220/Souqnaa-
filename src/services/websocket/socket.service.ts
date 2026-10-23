@@ -92,8 +92,7 @@ export class SocketService {
 
         let rawToken: any =
           auth?.token ||
-          headers?.['authorization'] ||
-          query?.token;
+          headers?.['authorization'];
 
         if (!rawToken || typeof rawToken !== 'string' || !rawToken.trim()) {
           socket.data.user = { userId: `guest_${socket.id}`, role: 'GUEST' };

@@ -94,11 +94,11 @@ export async function flushSellerNotification(sellerId: string): Promise<void> {
 
     await notificationDispatcher.dispatch({
       eventId: randomUUID(),
-      idempotencyKey: `seller_follower_${sellerId}_${batch[0]}_${Date.now()}`,
+      idempotencyKey: `seller_follower_${seller.userId}_${batch[0]}`,
       eventType: 'SELLER_NEW_FOLLOWER',
       category: NotificationCategory.SYSTEM,
       priority: NotificationPriority.NORMAL,
-      recipientId: sellerId,
+      recipientId: seller.userId,
       recipientType: AppType.SELLER,
       entityType: 'seller',
       entityId: sellerId,

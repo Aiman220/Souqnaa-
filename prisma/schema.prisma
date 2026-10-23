@@ -2635,6 +2635,7 @@ model Notification {
 
   deliveries      NotificationDelivery[]
 
+  @@unique([userId, idempotencyKey])
   @@index([userId])
   @@index([isRead])
   @@index([category])
@@ -2646,6 +2647,7 @@ model Notification {
   @@index([idempotencyKey])
   @@index([userId, isRead])
   @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, recipientType, createdAt(sort: Desc)])
 }
 
 model NotificationDevice {

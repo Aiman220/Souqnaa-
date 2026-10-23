@@ -8,6 +8,7 @@ import {
   TransactionType,
   CancellationRequestStatus,
   ReturnRequestStatus,
+  RefundStatus,
   NotificationType,
   WalletTxType,
 } from '@prisma/client';
@@ -641,6 +642,35 @@ export class OrderStateMachine {
                   status: isOrderFullyRefunded ? PaymentStatus.REFUNDED : PaymentStatus.PARTIALLY_REFUNDED,
                 },
               });
+
+              if (isOrderFullyRefunded) {
+                await tx.sellerOrder.update({
+                  where: { id: sellerOrder.id },
+                  data: { status: SellerOrderStatus.REFUNDED },
+                });
+                updatedSellerOrder.status = SellerOrderStatus.REFUNDED;
+
+                await tx.returnRequest.updateMany({
+                  where: { orderId: sellerOrder.orderId, status: ReturnRequestStatus.PENDING },
+                  data: {
+                    status: ReturnRequestStatus.APPROVED,
+                    refundAmount: retRefundAmt,
+                    resolvedBy: changedBy,
+                    resolvedAt: new Date(),
+                  },
+                });
+
+                await tx.refundRequest.updateMany({
+                  where: {
+                    orderId: sellerOrder.orderId,
+                    status: { in: [RefundStatus.SUBMITTED, RefundStatus.UNDER_SELLER_REVIEW, RefundStatus.SELLER_ACCEPTED, RefundStatus.REQUESTED] },
+                  },
+                  data: {
+                    status: RefundStatus.REFUND_COMPLETED,
+                    resolvedAt: new Date(),
+                  },
+                });
+              }
             }
           }
         }

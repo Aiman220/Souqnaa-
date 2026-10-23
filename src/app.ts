@@ -11,6 +11,7 @@ import { errorHandler } from './middleware/error.middleware';
 import { globalLimiter } from './middleware/rate-limiter.middleware';
 import { requestIdMiddleware } from './middleware/request-id.middleware';
 import { maintenanceMiddleware, getMaintenanceConfig, setMaintenanceConfig } from './middleware/maintenance.middleware';
+import { appVersionGate } from './middleware/app-version.middleware';
 import { trafficProtectionService } from './services/traffic-protection.service';
 import { authenticate } from './middleware/auth.middleware';
 import { requireAdmin } from './middleware/rbac.middleware';
@@ -89,6 +90,7 @@ import {
   sellerPerformanceRouter,
   adminSellerPerformanceRouter,
 } from './modules/seller-performance/seller-performance.routes';
+import integrityRoutes from './modules/integrity/integrity.routes';
 
 export const createApp = (): Application => {
   const app = express();
@@ -279,6 +281,7 @@ export const createApp = (): Application => {
   app.use(globalLimiter);
   app.use(maintenanceMiddleware);
   app.use(trafficProtectionService.loadSheddingMiddleware());
+  app.use(appVersionGate);
 
   // Static uploads directory with seamless fallback to R2 storage endpoint
   app.use('/uploads', express.static(path.resolve(process.cwd(), config.storage.uploadDir)));
@@ -426,6 +429,7 @@ export const createApp = (): Application => {
   app.use(`${p}/admin/refunds`, adminRefundRoutes);
   app.use(`${p}/wallet`, customerWalletRoutes);
   app.use(`${p}/disputes`, disputeRoutes);
+  app.use(`${p}/integrity`, integrityRoutes);
 
   app.use(`${p}/admin`, adminRoutes);
   app.use('/admin', adminRoutes);

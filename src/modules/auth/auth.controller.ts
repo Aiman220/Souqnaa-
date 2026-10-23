@@ -709,7 +709,6 @@ export class AuthController {
         throw new AppError('غير مسموح باستخدام تسجيل الدخول الاجتماعي لحسابات الإدارة.', 403);
       }
 
-      const state = crypto.randomBytes(24).toString('hex');
       const oauthState = {
         sessionKey,
         role: role.toUpperCase() === 'SELLER' ? SocialAccountType.SELLER : SocialAccountType.CUSTOMER,
@@ -717,7 +716,12 @@ export class AuthController {
         provider: providerParam.toUpperCase(),
       };
 
-      await redis.set(`oauth_state:${state}`, JSON.stringify(oauthState), 600);
+      const state = AuthController.signOAuthState(oauthState);
+
+      // Best effort cache in Redis, but verification does not depend on Redis!
+      try {
+        await redis.set(`oauth_state:${state}`, JSON.stringify(oauthState), 1200);
+      } catch (_) {}
 
       // Resolve callback URL dynamically
       const protocol = req.headers['x-forwarded-proto'] || req.protocol;
@@ -757,6 +761,63 @@ export class AuthController {
     }
   }
 
+  static signOAuthState(payload: {
+    sessionKey: string;
+    role: SocialAccountType;
+    platform: string;
+    provider: string;
+  }): string {
+    const dataObj = {
+      ...payload,
+      iat: Date.now(),
+      nonce: crypto.randomBytes(8).toString('hex'),
+    };
+    const dataStr = Buffer.from(JSON.stringify(dataObj)).toString('base64url');
+    const secret = config.jwt.secret || 'souqna-oauth-state-secret-2026';
+    const sig = crypto.createHmac('sha256', secret).update(dataStr).digest('base64url');
+    return `${dataStr}.${sig}`;
+  }
+
+  static async verifyOAuthState(stateStr: string): Promise<{
+    sessionKey: string;
+    role: SocialAccountType;
+    platform: string;
+    provider: string;
+  } | null> {
+    try {
+      const parts = stateStr.split('.');
+      if (parts.length === 2) {
+        const [dataStr, sig] = parts;
+        const secret = config.jwt.secret || 'souqna-oauth-state-secret-2026';
+        const expectedSig = crypto.createHmac('sha256', secret).update(dataStr).digest('base64url');
+        const sigBuf = Buffer.from(sig);
+        const expBuf = Buffer.from(expectedSig);
+        if (sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf)) {
+          const parsed = JSON.parse(Buffer.from(dataStr, 'base64url').toString('utf8'));
+          // Allow 25 minutes validity window
+          if (Date.now() - (parsed.iat || 0) < 25 * 60 * 1000) {
+            return {
+              sessionKey: parsed.sessionKey,
+              role: parsed.role,
+              platform: parsed.platform,
+              provider: parsed.provider,
+            };
+          }
+        }
+      }
+    } catch (_) {}
+
+    // Fallback to Redis lookup if needed
+    try {
+      const cached = await redis.get(`oauth_state:${stateStr}`);
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch (_) {}
+
+    return null;
+  }
+
   static async socialCallback(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const providerParam = String(req.params.provider || '').toLowerCase();
@@ -772,14 +833,15 @@ export class AuthController {
         return;
       }
 
-      const cachedStateStr = await redis.get(`oauth_state:${state}`);
-      if (!cachedStateStr) {
+      const oauthState = await AuthController.verifyOAuthState(state);
+      if (!oauthState) {
         res.status(400).send(renderOAuthResultHtml(false, 'انتهت صلاحية جلسة تسجيل الدخول، يرجى المحاولة مجدداً'));
         return;
       }
 
-      const oauthState = JSON.parse(cachedStateStr);
-      await redis.del(`oauth_state:${state}`);
+      try {
+        await redis.del(`oauth_state:${state}`);
+      } catch (_) {}
 
       if (error) {
         const isCancelled = error === 'access_denied' || error.includes('cancel');
@@ -1038,15 +1100,23 @@ function renderOAuthResultHtml(
   accessToken?: string,
   refreshToken?: string
 ): string {
-  const deepLink = sessionKey
-    ? `souqnaa://auth/callback?sessionKey=${encodeURIComponent(sessionKey)}&status=${success ? 'success' : 'error'}`
-    : 'souqnaa://auth/callback';
+  let deepLink = 'souqnaa://auth/callback';
+  if (sessionKey) {
+    deepLink = `souqnaa://auth/callback?sessionKey=${encodeURIComponent(sessionKey)}&status=${success ? 'success' : 'error'}`;
+    if (accessToken) {
+      deepLink += `&token=${encodeURIComponent(accessToken)}`;
+    }
+    if (refreshToken) {
+      deepLink += `&refresh=${encodeURIComponent(refreshToken)}`;
+    }
+  }
 
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  ${success ? `<meta http-equiv="refresh" content="0; url=${deepLink}">` : ''}
   <title>سوقناا — ${success ? 'تم تسجيل الدخول' : 'تنبيه'}</title>
   <style>
     * { box-sizing: border-box; }
@@ -1111,12 +1181,16 @@ function renderOAuthResultHtml(
     try {
       if (window.opener) {
         window.opener.postMessage({ type: 'SOUQNA_OAUTH_RESULT', success: ${success}, sessionKey: '${sessionKey || ''}' }, '*');
-        setTimeout(function() { window.close(); }, 800);
+        setTimeout(function() { window.close(); }, 300);
       }
     } catch (_) {}
     setTimeout(function() {
-      window.location.href = "${deepLink}";
-    }, 400);
+      try {
+        window.location.replace("${deepLink}");
+      } catch (_) {
+        window.location.href = "${deepLink}";
+      }
+    }, 100);
   </script>
 </body>
 </html>`;
