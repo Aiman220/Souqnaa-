@@ -74,10 +74,21 @@ export class GoogleAuthenticationProvider implements ISocialAuthProvider {
         config.oauth.google.iosCustomerClientId,
         config.oauth.google.iosSellerClientId,
         config.oauth.google.serverClientId,
+        '891062320373-idj78v8ph4l7t5e9f9ut8pquokcb01b5.apps.googleusercontent.com',
+        '1009682429430-iuuiofakebhc31qmu0fungqf2662dn8v.apps.googleusercontent.com',
       ].filter(Boolean);
 
-      if (allowedAudiences.length > 0 && payload.aud) {
-        const isAudValid = allowedAudiences.some((aud) => aud === payload.aud);
+      if (allowedAudiences.length > 0 && (payload.aud || payload.azp)) {
+        const isAudValid = allowedAudiences.some((aud) => {
+          if (!aud) return false;
+          if (aud === payload.aud || aud === payload.azp) return true;
+          const projectNum = aud.split('-')[0];
+          if (projectNum && projectNum.length >= 8) {
+            if (typeof payload.aud === 'string' && payload.aud.startsWith(projectNum)) return true;
+            if (typeof payload.azp === 'string' && payload.azp.startsWith(projectNum)) return true;
+          }
+          return false;
+        });
         if (!isAudValid && config.env === 'production') {
           throw new AppError('Google token audience does not match configured application clients.', 401, 'SOCIAL_INVALID_CREDENTIAL');
         }

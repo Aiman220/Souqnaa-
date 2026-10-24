@@ -216,6 +216,9 @@ export class SocialAuthenticationService {
                   data: userUpdates,
                 });
               }
+            }, {
+              timeout: 15000,
+              maxWait: 5000,
             });
 
             // Issue SOUQNA session tokens
@@ -311,6 +314,9 @@ export class SocialAuthenticationService {
       });
 
       return createdUser;
+    }, {
+      timeout: 15000,
+      maxWait: 5000,
     });
 
     // 6. Asynchronous Welcome Notifications

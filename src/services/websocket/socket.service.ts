@@ -188,6 +188,9 @@ export class SocketService {
   private setup(httpServer: HttpServer): void {
     this.io = new Server(httpServer, {
       cors: { origin: '*', methods: ['GET', 'POST'] },
+      pingTimeout: 20000,
+      pingInterval: 25000,
+      transports: ['websocket', 'polling'],
     });
 
     // JWT Authentication for WebSocket (with seamless guest fallback)
@@ -212,8 +215,10 @@ export class SocketService {
           const payload = JwtUtil.verifyAccessToken(token);
           socket.data.user = payload;
           console.log(`[Socket.IO] Authenticated user: ${payload.userId} (${payload.role})`);
-        } catch (_) {
+        } catch (tokenErr: any) {
+          console.warn(`[Socket.IO] [AUTH] Handshake token verification failed (expired or invalid). Falling back to guest.`);
           socket.data.user = { userId: `guest_${socket.id}`, role: 'GUEST' };
+          socket.data.authError = 'Token expired or invalid';
         }
         next();
       } catch (err: any) {
@@ -228,6 +233,10 @@ export class SocketService {
 
       const isGuest = userId.startsWith('guest_');
       console.log(`[Socket.IO] ${isGuest ? 'Guest' : 'User'} connected: ${userId}, socket: ${socket.id}`);
+
+      if (socket.data.authError) {
+        socket.emit('auth:error', { message: socket.data.authError });
+      }
 
       // Cancel pending offline transition if user reconnected within grace period
       const pendingTimer = this.pendingDisconnectTimers.get(userId);
