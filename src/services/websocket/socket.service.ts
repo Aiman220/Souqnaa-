@@ -15,6 +15,9 @@ export class SocketService {
   private userSockets = new Map<string, string[]>(); // userId -> socketIds
   private userLastSeen = new Map<string, Date>(); // userId -> Date
   private userMessageTimestamps = new Map<string, number[]>(); // userId -> timestamps for rate limiting
+  private userTypingTimestamps = new Map<string, number[]>(); // userId -> timestamps for typing rate limiting
+  private pendingDisconnectTimers = new Map<string, NodeJS.Timeout>(); // userId -> grace period timer
+  public readonly DISCONNECT_GRACE_PERIOD_MS = 5000; // 5 second grace period to prevent false offline transitions
 
   private checkMessageRateLimit(userId: string): boolean {
     const now = Date.now();
@@ -29,6 +32,20 @@ export class SocketService {
     
     recent.push(now);
     this.userMessageTimestamps.set(userId, recent);
+    return true;
+  }
+
+  private checkTypingRateLimit(userId: string): boolean {
+    const now = Date.now();
+    const timestamps = this.userTypingTimestamps.get(userId) || [];
+    const windowStart = now - 10 * 1000; // 10 second sliding window
+    const recent = timestamps.filter((t) => t > windowStart);
+    // Allow maximum 25 typing events per 10 seconds per user
+    if (recent.length >= 25) {
+      return false;
+    }
+    recent.push(now);
+    this.userTypingTimestamps.set(userId, recent);
     return true;
   }
 
@@ -62,6 +79,14 @@ export class SocketService {
     const memoryLastSeen = this.userLastSeen.get(userId);
     if (memoryLastSeen) return memoryLastSeen;
     try {
+      const redisVal = await redis.get(`user:last_seen:${userId}`);
+      if (redisVal) {
+        const d = new Date(redisVal);
+        if (!isNaN(d.getTime())) {
+          this.userLastSeen.set(userId, d);
+          return d;
+        }
+      }
       const lastMsg = await prisma.message.findFirst({
         where: { senderId: userId },
         orderBy: { createdAt: 'desc' },
@@ -75,6 +100,88 @@ export class SocketService {
       return user?.updatedAt || null;
     } catch (_) {
       return null;
+    }
+  }
+
+  public async handleUserOnline(userId: string): Promise<void> {
+    if (!userId || userId.startsWith('guest_')) return;
+    try {
+      const memberships = await prisma.conversationMember.findMany({
+        where: { userId },
+        select: { conversationId: true },
+      });
+      const convIds = memberships.map((m) => m.conversationId);
+      if (convIds.length === 0) return;
+
+      const coMembers = await prisma.conversationMember.findMany({
+        where: {
+          conversationId: { in: convIds },
+          userId: { not: userId },
+        },
+        select: { userId: true, conversationId: true },
+      });
+
+      const presencePayload = {
+        userId,
+        isOnline: true,
+        lastSeen: new Date().toISOString(),
+      };
+
+      const notifiedUsers = new Set<string>();
+      for (const cm of coMembers) {
+        if (!notifiedUsers.has(cm.userId)) {
+          notifiedUsers.add(cm.userId);
+          this.io.to(`user:${cm.userId}`).emit('user:online', { ...presencePayload, conversationId: cm.conversationId });
+          this.io.to(`user:${cm.userId}`).emit('user:presence', { ...presencePayload, conversationId: cm.conversationId });
+        }
+        this.io.to(`conversation:${cm.conversationId}`).emit('user:online', { ...presencePayload, conversationId: cm.conversationId });
+        this.io.to(`conversation:${cm.conversationId}`).emit('user:presence', { ...presencePayload, conversationId: cm.conversationId });
+      }
+    } catch (err) {
+      console.error(`[Socket.IO] handleUserOnline error for ${userId}:`, err);
+    }
+  }
+
+  public async handleUserOffline(userId: string): Promise<void> {
+    if (!userId || userId.startsWith('guest_')) return;
+    try {
+      const now = new Date();
+      this.userLastSeen.set(userId, now);
+      await redis.set(`user:last_seen:${userId}`, now.toISOString(), 60 * 60 * 24 * 30).catch(() => {});
+
+      const memberships = await prisma.conversationMember.findMany({
+        where: { userId },
+        select: { conversationId: true },
+      });
+      const convIds = memberships.map((m) => m.conversationId);
+      if (convIds.length === 0) return;
+
+      const coMembers = await prisma.conversationMember.findMany({
+        where: {
+          conversationId: { in: convIds },
+          userId: { not: userId },
+        },
+        select: { userId: true, conversationId: true },
+      });
+
+      const presencePayload = {
+        userId,
+        isOnline: false,
+        lastSeen: now.toISOString(),
+      };
+
+      const notifiedUsers = new Set<string>();
+      for (const cm of coMembers) {
+        if (!notifiedUsers.has(cm.userId)) {
+          notifiedUsers.add(cm.userId);
+          this.io.to(`user:${cm.userId}`).emit('user:offline', { ...presencePayload, conversationId: cm.conversationId });
+          this.io.to(`user:${cm.userId}`).emit('user:presence', { ...presencePayload, conversationId: cm.conversationId });
+        }
+        this.io.to(`conversation:${cm.conversationId}`).emit('user:offline', { ...presencePayload, conversationId: cm.conversationId });
+        this.io.to(`conversation:${cm.conversationId}`).emit('user:presence', { ...presencePayload, conversationId: cm.conversationId });
+      }
+    } catch (err) {
+      console.error(`[Socket.IO] handleUserOffline error for ${userId}:`, err);
     }
   }
 
@@ -92,7 +199,8 @@ export class SocketService {
 
         let rawToken: any =
           auth?.token ||
-          headers?.['authorization'];
+          headers?.['authorization'] ||
+          query?.token;
 
         if (!rawToken || typeof rawToken !== 'string' || !rawToken.trim()) {
           socket.data.user = { userId: `guest_${socket.id}`, role: 'GUEST' };
@@ -120,7 +228,17 @@ export class SocketService {
 
       const isGuest = userId.startsWith('guest_');
       console.log(`[Socket.IO] ${isGuest ? 'Guest' : 'User'} connected: ${userId}, socket: ${socket.id}`);
+
+      // Cancel pending offline transition if user reconnected within grace period
+      const pendingTimer = this.pendingDisconnectTimers.get(userId);
+      if (pendingTimer) {
+        clearTimeout(pendingTimer);
+        this.pendingDisconnectTimers.delete(userId);
+        console.log(`[Socket.IO] Cancelled pending offline transition for user ${userId} (reconnected within grace period)`);
+      }
+
       const existing = this.userSockets.get(userId) || [];
+      const isFirstSocket = existing.length === 0;
       this.userSockets.set(userId, [...existing, socket.id]);
 
       // Join user room
@@ -139,6 +257,11 @@ export class SocketService {
             }
           })
           .catch(() => {});
+      }
+
+      // If this is the user's first active connection, announce online status to authorized conversation co-members
+      if (isFirstSocket && !isGuest) {
+        this.handleUserOnline(userId);
       }
 
       // Join authorized order room
@@ -279,13 +402,13 @@ export class SocketService {
       });
 
       // Join conversation room
-      socket.on('join:conversation', async (data: any) => {
+      socket.on('join:conversation', async (data: any, ack?: (res: any) => void) => {
         const conversationId = typeof data === 'string' ? data.trim() : (data?.conversationId || data?.id)?.toString().trim();
-        if (!conversationId) return;
-        console.log(`[Socket.IO] User ${userId} joined room conversation:${conversationId}`);
-        socket.join(`conversation:${conversationId}`);
+        if (!conversationId || isGuest) {
+          if (ack) ack({ success: false, error: 'Unauthorized to join conversation' });
+          return;
+        }
 
-        // Check if other members of the conversation are online
         try {
           let baseConvId = conversationId;
           const supConv = await prisma.supportConversation.findFirst({
@@ -296,12 +419,43 @@ export class SocketService {
           });
 
           if (supConv) {
+            baseConvId = supConv.conversationId;
+          }
+
+          // Authorize: user must be conversation member, ADMIN, or assigned/requester of support conversation
+          const userRole = socket.data.user?.role;
+          let isAuthorized = userRole === 'ADMIN';
+
+          if (!isAuthorized) {
+            const member = await prisma.conversationMember.findUnique({
+              where: {
+                conversationId_userId: { conversationId: baseConvId, userId },
+              },
+            });
+            if (member) {
+              isAuthorized = true;
+            } else if (supConv) {
+              if (supConv.requesterId === userId) {
+                isAuthorized = true;
+              } else {
+                const agent = await prisma.supportAgent.findUnique({ where: { adminUserId: userId } });
+                if (agent) isAuthorized = true;
+              }
+            }
+          }
+
+          if (!isAuthorized) {
+            console.warn(`[Socket.IO] Unauthorized join:conversation rejected for user ${userId} on conversation ${conversationId}`);
+            if (ack) ack({ success: false, error: 'Unauthorized to access this conversation' });
+            return;
+          }
+
+          socket.join(`conversation:${conversationId}`);
+          if (supConv) {
             socket.join(`conversation:${supConv.id}`);
             socket.join(`conversation:${supConv.conversationId}`);
-            baseConvId = supConv.conversationId;
 
             // 1. Direct unread badge clearance upon opening chat room
-            const userRole = socket.data.user?.role;
             const isAgent = userRole === 'ADMIN' || (await prisma.supportAgent.findUnique({ where: { adminUserId: userId } })) !== null;
             const isSeller = userRole === 'SELLER';
             const updateField = isAgent
@@ -527,27 +681,54 @@ export class SocketService {
               }
             }
           }
+
+          // Notify other members in this conversation room that user joined/is online
+          const joinPresence = {
+            userId,
+            isOnline: true,
+            lastSeen: new Date().toISOString(),
+            conversationId,
+          };
+          socket.to(`conversation:${conversationId}`).emit('user:online', joinPresence);
+          socket.to(`conversation:${conversationId}`).emit('user:presence', joinPresence);
+
+          if (ack) ack({ success: true, room: `conversation:${conversationId}` });
         } catch (e) {
           console.error('[Socket.IO] Error in join:conversation:', e);
+          if (ack) ack({ success: false, error: 'Internal error joining conversation' });
         }
-
-        // Notify other members in this conversation room that user joined/is online
-        const joinPresence = {
-          userId,
-          isOnline: true,
-          lastSeen: new Date().toISOString(),
-          conversationId,
-        };
-        socket.to(`conversation:${conversationId}`).emit('user:online', joinPresence);
-        socket.to(`conversation:${conversationId}`).emit('user:presence', joinPresence);
       });
 
       // Query presence
-      socket.on('get:presence', async (data: any) => {
+      socket.on('get:presence', async (data: any, ack?: (res: any) => void) => {
         const targetUserId = typeof data === 'string'
           ? data.trim()
           : (data?.targetUserId || data?.userId || data?.id)?.toString().trim();
-        if (!targetUserId) return;
+        if (!targetUserId || isGuest) {
+          if (ack) ack({ success: false, error: 'Target user ID is required' });
+          return;
+        }
+
+        // Authorize: Requester must be ADMIN or share at least one conversation with target user
+        const userRole = socket.data.user?.role;
+        let isAuthorized = userRole === 'ADMIN';
+        if (!isAuthorized) {
+          const shared = await prisma.conversationMember.findFirst({
+            where: {
+              userId,
+              conversation: {
+                members: { some: { userId: targetUserId } },
+              },
+            },
+          });
+          if (shared) isAuthorized = true;
+        }
+
+        if (!isAuthorized) {
+          if (ack) ack({ success: false, error: 'Unauthorized to view presence for this user' });
+          return;
+        }
+
         const isOnline = this.isUserOnline(targetUserId);
         const lastSeen = await this.getLastSeen(targetUserId);
         const presencePayload = {
@@ -557,6 +738,7 @@ export class SocketService {
         };
         socket.emit(isOnline ? 'user:online' : 'user:offline', presencePayload);
         socket.emit('user:presence', presencePayload);
+        if (ack) ack({ success: true, presence: presencePayload });
       });
 
       // Leave conversation room
@@ -575,14 +757,21 @@ export class SocketService {
         } catch (_) {}
       });
 
-      // Unified typing indicators (handles typing:start, typing:stop, support:typing:start, support:typing:stop, typing, typing:status)
+      // Unified typing indicators with authorization and rate-limiting
       const handleTypingEvent = async (convId: string, isTyping: boolean) => {
+        if (isGuest) return;
+        const cleanConvId = convId.trim();
+        if (!cleanConvId) return;
+
+        // Rate-limit typing events to prevent abuse
+        if (!this.checkTypingRateLimit(userId)) {
+          return;
+        }
+
         let altRoom: string | null = null;
         let supportRequesterId: string | null = null;
         let supportAgentUserId: string | null = null;
-
-        const cleanConvId = convId.trim();
-        if (!cleanConvId) return;
+        let baseConvId = cleanConvId;
 
         try {
           const supConv = await prisma.supportConversation.findFirst({
@@ -600,10 +789,27 @@ export class SocketService {
             altRoom = supConv.id.toLowerCase() === cleanConvId.toLowerCase()
               ? supConv.conversationId
               : supConv.id;
+            baseConvId = supConv.conversationId;
             supportRequesterId = supConv.requesterId;
             supportAgentUserId = supConv.assignedAgent?.adminUserId || null;
           }
         } catch (_) {}
+
+        // Authorize: Sender must be a member of the conversation or an ADMIN
+        const userRole = socket.data.user?.role;
+        let isAuthorized = userRole === 'ADMIN';
+        if (!isAuthorized) {
+          const member = await prisma.conversationMember.findUnique({
+            where: { conversationId_userId: { conversationId: baseConvId, userId } },
+          });
+          if (member || supportRequesterId === userId || supportAgentUserId === userId) {
+            isAuthorized = true;
+          }
+        }
+
+        if (!isAuthorized) {
+          return;
+        }
 
         const typingPayload = {
           conversationId: cleanConvId,
@@ -612,22 +818,16 @@ export class SocketService {
           isTyping,
         };
 
-        const rawRooms = [cleanConvId, ...(altRoom ? [altRoom] : [])];
-        const uniqueRooms = Array.from(new Set(rawRooms.flatMap(r => [r, r.toLowerCase()])));
+        const rawRooms = [cleanConvId, ...(altRoom ? [altRoom] : []), baseConvId];
+        const uniqueRooms = Array.from(new Set(rawRooms.filter(Boolean)));
 
+        // Broadcast to rooms excluding sender socket
         for (const r of uniqueRooms) {
-          const payload = {
-            conversationId: r,
-            altConversationId: altRoom,
-            userId,
-            isTyping,
-          };
-          socket.to(`conversation:${r}`).emit(isTyping ? 'typing:start' : 'typing:stop', payload);
-          socket.to(`conversation:${r}`).emit('typing:status', payload);
-          socket.to(`conversation:${r}`).emit('support:typing', payload);
+          socket.to(`conversation:${r}`).emit(isTyping ? 'typing:start' : 'typing:stop', typingPayload);
+          socket.to(`conversation:${r}`).emit('typing:status', typingPayload);
         }
 
-        // Direct user-room delivery to conversation members (ensures delivery even if client room join lagged)
+        // Also deliver directly to co-members' user rooms in case client lagged in room join
         try {
           const targetUserIds = new Set<string>();
           if (supportRequesterId && supportRequesterId !== userId) {
@@ -651,7 +851,6 @@ export class SocketService {
           for (const targetUid of targetUserIds) {
             this.io.to(`user:${targetUid}`).emit(isTyping ? 'typing:start' : 'typing:stop', typingPayload);
             this.io.to(`user:${targetUid}`).emit('typing:status', typingPayload);
-            this.io.to(`user:${targetUid}`).emit('support:typing', typingPayload);
           }
         } catch (_) {}
       };
@@ -1134,37 +1333,33 @@ export class SocketService {
         }
       });
 
-      socket.on('disconnecting', () => {
-        try {
-          const rooms = Array.from(socket.rooms);
-          const now = new Date();
-          for (const room of rooms) {
-            if (room.startsWith('conversation:')) {
-              socket.to(room).emit('user:offline', {
-                userId,
-                isOnline: false,
-                lastSeen: now.toISOString(),
-                conversationId: room.replace('conversation:', ''),
-              });
-            }
-          }
-        } catch (_) {}
-      });
-
-      // Disconnect
+      // Disconnect handling with multi-socket support and configurable grace period
       socket.on('disconnect', () => {
         const sockets = this.userSockets.get(userId) || [];
         const filtered = sockets.filter((id) => id !== socket.id);
         if (filtered.length > 0) {
           this.userSockets.set(userId, filtered);
+          console.log(`[Socket.IO] Socket ${socket.id} disconnected for user ${userId}, remaining active sockets: ${filtered.length}`);
         } else {
           this.userSockets.delete(userId);
-          const now = new Date();
-          this.userLastSeen.set(userId, now);
+          console.log(`[Socket.IO] Last socket disconnected for user ${userId}. Starting ${this.DISCONNECT_GRACE_PERIOD_MS}ms grace period.`);
+
+          if (!isGuest) {
+            const timer = setTimeout(async () => {
+              this.pendingDisconnectTimers.delete(userId);
+              const remainingSockets = this.userSockets.get(userId);
+              if (!remainingSockets || remainingSockets.length === 0) {
+                console.log(`[Socket.IO] Grace period expired for user ${userId}. Transitioning to OFFLINE.`);
+                await this.handleUserOffline(userId);
+              }
+            }, this.DISCONNECT_GRACE_PERIOD_MS);
+            this.pendingDisconnectTimers.set(userId, timer);
+          }
 
           // If user was a support agent, update agent offline status in background
           prisma.supportAgent.findUnique({ where: { adminUserId: userId } }).then((agent) => {
             if (agent) {
+              const now = new Date();
               prisma.supportAgent.update({
                 where: { id: agent.id },
                 data: { online: false, status: SupportAgentStatus.OFFLINE, lastSeenAt: now },

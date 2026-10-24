@@ -1165,8 +1165,8 @@ export class SellerOrderPrintService {
     <div class="order-hero-banner">
       <div>
         <div class="hero-col-title">رقم طلب البائع • SELLER ORDER #</div>
-        <div class="hero-order-id">${d.sellerOrderNumber}</div>
-        <div class="hero-main-order">الطلب الرئيسي: ${d.mainOrderNumber}</div>
+        <div class="hero-order-id" dir="ltr">${d.sellerOrderNumber}</div>
+        <div class="hero-main-order">الطلب الرئيسي: <span dir="ltr">${d.mainOrderNumber}</span></div>
       </div>
       <div class="hero-badges-group">
         <div class="status-pill" style="background: ${d.orderStatusBg}; color: ${d.orderStatusColor}; font-weight: 800;">${d.orderStatusAr}</div>
@@ -1218,7 +1218,7 @@ export class SellerOrderPrintService {
                 <div class="item-title">${it.productName}</div>
                 <div class="item-variant-tag">${it.variant}</div>
               </td>
-              <td><span class="item-sku-code">${it.sku}</span></td>
+              <td><span class="item-sku-code" dir="ltr">${it.sku}</span></td>
               <td class="center"><strong>${it.quantity}</strong></td>
               <td>${SellerOrderPrintService.formatNumber(it.unitPrice)} ${d.totals.currency}</td>
               <td style="color: #059669; font-weight: 700;">${it.discount > 0 ? `-${SellerOrderPrintService.formatNumber(it.discount)} ${d.totals.currency}` : '0.00'}</td>
@@ -1832,8 +1832,8 @@ export class SellerOrderPrintService {
         ${storeLogoHtml}
         <div class="order-box">
           <div style="font-size: 11px; font-weight: bold; color: #64748b;">رقم طلب البائع:</div>
-          <div class="seller-num">${d.sellerOrderNumber}</div>
-          <div class="main-num">الرئيسي: ${d.mainOrderNumber}</div>
+          <div class="seller-num" dir="ltr">${d.sellerOrderNumber}</div>
+          <div class="main-num">الرئيسي: <span dir="ltr">${d.mainOrderNumber}</span></div>
         </div>
       </div>
     </div>
@@ -1875,7 +1875,7 @@ export class SellerOrderPrintService {
                 <strong>${it.productName}</strong>
                 <div style="font-size: 11px; color: #0284c7; font-weight: 600;">المواصفات: ${it.variant}</div>
               </td>
-              <td><code style="font-family: 'Inter', monospace; font-weight: bold;">${it.sku}</code></td>
+              <td><code dir="ltr" style="font-family: 'Inter', monospace; font-weight: bold;">${it.sku}</code></td>
               <td style="text-align: center; font-size: 15px; font-weight: 900; color: #0f172a;">${it.quantity}</td>
               <td style="text-align: center;">
                 <span class="check-box-cell"></span>
@@ -1978,17 +1978,17 @@ export class SellerOrderPrintService {
     .map(
       (it) => `
     <div style="margin-bottom: 6px; padding-bottom: 4px; border-bottom: 0.5px dotted #ccc;">
-      <div>[  ] <strong>${it.productName}</strong></div>
+      <div><span style="display:inline-block; width:10px; height:10px; border:1px solid #475569; border-radius:2px; vertical-align:middle; margin-left:5px;"></span><strong>${it.productName}</strong></div>
       ${it.variant ? `<div style="font-size: 10px; color: #444;">المواصفات: ${it.variant}</div>` : ''}
-      <div style="font-size: 10px; margin-right: 12px;">الكمية: <strong>${it.quantity}</strong> • SKU: ${it.sku}</div>
+      <div style="font-size: 10px; margin-right: 12px;">الكمية: <strong>${it.quantity}</strong> • SKU: <span dir="ltr">${it.sku}</span></div>
     </div>
   `
     )
     .join('')}
 
   <div class="divider"></div>
-  <div>[  ] فحص الجودة — Checked</div>
-  <div>[  ] تم التغليف والإغلاق — Packed</div>
+  <div><span style="display:inline-block; width:10px; height:10px; border:1px solid #475569; border-radius:2px; vertical-align:middle; margin-left:5px;"></span>فحص الجودة — Checked</div>
+  <div><span style="display:inline-block; width:10px; height:10px; border:1px solid #475569; border-radius:2px; vertical-align:middle; margin-left:5px;"></span>تم التغليف والإغلاق — Packed</div>
   <div class="divider"></div>
   ${d.qrCodeDataUri ? `<img src="${d.qrCodeDataUri}" style="width: 80px; height: 80px; display: block; margin: 0 auto;" alt="QR" />` : ''}
   <div class="center" style="font-size: 9px; font-family: monospace;">${d.qrPayload.slice(0, 30)}</div>
@@ -2062,17 +2062,17 @@ export class SellerOrderPrintService {
     .map(
       (it) => `
     <div style="margin-bottom: 5px; padding-bottom: 3px; border-bottom: 0.5px dotted #999;">
-      <div>[  ] <strong>${it.productName}</strong></div>
+      <div><span style="display:inline-block; width:9px; height:9px; border:1px solid #475569; border-radius:2px; vertical-align:middle; margin-left:4px;"></span><strong>${it.productName}</strong></div>
       ${it.variant ? `<div style="font-size: 9px; color: #333;">المواصفات: ${it.variant}</div>` : ''}
-      <div style="font-size: 9px;">الكمية: <strong>${it.quantity}</strong> • SKU: ${it.sku}</div>
+      <div style="font-size: 9px;">الكمية: <strong>${it.quantity}</strong> • SKU: <span dir="ltr">${it.sku}</span></div>
     </div>
   `
     )
     .join('')}
 
   <div class="divider"></div>
-  <div>[  ] فحص الجودة — Quality OK</div>
-  <div>[  ] تم التغليف والإغلاق — Packed</div>
+  <div><span style="display:inline-block; width:9px; height:9px; border:1px solid #475569; border-radius:2px; vertical-align:middle; margin-left:4px;"></span>فحص الجودة — Quality OK</div>
+  <div><span style="display:inline-block; width:9px; height:9px; border:1px solid #475569; border-radius:2px; vertical-align:middle; margin-left:4px;"></span>تم التغليف والإغلاق — Packed</div>
   <div class="divider"></div>
   ${d.qrCodeDataUri ? `<img src="${d.qrCodeDataUri}" style="width: 70px; height: 70px; display: block; margin: 4px auto;" alt="QR" />` : ''}
   <div class="center" style="font-size: 8px; font-family: monospace;">${d.qrPayload.slice(0, 26)}</div>
@@ -2461,8 +2461,8 @@ export class SellerOrderPrintService {
         ${storeLogoHtml}
         <div class="order-box">
           <div style="font-size: 11px; font-weight: bold; color: #64748b;">رقم طلب المتجر:</div>
-          <div style="font-size: 16px; font-weight: 900; color: #FF6B00; font-family: 'Inter', monospace;">${d.sellerOrderNumber}</div>
-          <div style="font-size: 12px; font-weight: 700; color: #64748b; font-family: 'Inter', monospace;">الرئيسي: ${d.mainOrderNumber}</div>
+          <div style="font-size: 16px; font-weight: 900; color: #FF6B00; font-family: 'Inter', monospace;" dir="ltr">${d.sellerOrderNumber}</div>
+          <div style="font-size: 12px; font-weight: 700; color: #64748b; font-family: 'Inter', monospace;">الرئيسي: <span dir="ltr">${d.mainOrderNumber}</span></div>
           <div style="margin-top: 6px; display: inline-block; background: ${d.orderStatusBg}; color: ${d.orderStatusColor}; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 800;">${d.orderStatusAr}</div>
         </div>
       </div>

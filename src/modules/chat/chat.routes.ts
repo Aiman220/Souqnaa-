@@ -140,8 +140,24 @@ async function enrichConversation(conv: any, requestingUserId: string) {
     },
   });
 
-  const sellerUserId = store?.seller?.userId || (otherMember?.userId || requestingUserId);
-  const customerUserId = conv.members?.find((m: any) => m.userId !== sellerUserId)?.userId || requestingUserId;
+  const sellerMemberByRole = conv.members?.find((m: any) => m.user?.role === 'SELLER');
+  const customerMemberByRole = conv.members?.find((m: any) => m.user?.role === 'CUSTOMER');
+
+  let sellerUserId = store?.seller?.userId;
+  if (!sellerUserId && sellerMemberByRole) {
+    sellerUserId = sellerMemberByRole.userId;
+  }
+  if (!sellerUserId) {
+    sellerUserId = otherMember?.userId || requestingUserId;
+  }
+
+  let customerUserId = conv.members?.find((m: any) => m.userId !== sellerUserId)?.userId;
+  if (!customerUserId && customerMemberByRole) {
+    customerUserId = customerMemberByRole.userId;
+  }
+  if (!customerUserId) {
+    customerUserId = requestingUserId === sellerUserId ? (otherMember?.userId || requestingUserId) : requestingUserId;
+  }
 
   const customerMember = conv.members?.find((m: any) => m.userId === customerUserId) || otherMember || requesterMember;
   const sellerMember = conv.members?.find((m: any) => m.userId === sellerUserId) || otherMember || requesterMember;
@@ -248,7 +264,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       include: {
         members: {
           include: {
-            user: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+            user: { select: { id: true, firstName: true, lastName: true, avatar: true, role: true } },
           },
         },
         supportConversation: {
@@ -291,7 +307,7 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
       include: {
         members: {
           include: {
-            user: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+            user: { select: { id: true, firstName: true, lastName: true, avatar: true, role: true } },
           },
         },
         messages: {
@@ -568,7 +584,7 @@ router.post('/', conversationCreationLimiter, async (req: Request, res: Response
       include: {
         members: {
           include: {
-            user: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+            user: { select: { id: true, firstName: true, lastName: true, avatar: true, role: true } },
           },
         },
         messages: {
@@ -595,7 +611,7 @@ router.post('/', conversationCreationLimiter, async (req: Request, res: Response
       include: {
         members: {
           include: {
-            user: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+            user: { select: { id: true, firstName: true, lastName: true, avatar: true, role: true } },
           },
         },
         messages: {
