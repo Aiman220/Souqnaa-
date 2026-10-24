@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import path from 'path';
+import dns from 'dns/promises';
 import { storageService } from '../../services/storage/storage.service';
 import { authenticate } from '../../middleware/auth.middleware';
 import { ResponseUtil } from '../../utils/response.util';
@@ -93,7 +94,14 @@ export function isPrivateOrReservedHost(hostname: string): boolean {
     host.endsWith('.corp') ||
     host === '0.0.0.0' ||
     host === '::1' ||
-    host === '[::1]'
+    host === '[::1]' ||
+    host.startsWith('fe80:') ||
+    host.startsWith('fc00:') ||
+    host.startsWith('fd') ||
+    host.includes('::ffff:127.') ||
+    host.includes('::ffff:10.') ||
+    host.includes('::ffff:192.168.') ||
+    host.includes('::ffff:169.254.')
   ) {
     return true;
   }
@@ -168,6 +176,17 @@ router.post('/by-url', uploadByUrlLimiter, async (req: Request, res: Response, n
 
     if (isPrivateOrReservedHost(parsedUrl.hostname)) {
       throw new AppError('لا يمكن استرداد الملفات من عناوين الشبكة الداخلية أو العناوين المحجوزة.', 403, 'SSRF_BLOCKED');
+    }
+
+    // Resolve DNS and verify resolved IP to prevent DNS rebinding attacks
+    try {
+      const resolved = await dns.lookup(parsedUrl.hostname);
+      if (isPrivateOrReservedHost(resolved.address)) {
+        throw new AppError('لا يمكن استرداد الملفات من عناوين الشبكة الداخلية أو العناوين المحجوزة.', 403, 'SSRF_BLOCKED');
+      }
+    } catch (dnsErr: any) {
+      if (dnsErr instanceof AppError) throw dnsErr;
+      throw new AppError('تعذر التحقق من عنوان الخادم للرابط المطلوب.', 400, 'DNS_LOOKUP_FAILED');
     }
 
     try {

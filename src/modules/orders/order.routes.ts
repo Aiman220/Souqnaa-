@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import { config } from '../../config';
 import { prisma } from '../../database/prisma';
 import { redis } from '../../database/redis';
 import { authenticate } from '../../middleware/auth.middleware';
@@ -231,24 +232,27 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
       });
     }
     if (!address) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new AppError('يرجى تحديد أو إضافة عنوان توصيل لإتمام الطلب.', 400, 'ADDRESS_REQUIRED');
+      }
       let defaultCity = await prisma.city.findFirst();
       if (!defaultCity) {
         let defaultCountry = await prisma.country.findFirst();
         if (!defaultCountry) {
           defaultCountry = await prisma.country.create({
-            data: { code: 'SA', nameAr: 'المملكة العربية السعودية', nameEn: 'Saudi Arabia' },
+            data: { code: 'YE', nameAr: 'الجمهورية اليمنية', nameEn: 'Yemen' },
           });
         }
         defaultCity = await prisma.city.create({
-          data: { nameAr: 'الرياض', nameEn: 'Riyadh', countryId: defaultCountry.id },
+          data: { nameAr: 'صنعاء', nameEn: 'Sanaa', countryId: defaultCountry.id },
         });
       }
       address = await prisma.address.create({
         data: {
           userId: req.user!.userId,
           recipientName: req.user!.email?.split('@')[0] || 'عميل سوقناا',
-          recipientPhone: '0500000000',
-          street: 'شارع الملك فهد',
+          recipientPhone: '770000000',
+          street: 'شارع الزبيري',
           cityId: defaultCity.id,
           isDefault: true,
         },
@@ -647,7 +651,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
         items: cartEvalItems,
         shippingFee: quote.totalDeliveryFee,
         vouchers: activeVouchers,
-        currency: 'SAR',
+        currency: config.marketplace.currency || 'YER',
       });
       appliedVouchersList = voucherCalcResult.appliedVouchers;
     }
@@ -859,7 +863,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           street: address.street,
           buildingNumber: address.buildingNumber,
           apartmentNumber: address.apartmentNumber,
-          cityName: address.city?.nameAr ?? 'الرياض',
+          cityName: address.city?.nameAr ?? 'صنعاء',
           districtName: address.district?.nameAr ?? null,
           latitude: address.latitude,
           longitude: address.longitude,
@@ -1089,7 +1093,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           tx,
           orderId: createdOrder.id,
           customerId: req.user!.userId,
-          currency: 'SAR',
+          currency: config.marketplace.currency || 'YER',
           vouchers: appliedVouchersList,
           allocations: voucherCalcResult.allocations,
           idempotencyKey: (req.headers['idempotency-key'] as string) || undefined,

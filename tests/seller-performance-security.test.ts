@@ -56,6 +56,7 @@ async function runSecurityTests() {
   console.log('\n────────────────────────────────────────────────────────────');
   console.log('🛡️ ALL SELLER PERFORMANCE SECURITY TESTS PASSED (3/3)');
   console.log('────────────────────────────────────────────────────────────\n');
+  process.exit(0);
 }
 
 runSecurityTests().catch((err) => {

@@ -352,19 +352,45 @@ export class AuthController {
   static async resetPassword(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const { email, code, newPassword } = req.body;
-      const stored = await redis.get(`pwd_reset:${email.toLowerCase()}`);
+      const cleanEmail = email.toLowerCase().trim();
+      const attemptsKey = `pwd_reset_attempts:${cleanEmail}`;
+      const MAX_ATTEMPTS = 5;
+
+      const attempts = parseInt((await redis.get(attemptsKey)) || '0', 10);
+      if (attempts >= MAX_ATTEMPTS) {
+        await redis.del(`pwd_reset:${cleanEmail}`);
+        throw new AppError('تم تجاوز الحد الأقصى لمحاولات إعادة ضبط كلمة المرور. يرجى طلب رمز جديد.', 429, 'RESET_ATTEMPTS_EXCEEDED');
+      }
+
+      const stored = await redis.get(`pwd_reset:${cleanEmail}`);
 
       if (!stored || stored !== code) {
-        throw new AppError('Invalid or expired reset code.', 400);
+        const currentAttempts = await redis.incr(attemptsKey);
+        if (currentAttempts === 1) {
+          await redis.expire(attemptsKey, 900);
+        }
+        if (currentAttempts >= MAX_ATTEMPTS) {
+          await redis.del(`pwd_reset:${cleanEmail}`);
+          throw new AppError('تم تجاوز الحد الأقصى للمحاولات وتم إبطال الرمز. يرجى طلب رمز جديد.', 429, 'RESET_ATTEMPTS_EXCEEDED');
+        }
+        const remaining = MAX_ATTEMPTS - currentAttempts;
+        throw new AppError(`رمز التحقق غير صحيح. المحاولات المتبقية: ${remaining}`, 400, 'INVALID_RESET_CODE');
       }
 
       const passwordHash = await bcrypt.hash(newPassword, 10);
-      await prisma.user.update({
-        where: { email: email.toLowerCase() },
+      const updatedUser = await prisma.user.update({
+        where: { email: cleanEmail },
         data: { passwordHash },
+        select: { id: true },
       });
 
-      await redis.del(`pwd_reset:${email.toLowerCase()}`);
+      // Clear reset state and revoke active sessions/refresh tokens
+      await redis.del(`pwd_reset:${cleanEmail}`);
+      await redis.del(attemptsKey);
+      if (updatedUser?.id) {
+        await redis.del(`refresh:${updatedUser.id}`);
+      }
+
       ResponseUtil.success(res, null, 'Password updated successfully. You can now login.');
     } catch (error) {
       next(error);
@@ -1180,7 +1206,7 @@ function renderOAuthResultHtml(
   <script>
     try {
       if (window.opener) {
-        window.opener.postMessage({ type: 'SOUQNA_OAUTH_RESULT', success: ${success}, sessionKey: '${sessionKey || ''}' }, '*');
+        window.opener.postMessage({ type: 'SOUQNA_OAUTH_RESULT', success: ${success}, sessionKey: '${sessionKey || ''}' }, window.location.origin);
         setTimeout(function() { window.close(); }, 300);
       }
     } catch (_) {}

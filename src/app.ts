@@ -199,12 +199,12 @@ export const createApp = (): Application => {
 
   const corsOptions: cors.CorsOptions = {
     origin: (origin, callback) => {
-      if (!origin || config.corsOrigin === '*' || config.env === 'development') {
+      if (!origin) {
+        // Allow mobile apps, curl, server-to-server requests without origin
         callback(null, true);
       } else if (
-        allowedOriginsList.includes(origin) ||
-        allowedOriginsList.includes('*') ||
-        /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+        allowedOriginsList.filter((o) => o !== '*').includes(origin) ||
+        (config.env === 'development' && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin))
       ) {
         callback(null, true);
       } else {
@@ -289,6 +289,106 @@ export const createApp = (): Application => {
     const fileKey = req.params[0];
     res.redirect(301, `${config.apiPrefix}/storage/file/${fileKey}`);
   });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Deep-Link Verification Files (AR-2.4)
+  // Served at /.well-known/ so iOS and Android can verify domain ownership for
+  // Universal Links (apple-app-site-association) and Android App Links
+  // (assetlinks.json). MUST be served over HTTPS with no redirect on the final
+  // domain. Helmet is intentionally bypassed for these public files.
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  // iOS Universal Links — Apple App Site Association
+  // Customer: com.souqnaa.app    → souqnaa.online, www.souqnaa.online
+  // Seller  : com.souqnaa.seller → seller.souqnaa.online
+  app.get(
+    '/.well-known/apple-app-site-association',
+    (req: Request, res: Response) => {
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.json({
+        applinks: {
+          apps: [],
+          details: [
+            {
+              // Customer app — handles all customer-facing paths
+              appIDs: ['$(APPLE_TEAM_ID).com.souqnaa.app'],
+              components: [
+                { '/': '/products/*',  comment: 'Product detail pages' },
+                { '/': '/store/*',     comment: 'Seller storefronts' },
+                { '/': '/orders/*',    comment: 'Order tracking' },
+                { '/': '/campaign/*',  comment: 'Campaigns' },
+                { '/': '/flash-sale',  comment: 'Flash sale' },
+                { '/': '/wallet',      comment: 'SouqnaPay wallet' },
+                { '/': '/rewards',     comment: 'Rewards' },
+                { '/': '/voucher-center', comment: 'Vouchers' },
+                { '/': '/cart',        comment: 'Cart' },
+                { '/': '/home',        comment: 'Home' },
+              ],
+            },
+          ],
+        },
+        webcredentials: {
+          apps: ['$(APPLE_TEAM_ID).com.souqnaa.app'],
+        },
+      });
+    }
+  );
+
+  // Seller-subdomain Apple App Site Association
+  // iOS resolves AASA per host, so seller.souqnaa.online needs its own entry
+  app.get(
+    '/.well-known/apple-app-site-association/seller',
+    (req: Request, res: Response) => {
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.json({
+        applinks: {
+          apps: [],
+          details: [
+            {
+              appIDs: ['$(APPLE_TEAM_ID).com.souqnaa.seller'],
+              components: [
+                { '/': '/seller/*', comment: 'Seller dashboard and management' },
+                { '/': '/*',        comment: 'All other seller paths' },
+              ],
+            },
+          ],
+        },
+      });
+    }
+  );
+
+  // Android App Links — Digital Asset Links
+  // SHA-256 fingerprint is injected via env ANDROID_SIGNING_CERT_SHA256.
+  // Customer: com.souqnaa.app    → souqnaa.online, www.souqnaa.online
+  // Seller  : com.souqnaa.seller → seller.souqnaa.online
+  app.get(
+    '/.well-known/assetlinks.json',
+    (req: Request, res: Response) => {
+      const sha256 = process.env.ANDROID_SIGNING_CERT_SHA256 ?? 'FINGERPRINT_NOT_CONFIGURED';
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.json([
+        {
+          relation: ['delegate_permission/common.handle_all_urls'],
+          target: {
+            namespace: 'android_app',
+            package_name: 'com.souqnaa.app',
+            sha256_cert_fingerprints: [sha256],
+          },
+        },
+        {
+          relation: ['delegate_permission/common.handle_all_urls'],
+          target: {
+            namespace: 'android_app',
+            package_name: 'com.souqnaa.seller',
+            sha256_cert_fingerprints: [sha256],
+          },
+        },
+      ]);
+    }
+  );
 
   // Root welcome & API status
   app.get('/', (req: Request, res: Response) => {

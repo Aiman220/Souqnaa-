@@ -60,9 +60,9 @@ router.post(
       throw new AppError('Forbidden: Access denied to other customer orders', 403, 'FORBIDDEN');
     }
 
-    if (process.env.NODE_ENV === 'production' && req.user!.role !== 'ADMIN') {
+    if (req.user!.role !== 'ADMIN' && process.env.NODE_ENV !== 'test') {
       throw new AppError(
-        'تأكيد الدفع المباشر من العميل معطل في بيئة الإنتاج. يتم التأكيد آلياً عبر إشعارات البوابة (Webhook) أو مراجعة الحوالة.',
+        'تأكيد الدفع المباشر من العميل معطل. يتم التأكيد آلياً عبر إشعارات البوابة (Webhook) أو مراجعة الحوالة بواسطة الإدارة.',
         403,
         'CLIENT_CONFIRMATION_DISABLED'
       );

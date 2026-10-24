@@ -255,7 +255,6 @@ export class OrderStateMachine {
           sellerOrder.order.payment &&
           (sellerOrder.order.payment.status === PaymentStatus.PAID ||
             sellerOrder.order.payment.status === PaymentStatus.PARTIALLY_REFUNDED ||
-            sellerOrder.order.payment.method === 'WALLET' ||
             sellerOrder.order.payment.paidAt !== null)
         );
 
