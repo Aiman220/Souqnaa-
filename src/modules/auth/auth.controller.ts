@@ -452,28 +452,76 @@ export class AuthController {
   static async updateMe(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.user!.userId;
-      const { firstName, lastName, phone, avatar } = req.body;
+      const { firstName, lastName, email, phone, avatar } = req.body;
 
       const dataToUpdate: any = {};
-      if (firstName !== undefined) dataToUpdate.firstName = firstName.trim();
-      if (lastName !== undefined) dataToUpdate.lastName = lastName.trim();
+      if (firstName !== undefined) {
+        const cleanFirst = typeof firstName === 'string' ? firstName.trim() : '';
+        if (cleanFirst.length === 0) throw new AppError('الاسم الأول مطلوب', 400);
+        if (cleanFirst.length < 2) throw new AppError('الاسم الأول يجب أن يكون حرفين على الأقل', 400);
+        dataToUpdate.firstName = cleanFirst;
+      }
+      if (lastName !== undefined) {
+        const cleanLast = typeof lastName === 'string' ? lastName.trim() : '';
+        if (cleanLast.length === 0) throw new AppError('اسم العائلة مطلوب', 400);
+        if (cleanLast.length < 2) throw new AppError('اسم العائلة يجب أن يكون حرفين على الأقل', 400);
+        dataToUpdate.lastName = cleanLast;
+      }
+      if (email !== undefined) {
+        const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+        if (cleanEmail.length === 0) throw new AppError('البريد الإلكتروني مطلوب', 400);
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(cleanEmail)) {
+          throw new AppError('البريد الإلكتروني غير صالح', 400);
+        }
+        const currentUser = await prisma.user.findUnique({ where: { id: userId } });
+        if (cleanEmail !== currentUser?.email) {
+          const existingEmail = await prisma.user.findFirst({
+            where: { email: cleanEmail, id: { not: userId } },
+          });
+          if (existingEmail) {
+            throw new AppError('البريد الإلكتروني مسجل مسبقاً بحساب آخر', 409);
+          }
+          dataToUpdate.email = cleanEmail;
+          const isOtpVerified = await redis.get(`otp_verified:${cleanEmail}`);
+          if (isOtpVerified === '1') {
+            dataToUpdate.isVerified = true;
+            await redis.del(`otp_verified:${cleanEmail}`);
+          } else {
+            dataToUpdate.isVerified = false;
+          }
+        }
+      }
       if (phone !== undefined) {
-        dataToUpdate.phone = phone && typeof phone === 'string' && phone.trim() !== '' ? phone.trim() : null;
+        if (phone === null || (typeof phone === 'string' && phone.trim() === '')) {
+          dataToUpdate.phone = null;
+        } else if (typeof phone === 'string') {
+          const cleanPhone = phone.trim().replace(/\s|-/g, '');
+          const phoneRegex = /^\+?[0-9]{8,15}$/;
+          if (!phoneRegex.test(cleanPhone)) {
+            throw new AppError('رقم الهاتف غير صالح', 400);
+          }
+          const currentUser = await prisma.user.findUnique({ where: { id: userId } });
+          if (cleanPhone !== currentUser?.phone) {
+            const existingPhone = await prisma.user.findFirst({
+              where: {
+                phone: cleanPhone,
+                id: { not: userId },
+              },
+            });
+            if (existingPhone) {
+              throw new AppError('رقم الجوال مسجل مسبقاً بحساب آخر', 409);
+            }
+            dataToUpdate.phone = cleanPhone;
+            const isPhoneOtpVerified = await redis.get(`otp_verified:${cleanPhone}`);
+            if (isPhoneOtpVerified === '1') {
+              await redis.del(`otp_verified:${cleanPhone}`);
+            }
+          }
+        }
       }
       if (avatar !== undefined) {
         dataToUpdate.avatar = avatar && typeof avatar === 'string' && avatar.trim() !== '' ? avatar.trim() : null;
-      }
-
-      if (dataToUpdate.phone) {
-        const existingPhone = await prisma.user.findFirst({
-          where: {
-            phone: dataToUpdate.phone,
-            id: { not: userId },
-          },
-        });
-        if (existingPhone) {
-          throw new AppError('رقم الجوال مسجل مسبقاً بحساب آخر', 400);
-        }
       }
 
       const updatedUser = await prisma.user.update({

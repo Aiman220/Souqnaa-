@@ -66,6 +66,7 @@ export const updateProfileSchema = z.object({
   body: z.object({
     firstName: z.string().min(1, 'الاسم الأول مطلوب').optional(),
     lastName: z.string().min(1, 'اسم العائلة مطلوب').optional(),
+    email: z.string().email('البريد الإلكتروني غير صالح').optional(),
     phone: z.string().optional().nullable(),
     avatar: z.string().optional().nullable(),
   }),

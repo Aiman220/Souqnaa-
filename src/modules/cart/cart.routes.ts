@@ -37,7 +37,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
                     createdAt: true,
                   },
                 },
-                images: { where: { isPrimary: true } },
+                images: { orderBy: [{ isPrimary: 'desc' }, { order: 'asc' }], take: 5 },
               },
             },
 
@@ -105,8 +105,15 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
         };
       }
 
+      const primaryImage =
+        item.variant?.image ??
+        item.product?.images?.find((img: any) => img.isPrimary)?.url ??
+        item.product?.images?.[0]?.url ??
+        null;
+
       storeMap[storeId].items.push({
         ...item,
+        image: primaryImage,
         unitPrice,
         itemTotal,
         isFlashSale: isFlashSaleActive,

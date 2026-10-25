@@ -144,6 +144,104 @@ export class CustomerWalletService {
   }
 
   /**
+   * Authoritatively retrieves complete details of a single customer wallet transaction.
+   * Strictly enforces user ownership against the authenticated userId to prevent IDOR.
+   */
+  static async getTransactionDetail(userId: string, txId: string) {
+    const account = await prisma.walletAccount.findUnique({
+      where: { userId },
+    });
+    if (!account) {
+      throw new AppError('حساب المحفظة غير موجود', 404);
+    }
+
+    const tx = await prisma.walletTransaction.findFirst({
+      where: {
+        id: txId,
+        walletAccountId: account.id, // Strictly scoped to user's wallet
+      },
+      include: {
+        refund: {
+          select: {
+            id: true,
+            refundNumber: true,
+            status: true,
+            reason: true,
+            orderId: true,
+            order: {
+              select: {
+                id: true,
+                orderNumber: true,
+                status: true,
+                payment: {
+                  select: {
+                    method: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!tx) {
+      throw new AppError('الحركة المالية غير موجودة أو ليس لديك صلاحية الوصول إليها', 404);
+    }
+
+    // Locate associated ledger entry for authoritative balanceBefore / balanceAfter
+    const ledger = await prisma.walletLedgerEntry.findFirst({
+      where: {
+        walletAccountId: account.id,
+        OR: [
+          { referenceId: tx.id },
+          ...(tx.refundId ? [{ referenceId: tx.refundId }] : []),
+          ...(tx.referenceNumber ? [{ referenceId: tx.referenceNumber }] : []),
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    let metadataObj: any = null;
+    if (tx.metadata) {
+      try {
+        metadataObj = JSON.parse(tx.metadata);
+      } catch {
+        metadataObj = null;
+      }
+    }
+
+    const isCredit = ['DEPOSIT', 'REFUND_CREDIT', 'MANUAL_CREDIT', 'ADJUSTMENT_CREDIT', 'ORDER_REFUND'].includes(tx.type);
+
+    return {
+      id: tx.id,
+      referenceNumber: tx.referenceNumber,
+      externalReference: tx.externalReference,
+      type: tx.type,
+      status: tx.status,
+      amount: tx.amount,
+      currency: tx.currency,
+      direction: ledger?.direction ?? (isCredit ? 'CREDIT' : 'DEBIT'),
+      isCredit,
+      description: tx.description,
+      balanceBefore: ledger?.balanceBefore ?? null,
+      balanceAfter: ledger?.balanceAfter ?? null,
+      currentBalance: account.availableBalance,
+      refundNumber: tx.refund?.refundNumber ?? null,
+      refundReason: tx.refund?.reason ?? null,
+      refundStatus: tx.refund?.status ?? null,
+      orderId: tx.refund?.orderId ?? metadataObj?.orderId ?? null,
+      orderNumber: tx.refund?.order?.orderNumber ?? metadataObj?.orderNumber ?? null,
+      orderStatus: tx.refund?.order?.status ?? null,
+      paymentMethod: tx.refund?.order?.payment?.method ?? metadataObj?.paymentMethod ?? null,
+      walletProvider: metadataObj?.walletProvider ?? null,
+      walletNumberMasked: metadataObj?.walletNumberMasked ?? null,
+      createdAt: tx.createdAt,
+      completedAt: tx.completedAt,
+    };
+  }
+
+  /**
    * Idempotently credits customer wallet from an approved refund.
    * Uses unique constraint on (refundId, type) to strictly prevent double credits.
    */

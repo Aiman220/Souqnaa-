@@ -57,26 +57,38 @@ router.use(authenticate);
 router.get('/checkout-payment-methods', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const evaluationContext = { userId: req.user!.userId };
-    const cart = await prisma.cart.findUnique({
-      where: { userId: req.user!.userId },
-      include: {
-        items: {
-          include: {
-            product: {
-              include: {
-                store: { select: { id: true, sellerId: true, isActive: true } },
+    const { sellerId, productId } = req.query;
+
+    const sellerIds = new Set<string>();
+    if (sellerId) {
+      sellerIds.add(String(sellerId));
+    } else if (productId) {
+      const prod = await prisma.product.findUnique({
+        where: { id: String(productId) },
+        include: { store: { select: { sellerId: true } } },
+      });
+      if (prod?.store?.sellerId) sellerIds.add(prod.store.sellerId);
+    } else {
+      const cart = await prisma.cart.findUnique({
+        where: { userId: req.user!.userId },
+        include: {
+          items: {
+            include: {
+              product: {
+                include: {
+                  store: { select: { id: true, sellerId: true, isActive: true } },
+                },
               },
             },
           },
         },
-      },
-    });
+      });
 
-    const sellerIds = new Set<string>();
-    if (cart?.items) {
-      for (const item of cart.items) {
-        const sId = item.product.store?.sellerId;
-        if (sId) sellerIds.add(sId);
+      if (cart?.items) {
+        for (const item of cart.items) {
+          const sId = item.product.store?.sellerId;
+          if (sId) sellerIds.add(sId);
+        }
       }
     }
 
@@ -158,6 +170,10 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
       coinsUsed,
       coinReservationId,
       coinQuoteId,
+      // Purchase Mode & Cart Isolation
+      purchaseMode = 'CART_CHECKOUT',
+      buyNowItem,
+      selectedCartItemIds,
     } = req.body;
 
     // Check Idempotency Key (prevent duplicate orders on double taps / network retries)
@@ -267,26 +283,96 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
       ? parseFloat(defaultCommissionSetting.value)
       : 0.10;
 
-    const cart = await prisma.cart.findUnique({
-      where: { userId: req.user!.userId },
-      include: {
-        items: {
-          include: {
-            product: {
-              include: {
-                category: true,
-                store: { include: { seller: true } },
-                inventory: true,
+    let cart: any = null;
+    let orderCheckoutItems: any[] = [];
+    const isBuyNowFlow = String(purchaseMode || '').toUpperCase() === 'BUY_NOW';
+
+    if (isBuyNowFlow) {
+      if (!buyNowItem || !buyNowItem.productId) {
+        throw new AppError('تفاصيل منتج الشراء المباشر غير متوفرة', 400);
+      }
+      const buyQty = parseInt(String(buyNowItem.quantity), 10) || 1;
+      if (buyQty <= 0) {
+        throw new AppError('الكمية المطلوبة يجب أن تكون قطعة واحدة على الأقل', 400);
+      }
+
+      const product = await prisma.product.findUnique({
+        where: { id: String(buyNowItem.productId) },
+        include: {
+          category: true,
+          store: { include: { seller: true } },
+          inventory: true,
+          variants: true,
+        },
+      });
+
+      if (!product || !product.isActive) {
+        throw new AppError('المنتج المطلوب للشراء غير متاح حالياً', 400);
+      }
+
+      let variant = null;
+      if (buyNowItem.variantId) {
+        variant = product.variants.find((v) => v.id === String(buyNowItem.variantId));
+        if (!variant) {
+          throw new AppError('خيار المنتج المحدد غير متوفر', 400);
+        }
+      }
+
+      const availableStock = variant
+        ? variant.stockQuantity
+        : (product.inventory ? Math.max(0, product.inventory.quantity - (product.inventory.reserved || 0)) : 0);
+
+      if (availableStock < buyQty) {
+        throw new AppError(`عذراً، الكمية المطلوبة غير متوفرة في المخزون (المتبقي: ${availableStock})`, 400);
+      }
+
+      orderCheckoutItems = [
+        {
+          id: `buynow_${product.id}_${Date.now()}`,
+          cartId: 'direct_purchase',
+          productId: product.id,
+          variantId: variant ? variant.id : null,
+          quantity: buyQty,
+          product,
+          variant,
+          isFlashSale: false,
+          flashSaleReservationId: null,
+          flashSaleItemId: null,
+          flashSaleUnitPrice: null,
+        },
+      ];
+    } else {
+      cart = await prisma.cart.findUnique({
+        where: { userId: req.user!.userId },
+        include: {
+          items: {
+            include: {
+              product: {
+                include: {
+                  category: true,
+                  store: { include: { seller: true } },
+                  inventory: true,
+                },
               },
+              variant: true,
             },
-            variant: true,
           },
         },
-      },
-    });
+      });
 
-    if (!cart || cart.items.length === 0) {
-      throw new AppError('سلة التسوق فارغة', 400);
+      if (!cart || cart.items.length === 0) {
+        throw new AppError('سلة التسوق فارغة', 400);
+      }
+
+      if (Array.isArray(selectedCartItemIds) && selectedCartItemIds.length > 0) {
+        const idSet = new Set(selectedCartItemIds.map(String));
+        orderCheckoutItems = cart.items.filter((item: any) => idSet.has(item.id));
+        if (orderCheckoutItems.length === 0) {
+          throw new AppError('المنتجات المحددة في السلة لم تعد متوفرة', 400);
+        }
+      } else {
+        orderCheckoutItems = cart.items;
+      }
     }
 
     // Map PaymentMethod
@@ -385,11 +471,11 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
     }
 
     // Group items by seller
-    const sellerGroups = new Map<string, typeof cart.items>();
+    const sellerGroups = new Map<string, typeof orderCheckoutItems>();
     let subtotal = 0;
     const fallbackSeller = await prisma.seller.findFirst();
 
-    for (const item of cart.items) {
+    for (const item of orderCheckoutItems) {
       const sellerId = item.product.store?.sellerId || item.product.store?.seller?.id || fallbackSeller?.id || '';
       if (!sellerId) {
         throw new AppError(`تعذر تحديد المتجر التابع للمنتج: ${item.product.nameAr}`, 400);
@@ -516,8 +602,8 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
         deliveryZone: sq.zoneName || undefined,
       }));
 
-      const productIdsInCart = cart.items.map((it) => it.productId);
-      const categoryIdsInCart = cart.items.map((it) => it.product?.categoryId).filter(Boolean) as string[];
+      const productIdsInCart = orderCheckoutItems.map((it) => it.productId);
+      const categoryIdsInCart = orderCheckoutItems.map((it) => it.product?.categoryId).filter(Boolean) as string[];
 
       const universalEvaluation = await UniversalShippingPromotionService.evaluateCheckout({
         context: {
@@ -532,7 +618,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           },
           order: {
             subtotal,
-            itemCount: cart.items.length,
+            itemCount: orderCheckoutItems.length,
             sellerCount: sellerIdsList.length,
             productIds: productIdsInCart,
             categoryIds: categoryIdsInCart,
@@ -610,13 +696,13 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
     // 2. Voucher Calculation & Authoritative Breakdown
     const requestedVoucherCodes: string[] = rawVoucherCodes
       ? (Array.isArray(rawVoucherCodes) ? rawVoucherCodes : [rawVoucherCodes])
-      : cart.appliedVouchers
-      ? cart.appliedVouchers.split(',').map((c) => c.trim())
-      : cart.couponCode
+      : cart?.appliedVouchers
+      ? cart.appliedVouchers.split(',').map((c: string) => c.trim())
+      : cart?.couponCode
       ? [cart.couponCode]
       : [];
 
-    const cartEvalItems: CartEvaluationItem[] = cart.items.map((it) => ({
+    const cartEvalItems: CartEvaluationItem[] = orderCheckoutItems.map((it) => ({
       id: it.id,
       cartItemId: it.id,
       productId: it.productId,
@@ -762,7 +848,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
     // ==========================================
     // SOUQNAA Centralized Production-Grade Tax Engine
     // ==========================================
-    const taxCalculationItems = cart.items.map((ci) => {
+    const taxCalculationItems = orderCheckoutItems.map((ci) => {
       let unitPrice = ci.variant?.price ?? ci.product.price;
       if (ci.isFlashSale && ci.flashSaleUnitPrice) {
         unitPrice = ci.flashSaleUnitPrice;
@@ -798,6 +884,44 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
       subtotal - (platformDiscount + sellerDiscount) - coinDiscount + deliveryFee + (taxResult.priceIncludesTax ? 0 : taxAmount)
     );
 
+    // Authoritative resolution of active Delivery Methods
+    const activeDeliveryMethods = await prisma.deliveryMethod.findMany({
+      where: { isActive: true },
+    });
+    const deliveryMethodCodeMap = new Map(
+      activeDeliveryMethods.map((m) => [m.code.toLowerCase(), m])
+    );
+    const checkoutDeliveryMethodCode = String(deliveryMethodCode || (isExpress ? 'express' : 'standard')).toLowerCase();
+    const defaultDeliveryMethod = deliveryMethodCodeMap.get(checkoutDeliveryMethodCode)
+      || deliveryMethodCodeMap.get('standard')
+      || activeDeliveryMethods[0]
+      || null;
+
+    // Resolve per-seller delivery methods with strict validation against active methods
+    const rawSellerMethodOverrides = (req.body.sellerDeliveryMethods && typeof req.body.sellerDeliveryMethods === 'object')
+      ? req.body.sellerDeliveryMethods
+      : {};
+    const resolvedSellerDeliveryMethods = new Map<string, typeof defaultDeliveryMethod>();
+    for (const sellerId of sellerGroups.keys()) {
+      const customCode = rawSellerMethodOverrides[sellerId];
+      if (customCode && typeof customCode === 'string') {
+        const validatedMethod = deliveryMethodCodeMap.get(customCode.trim().toLowerCase());
+        if (validatedMethod) {
+          resolvedSellerDeliveryMethods.set(sellerId, validatedMethod);
+          continue;
+        }
+      }
+      resolvedSellerDeliveryMethods.set(sellerId, defaultDeliveryMethod);
+    }
+
+    // Determine parent order deliveryMethodId: only populated if ALL sellers share the EXACT same delivery method
+    const distinctMethodIds = new Set(
+      Array.from(resolvedSellerDeliveryMethods.values())
+        .map((m) => m?.id)
+        .filter(Boolean)
+    );
+    const parentDeliveryMethodId = distinctMethodIds.size === 1 ? Array.from(distinctMethodIds)[0] : null;
+
     // 0. Atomically reserve sequence and generate public order numbers
     const orderNumberData = await OrderNumberService.generateNextOrderNumber();
 
@@ -815,6 +939,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           idempotencyKey: idempotencyKey || null,
           userId: req.user!.userId,
           deliveryAddressId: address.id,
+          deliveryMethodId: parentDeliveryMethodId || null,
           status: OrderStatus.PENDING,
           subtotal,
           deliveryFee,
@@ -822,7 +947,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           taxAmount,
           total,
           notes,
-          couponCode: appliedVouchersList.length > 0 ? appliedVouchersList.map((v) => v.code).join(',') : cart.couponCode,
+          couponCode: appliedVouchersList.length > 0 ? appliedVouchersList.map((v) => v.code).join(',') : (cart?.couponCode || null),
           voucherId: appliedVouchersList[0]?.id || null,
           voucherCode: appliedVouchersList[0]?.code || null,
           platformDiscount,
@@ -947,12 +1072,15 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
         const sellerTaxBreakdown = taxResult.sellerBreakdowns[sellerId];
         const sellerTaxAmount = sellerTaxBreakdown ? sellerTaxBreakdown.sellerTotalTax : 0;
 
+        const sellerDeliveryMethod = resolvedSellerDeliveryMethods.get(sellerId) || defaultDeliveryMethod;
+
         const sellerOrder = await tx.sellerOrder.create({
           data: {
             orderId: createdOrder.id,
             sellerId,
             sellerOrderNumber,
             subOrderIndex,
+            deliveryMethodId: sellerDeliveryMethod?.id || null,
             status: SellerOrderStatus.PENDING,
             subtotal: sellerSubtotal,
             deliveryFee: sellerCustCharge,
@@ -1323,7 +1451,18 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
       }
 
       // 7. Clear Cart
-      await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
+      if (isBuyNowFlow) {
+        // Buy Now directly purchases without touching or clearing persistent cart
+      } else if (Array.isArray(selectedCartItemIds) && selectedCartItemIds.length > 0 && cart) {
+        await tx.cartItem.deleteMany({
+          where: {
+            id: { in: selectedCartItemIds.map(String) },
+            cartId: cart.id,
+          },
+        });
+      } else if (cart) {
+        await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
+      }
       return { newOrder: createdOrder, createdSellerOrders: sellerOrdersList };
     });
 
@@ -1348,7 +1487,9 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
     }
 
     // Notify Cart Abandonment Engine of completed checkout
-    CartAbandonmentJob.onCheckoutCompleted(req.user!.userId, newOrder.id).catch(console.error);
+    if (!isBuyNowFlow) {
+      CartAbandonmentJob.onCheckoutCompleted(req.user!.userId, newOrder.id).catch(console.error);
+    }
 
     const order = newOrder;
 

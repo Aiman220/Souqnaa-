@@ -259,7 +259,7 @@ router.get('/tiles/:z/:x/:y.png', async (req: Request, res: Response, next: Next
     const apiKey = config.geo.geoapifyApiKey;
     const upstreamUrl = apiKey
       ? `https://maps.geoapify.com/v1/tile/osm-bright/${zNum}/${xNum}/${yNum}.png?apiKey=${apiKey}`
-      : `https://a.basemaps.cartocdn.com/rastertiles/voyager/${zNum}/${xNum}/${yNum}.png`;
+      : `https://tile.openstreetmap.org/${zNum}/${xNum}/${yNum}.png`;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 6000);
@@ -267,7 +267,7 @@ router.get('/tiles/:z/:x/:y.png', async (req: Request, res: Response, next: Next
     const upstreamRes = await fetch(upstreamUrl, {
       signal: controller.signal,
       headers: {
-        'User-Agent': 'SOUQNA-MapProxy/1.0',
+        'User-Agent': 'SOUQNA-MapProxy/1.0 (support@souqnaa.com)',
       },
     });
     clearTimeout(timeout);
@@ -291,15 +291,27 @@ router.get('/tiles/:z/:x/:y.png', async (req: Request, res: Response, next: Next
 // ──────────────────────────────────────────────────────────────────────────────
 router.get('/map-config', async (req: Request, res: Response) => {
   const isConfigured = geoService.isConfigured();
+
+  // Dynamically resolve base URL from the incoming request so clients always connect
+  // to the reachable server instance (works seamlessly in Render, production domain, LAN IP, or localhost).
+  let resolvedBaseUrl = config.domains.apiBaseUrl;
+  const host = req.get('x-forwarded-host') || req.get('host');
+  if (host) {
+    const proto = req.get('x-forwarded-proto') || req.protocol || (req.secure ? 'https' : 'http');
+    resolvedBaseUrl = `${proto}://${host}${config.apiPrefix}`;
+  } else if (process.env.RENDER_EXTERNAL_URL) {
+    resolvedBaseUrl = `${process.env.RENDER_EXTERNAL_URL.replace(/\/+$/, '')}${config.apiPrefix}`;
+  }
+
   ResponseUtil.success(res, {
     tileUrlTemplate: isConfigured
-      ? `${config.domains.apiBaseUrl}/locations/tiles/{z}/{x}/{y}.png`
-      : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-    subdomains: ['a', 'b', 'c', 'd'],
-    provider: isConfigured ? 'souqna-secure-tiles' : 'carto-osm',
+      ? `${resolvedBaseUrl}/locations/tiles/{z}/{x}/{y}.png`
+      : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    subdomains: isConfigured ? ['a', 'b', 'c', 'd'] : ['a', 'b', 'c'],
+    provider: isConfigured ? 'souqna-secure-tiles' : 'osm-standard',
     attribution: isConfigured
       ? '© OpenStreetMap contributors | © Geoapify'
-      : '© OpenStreetMap contributors | © CARTO',
+      : '© OpenStreetMap contributors',
     isConfigured,
   });
 });

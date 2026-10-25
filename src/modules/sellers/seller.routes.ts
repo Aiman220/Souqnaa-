@@ -46,7 +46,7 @@ async function getSeller(userId: string) {
         },
       },
       balance: true,
-      user: { select: { id: true, email: true, phone: true, firstName: true, lastName: true, avatar: true } },
+      user: { select: { id: true, email: true, phone: true, firstName: true, lastName: true, avatar: true, isVerified: true, role: true, isActive: true } },
     },
   });
 
@@ -94,7 +94,7 @@ async function getSeller(userId: string) {
             },
           },
           balance: true,
-          user: { select: { id: true, email: true, phone: true, firstName: true, lastName: true, avatar: true } },
+          user: { select: { id: true, email: true, phone: true, firstName: true, lastName: true, avatar: true, isVerified: true, role: true, isActive: true } },
         },
       });
     });
@@ -327,6 +327,10 @@ router.get('/user/:userId', async (req: Request, res: Response, next: NextFuncti
 router.patch('/me', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const {
+      firstName,
+      lastName,
+      email,
+      phone,
       businessType,
       crNumber,
       taxNumber,
@@ -338,21 +342,119 @@ router.patch('/me', async (req: Request, res: Response, next: NextFunction) => {
     } = req.body;
     const seller = await getSeller(req.user!.userId);
 
-    const updated = await (prisma.seller as any).update({
-      where: { id: seller.id },
-      data: {
-        ...(businessType !== undefined ? { businessType } : {}),
-        ...(crNumber !== undefined ? { crNumber } : {}),
-        ...(taxNumber !== undefined ? { taxNumber } : {}),
-        ...(idNumber !== undefined ? { idNumber } : {}),
-        ...(idFrontUrl !== undefined ? { idFrontUrl } : {}),
-        ...(idBackUrl !== undefined ? { idBackUrl } : {}),
-        ...(idSelfieUrl !== undefined ? { idSelfieUrl } : {}),
-        ...(businessDocUrl !== undefined ? { businessDocUrl } : {}),
-      },
+    const userUpdateData: Record<string, any> = {};
+
+    if (firstName !== undefined) {
+      if (typeof firstName !== 'string' || firstName.trim().length === 0) {
+        throw new AppError('الاسم الأول مطلوب', 400, 'VALIDATION_ERROR');
+      }
+      const cleanFirstName = firstName.trim();
+      if (cleanFirstName.length < 2) {
+        throw new AppError('الاسم الأول يجب أن يكون حرفين على الأقل', 400, 'VALIDATION_ERROR');
+      }
+      userUpdateData.firstName = cleanFirstName;
+    }
+
+    if (lastName !== undefined) {
+      if (typeof lastName !== 'string' || lastName.trim().length === 0) {
+        throw new AppError('اسم العائلة مطلوب', 400, 'VALIDATION_ERROR');
+      }
+      const cleanLastName = lastName.trim();
+      if (cleanLastName.length < 2) {
+        throw new AppError('اسم العائلة يجب أن يكون حرفين على الأقل', 400, 'VALIDATION_ERROR');
+      }
+      userUpdateData.lastName = cleanLastName;
+    }
+
+    if (email !== undefined) {
+      if (typeof email !== 'string' || email.trim().length === 0) {
+        throw new AppError('البريد الإلكتروني مطلوب', 400, 'VALIDATION_ERROR');
+      }
+      const cleanEmail = email.trim().toLowerCase();
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(cleanEmail)) {
+        throw new AppError('البريد الإلكتروني غير صالح', 400, 'INVALID_EMAIL');
+      }
+      if (cleanEmail !== seller.user.email) {
+        const existingEmail = await prisma.user.findFirst({
+          where: {
+            email: cleanEmail,
+            id: { not: seller.userId },
+          },
+        });
+        if (existingEmail) {
+          throw new AppError('البريد الإلكتروني مسجل مسبقاً بحساب آخر', 409, 'EMAIL_ALREADY_EXISTS');
+        }
+        userUpdateData.email = cleanEmail;
+
+        // Verify if OTP was confirmed for this target email
+        const isOtpVerified = await redis.get(`otp_verified:${cleanEmail}`);
+        if (isOtpVerified === '1') {
+          userUpdateData.isVerified = true;
+          await redis.del(`otp_verified:${cleanEmail}`);
+        } else {
+          // Unverified email change must not be marked as verified
+          userUpdateData.isVerified = false;
+        }
+      }
+    }
+
+    if (phone !== undefined) {
+      if (phone === null || (typeof phone === 'string' && phone.trim() === '')) {
+        userUpdateData.phone = null;
+      } else if (typeof phone === 'string') {
+        const cleanPhone = phone.trim().replace(/\s|-/g, '');
+        const phoneRegex = /^\+?[0-9]{8,15}$/;
+        if (!phoneRegex.test(cleanPhone)) {
+          throw new AppError('رقم الهاتف غير صالح', 400, 'INVALID_PHONE');
+        }
+        if (cleanPhone !== seller.user.phone) {
+          const existingPhone = await prisma.user.findFirst({
+            where: {
+              phone: cleanPhone,
+              id: { not: seller.userId },
+            },
+          });
+          if (existingPhone) {
+            throw new AppError('رقم الجوال مسجل مسبقاً بحساب آخر', 409, 'PHONE_ALREADY_EXISTS');
+          }
+          userUpdateData.phone = cleanPhone;
+          const isPhoneOtpVerified = await redis.get(`otp_verified:${cleanPhone}`);
+          if (isPhoneOtpVerified === '1') {
+            await redis.del(`otp_verified:${cleanPhone}`);
+          }
+        }
+      }
+    }
+
+    const sellerUpdateData: Record<string, any> = {
+      ...(businessType !== undefined ? { businessType } : {}),
+      ...(crNumber !== undefined ? { crNumber } : {}),
+      ...(taxNumber !== undefined ? { taxNumber } : {}),
+      ...(idNumber !== undefined ? { idNumber } : {}),
+      ...(idFrontUrl !== undefined ? { idFrontUrl } : {}),
+      ...(idBackUrl !== undefined ? { idBackUrl } : {}),
+      ...(idSelfieUrl !== undefined ? { idSelfieUrl } : {}),
+      ...(businessDocUrl !== undefined ? { businessDocUrl } : {}),
+    };
+
+    await prisma.$transaction(async (tx) => {
+      if (Object.keys(userUpdateData).length > 0) {
+        await tx.user.update({
+          where: { id: seller.userId },
+          data: userUpdateData,
+        });
+      }
+      if (Object.keys(sellerUpdateData).length > 0) {
+        await (tx.seller as any).update({
+          where: { id: seller.id },
+          data: sellerUpdateData,
+        });
+      }
     });
 
-    ResponseUtil.success(res, updated, 'تم تحديث بيانات البائع بنجاح');
+    const canonicalSeller = await getSeller(req.user!.userId);
+    ResponseUtil.success(res, canonicalSeller, 'تم تحديث بيانات البائع بنجاح');
   } catch (error) {
     next(error);
   }
@@ -1971,10 +2073,15 @@ router.get(
             include: {
               addressSnapshot: true,
               deliveryAddress: true,
+              deliveryMethod: true,
+              deliveryTimeSlot: true,
+              slotBooking: { include: { timeSlot: true } },
               payment: true,
               user: { select: { firstName: true, lastName: true, phone: true } },
             },
           },
+          deliveryMethod: true,
+          deliveryQuoteSnapshot: true,
           items: {
             include: {
               product: { select: { nameAr: true, nameEn: true, sku: true, images: true } },
@@ -3415,6 +3522,131 @@ router.get('/me/transactions', async (req: Request, res: Response, next: NextFun
         totalPages: Math.ceil(total / limit),
       },
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── GET /me/transactions/:id ────────────────────────────────────────────────────
+router.get('/me/transactions/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const seller = await getSeller(req.user!.userId);
+    const id = String(req.params.id);
+
+    const tx = await prisma.sellerTransaction.findFirst({
+      where: {
+        id,
+        sellerBalanceId: seller.balance!.id,
+      },
+    });
+
+    if (!tx) {
+      throw new AppError('الحركة المالية غير موجودة أو غير مصرح بالوصول إليها', 404);
+    }
+
+    let orderInfo: any = null;
+    let withdrawalInfo: any = null;
+    let refundInfo: any = null;
+
+    if (tx.referenceId) {
+      const order = await prisma.order.findUnique({
+        where: { id: tx.referenceId },
+        select: {
+          id: true,
+          orderNumber: true,
+          status: true,
+          total: true,
+          payment: { select: { method: true } },
+        },
+      });
+      if (order) {
+        orderInfo = {
+          id: order.id,
+          orderNumber: order.orderNumber,
+          status: order.status,
+          paymentMethod: order.payment?.method ?? null,
+          totalAmount: order.total,
+        };
+      } else {
+        const sellerOrder = await prisma.sellerOrder.findUnique({
+          where: { id: tx.referenceId },
+          include: {
+            order: {
+              select: {
+                id: true,
+                orderNumber: true,
+                status: true,
+                payment: { select: { method: true } },
+              },
+            },
+          },
+        });
+        if (sellerOrder) {
+          orderInfo = {
+            id: sellerOrder.orderId,
+            orderNumber: sellerOrder.order?.orderNumber ?? null,
+            status: sellerOrder.status,
+            paymentMethod: sellerOrder.order?.payment?.method ?? null,
+            subtotal: sellerOrder.subtotal,
+            commissionAmount: sellerOrder.commissionAmount,
+          };
+        } else {
+          const withdrawal = await prisma.withdrawal.findUnique({
+            where: { id: tx.referenceId },
+            select: {
+              id: true,
+              amount: true,
+              currency: true,
+              status: true,
+              walletProvider: true,
+              walletNumberMasked: true,
+              holderName: true,
+              bankName: true,
+              externalRef: true,
+              adminNote: true,
+              rejectionReason: true,
+              createdAt: true,
+              completedAt: true,
+            },
+          });
+          if (withdrawal) {
+            withdrawalInfo = withdrawal;
+          } else {
+            const refund = await prisma.refundRequest.findUnique({
+              where: { id: tx.referenceId },
+              select: {
+                id: true,
+                refundNumber: true,
+                status: true,
+                reason: true,
+                order: { select: { id: true, orderNumber: true } },
+              },
+            });
+            if (refund) {
+              refundInfo = refund;
+            }
+          }
+        }
+      }
+    }
+
+    const detail = {
+      id: tx.id,
+      amount: tx.amount,
+      type: tx.type,
+      description: tx.description,
+      referenceId: tx.referenceId,
+      isCredit: tx.amount > 0,
+      currency: (seller.balance?.currency && seller.balance.currency !== 'SAR') ? seller.balance.currency : 'YER',
+      currentBalance: seller.balance?.availableBalance ?? null,
+      pendingBalance: seller.balance?.pendingBalance ?? null,
+      createdAt: tx.createdAt,
+      order: orderInfo,
+      withdrawal: withdrawalInfo,
+      refund: refundInfo,
+    };
+
+    ResponseUtil.success(res, detail);
   } catch (error) {
     next(error);
   }

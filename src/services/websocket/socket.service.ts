@@ -16,6 +16,15 @@ export class SocketService {
   private userLastSeen = new Map<string, Date>(); // userId -> Date
   private userMessageTimestamps = new Map<string, number[]>(); // userId -> timestamps for rate limiting
   private userTypingTimestamps = new Map<string, number[]>(); // userId -> timestamps for typing rate limiting
+  private conversationMetaCache = new Map<
+    string,
+    {
+      baseConvId: string;
+      altRoom: string | null;
+      memberUserIds: string[];
+      expiresAt: number;
+    }
+  >();
   private pendingDisconnectTimers = new Map<string, NodeJS.Timeout>(); // userId -> grace period timer
   public readonly DISCONNECT_GRACE_PERIOD_MS = 5000; // 5 second grace period to prevent false offline transitions
 
@@ -47,6 +56,71 @@ export class SocketService {
     recent.push(now);
     this.userTypingTimestamps.set(userId, recent);
     return true;
+  }
+
+  public async resolveAndCacheConversationMeta(
+    cleanConvId: string,
+    _requestingUserId?: string
+  ): Promise<{ baseConvId: string; altRoom: string | null; memberUserIds: string[] } | null> {
+    const cached = this.conversationMetaCache.get(cleanConvId);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached;
+    }
+
+    try {
+      let altRoom: string | null = null;
+      let baseConvId = cleanConvId;
+      let supportRequesterId: string | null = null;
+      let supportAgentUserId: string | null = null;
+
+      const supConv = await prisma.supportConversation.findFirst({
+        where: {
+          OR: [
+            { id: cleanConvId },
+            { conversationId: cleanConvId },
+            { id: cleanConvId.toLowerCase() },
+            { conversationId: cleanConvId.toLowerCase() },
+          ],
+        },
+        include: { assignedAgent: true },
+      });
+
+      if (supConv) {
+        altRoom =
+          supConv.id.toLowerCase() === cleanConvId.toLowerCase()
+            ? supConv.conversationId
+            : supConv.id;
+        baseConvId = supConv.conversationId;
+        supportRequesterId = supConv.requesterId;
+        supportAgentUserId = supConv.assignedAgent?.adminUserId || null;
+      }
+
+      const members = await prisma.conversationMember.findMany({
+        where: {
+          conversationId: { in: [cleanConvId, ...(altRoom ? [altRoom] : []), baseConvId] },
+        },
+        select: { userId: true },
+      });
+
+      const memberSet = new Set<string>(members.map((m) => m.userId));
+      if (supportRequesterId) memberSet.add(supportRequesterId);
+      if (supportAgentUserId) memberSet.add(supportAgentUserId);
+
+      const meta = {
+        baseConvId,
+        altRoom,
+        memberUserIds: Array.from(memberSet),
+        expiresAt: Date.now() + 5 * 60 * 1000,
+      };
+
+      this.conversationMetaCache.set(cleanConvId, meta);
+      this.conversationMetaCache.set(baseConvId, meta);
+      if (altRoom) this.conversationMetaCache.set(altRoom, meta);
+
+      return meta;
+    } catch (_) {
+      return null;
+    }
   }
 
   static init(httpServer: HttpServer): SocketService {
@@ -623,6 +697,21 @@ export class SocketService {
           });
 
           if (conv) {
+            // Cache conversation metadata for instant typing & presence dispatch
+            const memberIds = conv.members.map((m) => m.userId);
+            const cachedMeta = {
+              baseConvId,
+              altRoom: supConv ? (supConv.id.toLowerCase() === baseConvId.toLowerCase() ? supConv.conversationId : supConv.id) : null,
+              memberUserIds: memberIds,
+              expiresAt: Date.now() + 5 * 60 * 1000,
+            };
+            this.conversationMetaCache.set(baseConvId, cachedMeta);
+            this.conversationMetaCache.set(conversationId, cachedMeta);
+            if (supConv) {
+              this.conversationMetaCache.set(supConv.id, cachedMeta);
+              this.conversationMetaCache.set(supConv.conversationId, cachedMeta);
+            }
+
             // Update last read timestamp for this member
             await prisma.conversationMember.updateMany({
               where: { conversationId: baseConvId, userId },
@@ -766,7 +855,7 @@ export class SocketService {
         } catch (_) {}
       });
 
-      // Unified typing indicators with authorization and rate-limiting
+      // Unified typing indicators with authorization, in-memory caching, and zero latency
       const handleTypingEvent = async (convId: string, isTyping: boolean) => {
         if (isGuest) return;
         const cleanConvId = convId.trim();
@@ -777,91 +866,85 @@ export class SocketService {
           return;
         }
 
-        let altRoom: string | null = null;
-        let supportRequesterId: string | null = null;
-        let supportAgentUserId: string | null = null;
-        let baseConvId = cleanConvId;
-
-        try {
-          const supConv = await prisma.supportConversation.findFirst({
-            where: {
-              OR: [
-                { id: cleanConvId },
-                { conversationId: cleanConvId },
-                { id: cleanConvId.toLowerCase() },
-                { conversationId: cleanConvId.toLowerCase() },
-              ],
-            },
-            include: { assignedAgent: true },
-          });
-          if (supConv) {
-            altRoom = supConv.id.toLowerCase() === cleanConvId.toLowerCase()
-              ? supConv.conversationId
-              : supConv.id;
-            baseConvId = supConv.conversationId;
-            supportRequesterId = supConv.requesterId;
-            supportAgentUserId = supConv.assignedAgent?.adminUserId || null;
-          }
-        } catch (_) {}
-
-        // Authorize: Sender must be a member of the conversation or an ADMIN
-        const userRole = socket.data.user?.role;
-        let isAuthorized = userRole === 'ADMIN';
-        if (!isAuthorized) {
-          const member = await prisma.conversationMember.findUnique({
-            where: { conversationId_userId: { conversationId: baseConvId, userId } },
-          });
-          if (member || supportRequesterId === userId || supportAgentUserId === userId) {
-            isAuthorized = true;
-          }
-        }
-
-        if (!isAuthorized) {
-          return;
-        }
-
-        const typingPayload = {
+        const typingPayload: any = {
           conversationId: cleanConvId,
-          altConversationId: altRoom,
           userId,
           isTyping,
         };
 
-        const rawRooms = [cleanConvId, ...(altRoom ? [altRoom] : []), baseConvId];
+        const userRole = socket.data.user?.role;
+        const now = Date.now();
+        const cached = this.conversationMetaCache.get(cleanConvId);
+
+        // Fast path 1: Instant dispatch from in-memory cached membership (0ms latency)
+        if (cached && cached.expiresAt > now) {
+          const isAuthorized = userRole === 'ADMIN' || cached.memberUserIds.includes(userId);
+          if (!isAuthorized) return;
+
+          typingPayload.altConversationId = cached.altRoom;
+          const rawRooms = [cleanConvId, ...(cached.altRoom ? [cached.altRoom] : []), cached.baseConvId];
+          const uniqueRooms = Array.from(new Set(rawRooms.filter(Boolean)));
+
+          for (const r of uniqueRooms) {
+            socket.to(`conversation:${r}`).emit(isTyping ? 'typing:start' : 'typing:stop', typingPayload);
+            socket.to(`conversation:${r}`).emit('typing:status', typingPayload);
+          }
+
+          for (const targetUid of cached.memberUserIds) {
+            if (targetUid !== userId) {
+              this.io.to(`user:${targetUid}`).emit(isTyping ? 'typing:start' : 'typing:stop', typingPayload);
+              this.io.to(`user:${targetUid}`).emit('typing:status', typingPayload);
+            }
+          }
+          return;
+        }
+
+        // Fast path 2: Socket has already authorized and joined the room in join:conversation
+        if (socket.rooms.has(`conversation:${cleanConvId}`)) {
+          // Immediately broadcast to conversation room without blocking on DB
+          socket.to(`conversation:${cleanConvId}`).emit(isTyping ? 'typing:start' : 'typing:stop', typingPayload);
+          socket.to(`conversation:${cleanConvId}`).emit('typing:status', typingPayload);
+
+          // Asynchronously resolve metadata and deliver to co-members' user rooms in background
+          this.resolveAndCacheConversationMeta(cleanConvId, userId).then((meta) => {
+            if (!meta) return;
+            if (meta.altRoom) {
+              typingPayload.altConversationId = meta.altRoom;
+              socket.to(`conversation:${meta.altRoom}`).emit(isTyping ? 'typing:start' : 'typing:stop', typingPayload);
+              socket.to(`conversation:${meta.altRoom}`).emit('typing:status', typingPayload);
+            }
+            for (const targetUid of meta.memberUserIds) {
+              if (targetUid !== userId) {
+                this.io.to(`user:${targetUid}`).emit(isTyping ? 'typing:start' : 'typing:stop', typingPayload);
+                this.io.to(`user:${targetUid}`).emit('typing:status', typingPayload);
+              }
+            }
+          }).catch(() => {});
+          return;
+        }
+
+        // Fallback cold path: resolve metadata from database, verify authorization, and emit
+        const meta = await this.resolveAndCacheConversationMeta(cleanConvId, userId);
+        if (!meta) return;
+
+        const isAuthorized = userRole === 'ADMIN' || meta.memberUserIds.includes(userId);
+        if (!isAuthorized) return;
+
+        typingPayload.altConversationId = meta.altRoom;
+        const rawRooms = [cleanConvId, ...(meta.altRoom ? [meta.altRoom] : []), meta.baseConvId];
         const uniqueRooms = Array.from(new Set(rawRooms.filter(Boolean)));
 
-        // Broadcast to rooms excluding sender socket
         for (const r of uniqueRooms) {
           socket.to(`conversation:${r}`).emit(isTyping ? 'typing:start' : 'typing:stop', typingPayload);
           socket.to(`conversation:${r}`).emit('typing:status', typingPayload);
         }
 
-        // Also deliver directly to co-members' user rooms in case client lagged in room join
-        try {
-          const targetUserIds = new Set<string>();
-          if (supportRequesterId && supportRequesterId !== userId) {
-            targetUserIds.add(supportRequesterId);
-          }
-          if (supportAgentUserId && supportAgentUserId !== userId) {
-            targetUserIds.add(supportAgentUserId);
-          }
-
-          const members = await prisma.conversationMember.findMany({
-            where: {
-              conversationId: { in: uniqueRooms },
-              userId: { not: userId },
-            },
-            select: { userId: true },
-          });
-          for (const m of members) {
-            targetUserIds.add(m.userId);
-          }
-
-          for (const targetUid of targetUserIds) {
+        for (const targetUid of meta.memberUserIds) {
+          if (targetUid !== userId) {
             this.io.to(`user:${targetUid}`).emit(isTyping ? 'typing:start' : 'typing:stop', typingPayload);
             this.io.to(`user:${targetUid}`).emit('typing:status', typingPayload);
           }
-        } catch (_) {}
+        }
       };
 
       const parseTypingData = (data: any): { convId: string | null; isTyping?: boolean } => {

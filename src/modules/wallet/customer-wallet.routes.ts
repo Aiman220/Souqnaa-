@@ -8,6 +8,7 @@ import { WalletProviderRegistry } from '../payments/adapters/wallet-provider.ada
 import { SocketService } from '../../services/websocket/socket.service';
 import { remoteConfigService } from '../remote-config/remote-config.service';
 import { financialLimiter } from '../../middleware/rate-limiter.middleware';
+import { requireIntegrity } from '../integrity/integrity.middleware'; // AR-2.5
 
 const router = Router();
 router.use(authenticate);
@@ -33,6 +34,18 @@ router.get('/transactions', async (req: Request, res: Response, next: NextFuncti
 
     const result = await CustomerWalletService.getTransactions(userId, { page, limit, type });
     ResponseUtil.success(res, result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── GET /api/v1/wallet/transactions/:id ───────────────────────────────────────
+router.get('/transactions/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user!.userId;
+    const id = String(req.params.id);
+    const detail = await CustomerWalletService.getTransactionDetail(userId, id);
+    ResponseUtil.success(res, detail);
   } catch (error) {
     next(error);
   }
@@ -219,7 +232,10 @@ router.get('/providers', async (req: Request, res: Response, next: NextFunction)
 });
 
 // ── POST /api/v1/wallet/withdraw ─────────────────────────────────────────────
-router.post('/withdraw', financialLimiter, async (req: Request, res: Response, next: NextFunction) => {
+// AR-2.5: Integrity evidence required (policy=WALLET_WITHDRAWAL, mode=soft).
+// VERIFIED → proceeds. UNAVAILABLE → proceeds with elevated risk score.
+// REJECTED / INVALID → 403. EXPIRED → 401 retryable.
+router.post('/withdraw', financialLimiter, requireIntegrity('WALLET_WITHDRAWAL'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.userId;
     const { savedWalletId, amount } = req.body;

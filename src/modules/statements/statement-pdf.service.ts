@@ -139,7 +139,7 @@ export class StatementPdfService {
         <tr>
           <th style="width: 50px;">#</th>
           <th>التاريخ — Date</th>
-          <th>المرجع — Reference</th>
+          <th style="width: 140px; text-align: center;">المرجع — Reference</th>
           <th>النوع — Type</th>
           <th>البيان — Description</th>
           <th>المبلغ الإجمالي — Gross</th>
@@ -154,7 +154,7 @@ export class StatementPdfService {
         <tr>
           <td>${li.lineIndex}</td>
           <td>${new Date(li.transactionDate).toLocaleDateString('en-GB')}</td>
-          <td class="font-mono">${li.reference}</td>
+          <td class="font-mono" style="text-align: center;" dir="ltr">${li.reference}</td>
           <td><span class="badge badge-${li.type.toLowerCase()}">${li.type}</span></td>
           <td>${li.description}</td>
           <td>${this.formatAmount(li.grossAmount, '')}</td>
@@ -204,7 +204,7 @@ export class StatementPdfService {
         <tr>
           <th style="width: 50px;">#</th>
           <th>تاريخ الطلب — Date</th>
-          <th>رقم الطلب — Order ID</th>
+          <th style="width: 140px; text-align: center;">رقم الطلب — Order ID</th>
           <th>إجمالي الطلب — Gross</th>
           <th>الخصم — Discount</th>
           <th>المسترجع — Refund</th>
@@ -218,7 +218,7 @@ export class StatementPdfService {
         <tr>
           <td>${li.lineIndex}</td>
           <td>${new Date(li.transactionDate).toLocaleDateString('en-GB')}</td>
-          <td class="font-mono">${li.reference}</td>
+          <td class="font-mono" style="text-align: center;" dir="ltr">${li.reference}</td>
           <td>${this.formatAmount(li.grossAmount, '')}</td>
           <td>${li.discountAmount ? this.formatAmount(li.discountAmount, '') : '-'}</td>
           <td>${li.adjustmentAmount ? this.formatAmount(li.adjustmentAmount, '') : '-'}</td>
@@ -260,7 +260,7 @@ export class StatementPdfService {
         <tr>
           <th style="width: 50px;">#</th>
           <th>التاريخ — Date</th>
-          <th>رقم الطلب — Order ID</th>
+          <th style="width: 140px; text-align: center;">رقم الطلب — Order ID</th>
           <th>البيان — Description</th>
           <th>قيمة المبيعات — Sale Amount</th>
           <th>وعاء العمولة — Base</th>
@@ -275,7 +275,7 @@ export class StatementPdfService {
           <tr>
             <td>${li.lineIndex}</td>
             <td>${new Date(li.transactionDate).toLocaleDateString('en-GB')}</td>
-            <td class="font-mono">${li.reference}</td>
+            <td class="font-mono" style="text-align: center;" dir="ltr">${li.reference}</td>
             <td>${li.description}</td>
             <td>${this.formatAmount(li.grossAmount, '')}</td>
             <td>${this.formatAmount(li.metadata?.commissionBase || li.grossAmount, '')}</td>
@@ -324,7 +324,7 @@ export class StatementPdfService {
         <tr>
           <th style="width: 50px;">#</th>
           <th>التاريخ — Date</th>
-          <th>المرجع — Ref / Order</th>
+          <th style="width: 140px; text-align: center;">المرجع — Ref / Order</th>
           <th>البيان — Tax Description</th>
           <th>الولاية الضريبية — Jurisdiction</th>
           <th>النسبة — Rate</th>
@@ -340,7 +340,7 @@ export class StatementPdfService {
           <tr>
             <td>${li.lineIndex}</td>
             <td>${new Date(li.transactionDate).toLocaleDateString('en-GB')}</td>
-            <td class="font-mono">${li.reference}</td>
+            <td class="font-mono" style="text-align: center;" dir="ltr">${li.reference}</td>
             <td>${li.description}</td>
             <td>${jurisdiction}</td>
             <td>${rate}</td>

@@ -1,11 +1,14 @@
 /**
  * SOUQNA — AR-2.5: Google Play Integrity Provider
- * 
- * Verifies Android Play Integrity evidence server-side.
- * Validates package name, challenge nonce binding, timestamp freshness,
- * device recognition verdicts, and application licensing.
- * 
- * Never trusts client-decoded verdicts or fabricates success results.
+ *
+ * Verifies Android Play Integrity evidence server-side using the official
+ * Google Play Integrity API (googleapis v1 decodeIntegrityToken).
+ *
+ * Safety rules (non-negotiable):
+ * - Credentials live server-side only; never embedded in the Flutter app.
+ * - A missing credential returns UNAVAILABLE, not VERIFIED.
+ * - An API or network error returns INVALID/UNAVAILABLE, never VERIFIED.
+ * - Tokens, credentials, and private key material are never logged.
  */
 
 import { DeviceIntegrityStatus, IntegrityProvider } from '../integrity.types';
@@ -15,7 +18,6 @@ export interface PlayIntegrityVerificationParams {
   expectedNonce: string;
   expectedPackageName: string;
   cloudProjectNumber?: string;
-  serviceAccountKey?: string;
 }
 
 export interface PlayIntegrityVerificationResult {
@@ -33,9 +35,7 @@ export interface PlayIntegrityVerificationResult {
 }
 
 export class PlayIntegrityProvider {
-  /**
-   * Authoritative map of recognized Android package names per app type.
-   */
+  /** Authoritative Android package names per app type. */
   public static readonly AUTHORIZED_PACKAGES: Record<string, string> = {
     customer: 'com.souqnaa.app',
     seller: 'com.souqnaa.seller',
@@ -43,15 +43,16 @@ export class PlayIntegrityProvider {
   };
 
   /**
-   * Verifies Google Play Integrity token on server.
+   * Verifies a Google Play Integrity token server-side.
+   * Calls Google's decodeIntegrityToken API when credentials are configured.
    */
   public static async verifyToken(
     params: PlayIntegrityVerificationParams
   ): Promise<PlayIntegrityVerificationResult> {
-    const { token, expectedNonce, expectedPackageName, serviceAccountKey } = params;
+    const { token, expectedNonce, expectedPackageName } = params;
 
-    // 1. Guard against empty or malformed token input
-    if (!token || typeof token !== 'string' || token.trim().length === 0) {
+    // 1. Reject missing or malformed token immediately
+    if (!token || typeof token !== 'string' || token.trim().length < 10) {
       return {
         status: DeviceIntegrityStatus.INVALID,
         provider: IntegrityProvider.GOOGLE_PLAY_INTEGRITY,
@@ -60,61 +61,156 @@ export class PlayIntegrityProvider {
       };
     }
 
-    // 2. Check if Google Cloud Play Integrity credentials are configured
-    const hasCredentials = Boolean(
-      serviceAccountKey || process.env.PLAY_INTEGRITY_SERVICE_ACCOUNT_KEY || process.env.GOOGLE_APPLICATION_CREDENTIALS
-    );
+    // 2. Require server-side credentials — never fabricate success without them
+    const credentialJson =
+      process.env.PLAY_INTEGRITY_SERVICE_ACCOUNT_KEY ||
+      process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
 
-    if (!hasCredentials) {
-      // In accordance with AR-2.5 mandatory safety rules:
-      // Never fabricate a successful verdict when backend credentials are not yet configured.
+    if (!credentialJson) {
       return {
         status: DeviceIntegrityStatus.UNAVAILABLE,
         provider: IntegrityProvider.GOOGLE_PLAY_INTEGRITY,
         reasons: ['PLAY_INTEGRITY_BACKEND_CREDENTIALS_NOT_CONFIGURED'],
-        riskScoreModifier: 0, // Zero penalty for unconfigured server infrastructure
+        riskScoreModifier: 0,
       };
     }
 
     try {
-      // 3. Decrypt and verify integrity token with Google Play Integrity API
-      // When credentials are provided, call googleapis playintegrity.decodeIntegrityToken
-      const payload = await this.callGooglePlayIntegrityApi(token, params.cloudProjectNumber);
+      const payload = await this._callGoogleApi(token, expectedPackageName, credentialJson);
 
       if (!payload) {
         return {
           status: DeviceIntegrityStatus.INVALID,
           provider: IntegrityProvider.GOOGLE_PLAY_INTEGRITY,
-          reasons: ['PLAY_INTEGRITY_DECODE_FAILED'],
+          reasons: ['PLAY_INTEGRITY_DECODE_RETURNED_EMPTY_PAYLOAD'],
           riskScoreModifier: 30,
         };
       }
 
       return this.evaluateDecodedPayload(payload, expectedNonce, expectedPackageName);
     } catch (error: any) {
-      const errMsg = error?.message || 'UNKNOWN_ERROR';
-      
-      // Handle rate limits or temporary service unavailability gracefully
-      if (errMsg.includes('RATE_LIMIT') || errMsg.includes('QUOTA_EXCEEDED') || errMsg.includes('503')) {
-        return {
-          status: DeviceIntegrityStatus.UNAVAILABLE,
-          provider: IntegrityProvider.GOOGLE_PLAY_INTEGRITY,
-          reasons: ['PLAY_INTEGRITY_SERVICE_UNAVAILABLE_OR_RATE_LIMITED'],
-          riskScoreModifier: 0,
-        };
-      }
-
-      return {
-        status: DeviceIntegrityStatus.INVALID,
-        provider: IntegrityProvider.GOOGLE_PLAY_INTEGRITY,
-        reasons: [`PLAY_INTEGRITY_VERIFICATION_ERROR: ${errMsg}`],
-        riskScoreModifier: 25,
-      };
+      return this._mapApiError(error);
     }
   }
 
   /**
-   * Evaluates the decoded Play Integrity claims against authoritative security criteria.
+   * Calls the Google Play Integrity v1 decodeIntegrityToken API.
+   * Authenticates with a service account JSON key from env.
+   * Returns the tokenPayloadExternal object or null.
+   */
+  private static async _callGoogleApi(
+    token: string,
+    packageName: string,
+    credentialJson: string
+  ): Promise<any | null> {
+    // Dynamic import to avoid load-time crash if googleapis is absent in dev
+    let googleapis: any;
+    try {
+      googleapis = await import('googleapis');
+    } catch {
+      throw new Error('GOOGLEAPIS_PACKAGE_NOT_INSTALLED');
+    }
+
+    const { google } = googleapis;
+
+    let credentials: any;
+    try {
+      credentials = JSON.parse(credentialJson);
+    } catch {
+      throw new Error('PLAY_INTEGRITY_CREDENTIALS_INVALID_JSON');
+    }
+
+    const auth = new google.auth.GoogleAuth({
+      credentials,
+      scopes: ['https://www.googleapis.com/auth/playintegrity'],
+    });
+
+    const playintegrity = google.playintegrity({ version: 'v1', auth });
+
+    // packageName used as the resource name in the API path
+    const response = await playintegrity.v1.decodeIntegrityToken({
+      packageName,
+      requestBody: { integrityToken: token },
+    });
+
+    return response?.data?.tokenPayloadExternal ?? null;
+  }
+
+  /**
+   * Maps Google API errors to typed verdicts without logging tokens.
+   */
+  private static _mapApiError(error: any): PlayIntegrityVerificationResult {
+    const code = error?.code ?? 0;
+    const msg: string = error?.message ?? 'UNKNOWN';
+
+    // 429 / quota / rate limit → UNAVAILABLE (retryable)
+    if (
+      code === 429 ||
+      msg.includes('QUOTA_EXCEEDED') ||
+      msg.includes('RATE_LIMIT') ||
+      msg.includes('rateLimitExceeded')
+    ) {
+      return {
+        status: DeviceIntegrityStatus.UNAVAILABLE,
+        provider: IntegrityProvider.GOOGLE_PLAY_INTEGRITY,
+        reasons: ['PLAY_INTEGRITY_QUOTA_EXCEEDED_OR_RATE_LIMITED'],
+        riskScoreModifier: 0,
+      };
+    }
+
+    // 503 / network errors → UNAVAILABLE
+    if (code === 503 || msg.includes('ECONNREFUSED') || msg.includes('ETIMEDOUT')) {
+      return {
+        status: DeviceIntegrityStatus.UNAVAILABLE,
+        provider: IntegrityProvider.GOOGLE_PLAY_INTEGRITY,
+        reasons: ['PLAY_INTEGRITY_SERVICE_TEMPORARILY_UNAVAILABLE'],
+        riskScoreModifier: 0,
+      };
+    }
+
+    // 403 permission / project misconfiguration → blocker, not retryable
+    if (code === 403 || msg.includes('PERMISSION_DENIED')) {
+      return {
+        status: DeviceIntegrityStatus.UNAVAILABLE,
+        provider: IntegrityProvider.GOOGLE_PLAY_INTEGRITY,
+        reasons: ['PLAY_INTEGRITY_PERMISSION_DENIED_CHECK_GCP_IAM'],
+        riskScoreModifier: 0,
+      };
+    }
+
+    // Missing googleapis package (dev environment)
+    if (msg === 'GOOGLEAPIS_PACKAGE_NOT_INSTALLED') {
+      return {
+        status: DeviceIntegrityStatus.UNAVAILABLE,
+        provider: IntegrityProvider.GOOGLE_PLAY_INTEGRITY,
+        reasons: ['PLAY_INTEGRITY_GOOGLEAPIS_PACKAGE_NOT_INSTALLED'],
+        riskScoreModifier: 0,
+      };
+    }
+
+    // Credential JSON malformed
+    if (msg === 'PLAY_INTEGRITY_CREDENTIALS_INVALID_JSON') {
+      return {
+        status: DeviceIntegrityStatus.UNAVAILABLE,
+        provider: IntegrityProvider.GOOGLE_PLAY_INTEGRITY,
+        reasons: ['PLAY_INTEGRITY_CREDENTIALS_INVALID_JSON'],
+        riskScoreModifier: 0,
+      };
+    }
+
+    // All other errors → INVALID (cryptographic or protocol failure)
+    // Sanitize message: never expose raw API error text that may contain token data
+    return {
+      status: DeviceIntegrityStatus.INVALID,
+      provider: IntegrityProvider.GOOGLE_PLAY_INTEGRITY,
+      reasons: [`PLAY_INTEGRITY_API_ERROR:code=${code}`],
+      riskScoreModifier: 25,
+    };
+  }
+
+  /**
+   * Evaluates the decoded tokenPayloadExternal against security criteria.
+   * Checks: nonce binding, package identity, freshness, device verdicts, app recognition.
    */
   public static evaluateDecodedPayload(
     payload: any,
@@ -123,19 +219,22 @@ export class PlayIntegrityProvider {
   ): PlayIntegrityVerificationResult {
     const reasons: string[] = [];
 
-    const requestDetails = payload.requestDetails || {};
-    const appIntegrity = payload.appIntegrity || {};
-    const deviceIntegrity = payload.deviceIntegrity || {};
-    const accountDetails = payload.accountDetails || {};
+    const requestDetails = payload.requestDetails ?? {};
+    const appIntegrity = payload.appIntegrity ?? {};
+    const deviceIntegrity = payload.deviceIntegrity ?? {};
+    const accountDetails = payload.accountDetails ?? {};
 
-    const receivedNonce = requestDetails.nonce || requestDetails.requestHash;
-    const receivedPackage = appIntegrity.packageName;
-    const timestampMillis = parseInt(requestDetails.timestampMillis || '0', 10);
-    const deviceVerdicts: string[] = deviceIntegrity.deviceRecognitionVerdict || [];
-    const appRecognition = appIntegrity.appRecognitionVerdict || 'UNKNOWN';
-    const licensing = accountDetails.appLicensingVerdict || 'UNKNOWN';
+    // Play Integrity API can return nonce in requestDetails.nonce (classic) or
+    // requestDetails.requestHash (request hash mode). Accept either.
+    const receivedNonce: string | undefined =
+      requestDetails.nonce ?? requestDetails.requestHash;
+    const receivedPackage: string | undefined = appIntegrity.packageName;
+    const timestampMillis = parseInt(requestDetails.timestampMillis ?? '0', 10);
+    const deviceVerdicts: string[] = deviceIntegrity.deviceRecognitionVerdict ?? [];
+    const appRecognition: string = appIntegrity.appRecognitionVerdict ?? 'UNKNOWN';
+    const licensing: string = accountDetails.appLicensingVerdict ?? 'UNKNOWN';
 
-    // 1. Challenge/nonce binding verification
+    // ── 1. Challenge / nonce binding ──────────────────────────────────────────
     if (!receivedNonce || receivedNonce !== expectedNonce) {
       return {
         status: DeviceIntegrityStatus.INVALID,
@@ -145,62 +244,63 @@ export class PlayIntegrityProvider {
       };
     }
 
-    // 2. Package name / App identity verification
-    if (!receivedPackage || receivedPackage.toLowerCase() !== expectedPackageName.toLowerCase()) {
+    // ── 2. Package identity ───────────────────────────────────────────────────
+    if (
+      !receivedPackage ||
+      receivedPackage.toLowerCase() !== expectedPackageName.toLowerCase()
+    ) {
       return {
         status: DeviceIntegrityStatus.REJECTED,
         provider: IntegrityProvider.GOOGLE_PLAY_INTEGRITY,
-        reasons: [`PACKAGE_NAME_MISMATCH: expected ${expectedPackageName}, received ${receivedPackage}`],
+        reasons: [
+          `PACKAGE_NAME_MISMATCH:expected=${expectedPackageName},received=${receivedPackage ?? 'MISSING'}`,
+        ],
         riskScoreModifier: 50,
       };
     }
 
-    // 3. Freshness verification (token age <= 10 minutes)
+    // ── 3. Freshness (token age ≤ 10 minutes) ─────────────────────────────────
     const now = Date.now();
     if (timestampMillis > 0 && Math.abs(now - timestampMillis) > 10 * 60 * 1000) {
       return {
         status: DeviceIntegrityStatus.EXPIRED,
         provider: IntegrityProvider.GOOGLE_PLAY_INTEGRITY,
-        reasons: ['INTEGRITY_TOKEN_EXPIRED'],
+        reasons: ['INTEGRITY_TOKEN_STALE_EXCEEDS_10_MINUTE_TOLERANCE'],
         riskScoreModifier: 20,
       };
     }
 
-    // 4. Device Recognition Verdicts
-    // SOUQNA requires at least MEETS_BASIC_INTEGRITY for non-tampered devices
+    // ── 4. Device recognition verdicts ───────────────────────────────────────
     const meetsBasic = deviceVerdicts.includes('MEETS_BASIC_INTEGRITY');
     const meetsDevice = deviceVerdicts.includes('MEETS_DEVICE_INTEGRITY');
     const meetsStrong = deviceVerdicts.includes('MEETS_STRONG_INTEGRITY');
 
     if (!meetsBasic && !meetsDevice && !meetsStrong) {
-      reasons.push('DEVICE_FAILED_INTEGRITY_CRITERIA');
+      reasons.push('DEVICE_FAILED_ALL_INTEGRITY_CRITERIA');
       return {
         status: DeviceIntegrityStatus.REJECTED,
         provider: IntegrityProvider.GOOGLE_PLAY_INTEGRITY,
         reasons,
         riskScoreModifier: 40,
-        details: {
-          deviceRecognitionVerdict: deviceVerdicts,
-          appRecognitionVerdict: appRecognition,
-          appLicensingVerdict: licensing,
-          packageName: receivedPackage,
-          timestampMillis,
-        },
+        details: { deviceRecognitionVerdict: deviceVerdicts, appRecognitionVerdict: appRecognition, appLicensingVerdict: licensing, packageName: receivedPackage, timestampMillis },
       };
     }
 
-    // 5. Binary recognition (detect side-loaded or tampered builds)
-    if (appRecognition === 'UNRECOGNIZED_VERSION') {
+    // ── 5. App binary recognition (detect side-loaded / tampered) ─────────────
+    if (appRecognition === 'UNAPPROVED_VERSION' || appRecognition === 'UNRECOGNIZED_VERSION') {
       reasons.push('UNRECOGNIZED_OR_TAMPERED_APP_BINARY');
     }
 
-    const isVerified = (meetsDevice || meetsStrong || meetsBasic) && appRecognition !== 'UNRECOGNIZED_VERSION';
+    const isVerified =
+      (meetsDevice || meetsStrong || meetsBasic) &&
+      appRecognition !== 'UNAPPROVED_VERSION' &&
+      appRecognition !== 'UNRECOGNIZED_VERSION';
 
     return {
       status: isVerified ? DeviceIntegrityStatus.VERIFIED : DeviceIntegrityStatus.REJECTED,
       provider: IntegrityProvider.GOOGLE_PLAY_INTEGRITY,
       reasons,
-      riskScoreModifier: isVerified ? -15 : 30, // Verified reduces risk, rejected increases risk
+      riskScoreModifier: isVerified ? -15 : 30,
       details: {
         deviceRecognitionVerdict: deviceVerdicts,
         appRecognitionVerdict: appRecognition,
@@ -209,18 +309,5 @@ export class PlayIntegrityProvider {
         timestampMillis,
       },
     };
-  }
-
-  /**
-   * Calls Google Cloud Play Integrity API to decode token.
-   * Extensible interface; returns null if API is not yet provisioned.
-   */
-  private static async callGooglePlayIntegrityApi(
-    _token: string,
-    _cloudProjectNumber?: string
-  ): Promise<any | null> {
-    // When live credentials are provided in production, googleapis playintegrity.decodeIntegrityToken
-    // is invoked here. If not provisioned, returns null safely.
-    return null;
   }
 }

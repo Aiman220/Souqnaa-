@@ -3405,6 +3405,239 @@ router.get('/finance/overview', async (req: Request, res: Response, next: NextFu
   }
 });
 
+// ── GET /finance/transactions/:id ───────────────────────────────────────────
+router.get('/finance/transactions/:id', requirePermission('finance:view'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params.id);
+
+    // 1. Check WalletTransaction
+    const walletTx = await prisma.walletTransaction.findUnique({
+      where: { id },
+      include: {
+        walletAccount: {
+          include: {
+            user: { select: { id: true, firstName: true, lastName: true, phone: true, email: true } },
+          },
+        },
+        refund: {
+          include: {
+            order: {
+              select: {
+                id: true,
+                orderNumber: true,
+                status: true,
+                payment: { select: { method: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (walletTx) {
+      const ledger = await prisma.walletLedgerEntry.findFirst({
+        where: {
+          walletAccountId: walletTx.walletAccountId,
+          OR: [
+            { referenceId: walletTx.id },
+            ...(walletTx.refundId ? [{ referenceId: walletTx.refundId }] : []),
+            ...(walletTx.referenceNumber ? [{ referenceId: walletTx.referenceNumber }] : []),
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      let metadataObj: any = null;
+      if (walletTx.metadata) {
+        try { metadataObj = JSON.parse(walletTx.metadata); } catch { metadataObj = null; }
+      }
+
+      const isCredit = ['DEPOSIT', 'REFUND_CREDIT', 'MANUAL_CREDIT', 'ADJUSTMENT_CREDIT', 'ORDER_REFUND'].includes(walletTx.type);
+
+      return ResponseUtil.success(res, {
+        category: 'WALLET_TRANSACTION',
+        id: walletTx.id,
+        referenceNumber: walletTx.referenceNumber,
+        externalReference: walletTx.externalReference,
+        type: walletTx.type,
+        status: walletTx.status,
+        amount: walletTx.amount,
+        currency: walletTx.currency,
+        direction: ledger?.direction ?? (isCredit ? 'CREDIT' : 'DEBIT'),
+        isCredit,
+        description: walletTx.description,
+        balanceBefore: ledger?.balanceBefore ?? null,
+        balanceAfter: ledger?.balanceAfter ?? null,
+        user: walletTx.walletAccount?.user ?? null,
+        orderId: walletTx.refund?.orderId ?? metadataObj?.orderId ?? null,
+        orderNumber: walletTx.refund?.order?.orderNumber ?? metadataObj?.orderNumber ?? null,
+        refundNumber: walletTx.refund?.refundNumber ?? null,
+        paymentMethod: walletTx.refund?.order?.payment?.method ?? metadataObj?.paymentMethod ?? null,
+        walletProvider: metadataObj?.walletProvider ?? null,
+        walletNumberMasked: metadataObj?.walletNumberMasked ?? null,
+        createdAt: walletTx.createdAt,
+        completedAt: walletTx.completedAt,
+      });
+    }
+
+    // 2. Check SellerTransaction
+    const sellerTx = await prisma.sellerTransaction.findUnique({
+      where: { id },
+      include: {
+        sellerBalance: {
+          include: {
+            seller: {
+              include: {
+                user: { select: { id: true, firstName: true, lastName: true, phone: true } },
+                stores: { select: { id: true, name: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (sellerTx) {
+      let orderInfo: any = null;
+      if (sellerTx.referenceId) {
+        const ord = await prisma.order.findUnique({
+          where: { id: sellerTx.referenceId },
+          select: {
+            id: true,
+            orderNumber: true,
+            status: true,
+            payment: { select: { method: true } },
+          },
+        });
+        if (ord) {
+          orderInfo = {
+            id: ord.id,
+            orderNumber: ord.orderNumber,
+            status: ord.status,
+            paymentMethod: ord.payment?.method ?? null,
+          };
+        }
+      }
+
+      return ResponseUtil.success(res, {
+        category: 'SELLER_TRANSACTION',
+        id: sellerTx.id,
+        amount: sellerTx.amount,
+        type: sellerTx.type,
+        status: 'COMPLETED',
+        currency: sellerTx.sellerBalance.currency,
+        isCredit: sellerTx.amount > 0,
+        direction: sellerTx.amount > 0 ? 'CREDIT' : 'DEBIT',
+        description: sellerTx.description,
+        referenceId: sellerTx.referenceId,
+        seller: sellerTx.sellerBalance.seller,
+        currentBalance: sellerTx.sellerBalance.availableBalance,
+        pendingBalance: sellerTx.sellerBalance.pendingBalance,
+        order: orderInfo,
+        createdAt: sellerTx.createdAt,
+      });
+    }
+
+    // 3. Check Withdrawal (seller)
+    const withdrawal = await prisma.withdrawal.findUnique({
+      where: { id },
+      include: {
+        seller: {
+          include: {
+            user: { select: { id: true, firstName: true, lastName: true, phone: true } },
+            stores: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+    if (withdrawal) {
+      return ResponseUtil.success(res, {
+        category: 'SELLER_WITHDRAWAL',
+        id: withdrawal.id,
+        referenceNumber: withdrawal.externalRef || withdrawal.id,
+        amount: withdrawal.amount,
+        type: 'WITHDRAWAL',
+        status: withdrawal.status,
+        currency: withdrawal.currency,
+        isCredit: false,
+        direction: 'DEBIT',
+        description: `سحب أرباح التاجر - ${withdrawal.seller.stores?.[0]?.name || 'متجر'}`,
+        seller: withdrawal.seller,
+        walletProvider: withdrawal.walletProvider,
+        walletNumberMasked: withdrawal.walletNumberMasked,
+        holderName: withdrawal.holderName,
+        bankName: withdrawal.bankName,
+        adminNote: withdrawal.adminNote,
+        rejectionReason: withdrawal.rejectionReason,
+        proofImageUrl: withdrawal.proofImageUrl,
+        createdAt: withdrawal.createdAt,
+        completedAt: withdrawal.completedAt,
+      });
+    }
+
+    // 4. Check CustomerWalletWithdrawal
+    const custWithdrawal = await prisma.customerWalletWithdrawal.findUnique({
+      where: { id },
+      include: {
+        user: { select: { id: true, firstName: true, lastName: true, phone: true, email: true } },
+      },
+    });
+    if (custWithdrawal) {
+      return ResponseUtil.success(res, {
+        category: 'CUSTOMER_WITHDRAWAL',
+        id: custWithdrawal.id,
+        referenceNumber: custWithdrawal.externalRef || custWithdrawal.id,
+        amount: custWithdrawal.amount,
+        type: 'WITHDRAWAL',
+        status: custWithdrawal.status,
+        currency: custWithdrawal.currency,
+        isCredit: false,
+        direction: 'DEBIT',
+        description: `سحب رصيد محفظة العميل - ${custWithdrawal.user?.firstName || ''} ${custWithdrawal.user?.lastName || ''}`.trim(),
+        user: custWithdrawal.user,
+        walletProvider: custWithdrawal.walletProvider,
+        walletNumberMasked: custWithdrawal.walletNumberMasked,
+        holderName: custWithdrawal.holderName,
+        adminNote: custWithdrawal.adminNote,
+        rejectionReason: custWithdrawal.rejectionReason,
+        proofImageUrl: custWithdrawal.proofImageUrl,
+        createdAt: custWithdrawal.createdAt,
+        completedAt: custWithdrawal.completedAt,
+      });
+    }
+
+    // 5. Check WalletDeposit
+    const deposit = await prisma.walletDeposit.findUnique({
+      where: { id },
+    });
+    if (deposit) {
+      return ResponseUtil.success(res, {
+        category: 'WALLET_DEPOSIT',
+        id: deposit.id,
+        referenceNumber: deposit.transferReference,
+        amount: deposit.amount,
+        type: 'DEPOSIT',
+        status: deposit.status,
+        currency: deposit.currency,
+        isCredit: true,
+        direction: 'CREDIT',
+        description: `طلب شحن رصيد عبر ${deposit.walletProvider}`,
+        walletProvider: deposit.walletProvider,
+        senderName: deposit.senderName,
+        senderPhone: deposit.senderPhone,
+        adminNote: deposit.adminNote,
+        rejectionReason: deposit.rejectionReason,
+        proofImageUrl: deposit.proofImageUrl,
+        createdAt: deposit.createdAt,
+      });
+    }
+
+    throw new AppError('المعاملة المالية غير موجودة', 404);
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/withdrawals', requirePermission('finance:view'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const page = parseInt(req.query.page as string) || 1;

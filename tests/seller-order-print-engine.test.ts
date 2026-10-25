@@ -27,6 +27,9 @@ describe('SOUQNA Universal Seller Order Print & Export Engine', () => {
       paymentMethodEn: 'Cash on Delivery (COD)',
       paymentStatusAr: 'معلق',
       paymentStatusEn: 'Pending',
+      deliveryMethodAr: 'توصيل قياسي',
+      deliveryMethodEn: 'Standard Delivery',
+      deliveryScheduleType: 'ASAP',
       orderStatusAr: 'تم التجهيز',
       orderStatusEn: 'PROCESSING',
       souqnaLogoDataUri: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=',
@@ -164,6 +167,8 @@ describe('SOUQNA Universal Seller Order Print & Export Engine', () => {
         assert.ok(html.includes('كشف حساب') || html.includes('STATEMENT'), 'Must identify as financial statement');
         assert.ok(html.includes('61,750') || html.includes('61750'), 'Must display net seller payout');
         assert.ok(html.includes('3,250') || html.includes('3250'), 'Must display platform commission deduction');
+        assert.ok(html.includes('رسوم توصيل المتجر') || html.includes('توصيل المتجر'), 'Must display seller delivery fee row');
+        assert.ok(html.includes('2,500') || html.includes('2500'), 'Must display seller delivery fee amount');
         assert.ok(html.includes('مستحق للصرف') || html.includes('walletReleaseStatus'), 'Must display payout status');
       });
     }
@@ -260,6 +265,90 @@ describe('SOUQNA Universal Seller Order Print & Export Engine', () => {
         }
       }
     });
+  });
+
+  describe('6. Exact Delivery Method Rendering & Unavailable Fallback', () => {
+    it('should render exact recorded delivery method across A4, 80MM, and 58MM formats for all document types', () => {
+      for (const docType of docTypes) {
+        for (const format of paperFormats) {
+          const mockData = createMockPrintData(docType, format);
+          mockData.deliveryMethodAr = 'توصيل سريع — إكسبرس';
+          mockData.deliveryMethodEn = 'Express Delivery';
+
+          const html = SellerOrderPrintService.renderHtmlDocument(mockData);
+
+          assert.ok(
+            html.includes('توصيل سريع — إكسبرس'),
+            `${docType} (${format}) must render the exact recorded delivery method 'توصيل سريع — إكسبرس'`
+          );
+        }
+      }
+    });
+
+    it('should render scheduled delivery method with slot name accurately', () => {
+      const mockData = createMockPrintData('STATEMENT', 'A4');
+      mockData.deliveryMethodAr = 'توصيل مجدول (الفترة الصباحية: 9 ص - 1 م)';
+      mockData.deliveryMethodEn = 'Scheduled Delivery (Morning Slot: 9 AM - 1 PM)';
+
+      const html = SellerOrderPrintService.renderHtmlDocument(mockData);
+      assert.ok(html.includes('توصيل مجدول'), 'Must render scheduled delivery label');
+      assert.ok(html.includes('الفترة الصباحية'), 'Must include slot details in statement');
+    });
+
+    it('should strictly render approved unavailable label "غير محدد" when delivery method is missing, without fabricating a default', () => {
+      for (const format of paperFormats) {
+        const mockData = createMockPrintData('STATEMENT', format);
+        mockData.deliveryMethodAr = 'غير محدد';
+        mockData.deliveryMethodEn = 'Not Specified';
+
+        const html = SellerOrderPrintService.renderHtmlDocument(mockData);
+
+        assert.ok(
+          html.includes('غير محدد'),
+          `STATEMENT (${format}) must render 'غير محدد' when delivery method is unavailable`
+        );
+        assert.ok(
+          !html.includes('توصيل قياسي — سوقناا إكسبرس'),
+          `STATEMENT (${format}) must not fabricate a delivery method`
+        );
+      }
+    });
+  });
+
+  describe('7. Table Column Alignment & Header-to-Cell Consistency', () => {
+    it('should center-align the SKU / identifier column in both header and rows in A4 Invoice', () => {
+      const mockData = createMockPrintData('INVOICE', 'A4');
+      const html = SellerOrderPrintService.renderHtmlDocument(mockData);
+
+      // Check header contains SKU and center alignment
+      assert.ok(html.includes('<th style="width: 110px; text-align: center;">الرمز — SKU</th>'), 'SKU table header must have text-align: center');
+      assert.ok(html.includes('<td style="text-align: center;"><span class="item-sku-code" dir="ltr" style="display: inline-block;">'), 'SKU data cells must have text-align: center and LTR direction');
+    });
+
+    it('should center-align the SKU / identifier column in both header and rows in A4 Packing Slip', () => {
+      const mockData = createMockPrintData('PACKING_SLIP', 'A4');
+      const html = SellerOrderPrintService.renderHtmlDocument(mockData);
+
+      assert.ok(html.includes('<th style="width: 130px; text-align: center;">الرمز — SKU</th>'), 'Packing slip SKU header must have text-align: center');
+      assert.ok(html.includes('<td style="text-align: center;"><code dir="ltr"'), 'Packing slip SKU data cells must have text-align: center');
+    });
+  });
+
+  describe('8. Seller First & Last Name Rendering in Header', () => {
+    for (const docType of docTypes) {
+      for (const format of paperFormats) {
+        it(`should display seller first and last name in header for ${docType} (${format})`, () => {
+          const mockData = createMockPrintData(docType, format);
+          mockData.store.sellerName = 'أحمد علي منصور';
+          const html = SellerOrderPrintService.renderHtmlDocument(mockData);
+
+          assert.ok(
+            html.includes('أحمد علي منصور'),
+            `Must render seller name 'أحمد علي منصور' in ${docType} (${format}) header`
+          );
+        });
+      }
+    }
   });
 });
 

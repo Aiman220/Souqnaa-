@@ -38,14 +38,17 @@ export const config = {
     backendPublicUrl:
       process.env.BACKEND_PUBLIC_URL ||
       process.env.API_BASE_URL ||
+      process.env.RENDER_EXTERNAL_URL ||
       (process.env.NODE_ENV === 'production'
         ? 'https://api.souqnaa.com'
         : 'https://dev-api.souqnaa.com'),
     apiBaseUrl:
       process.env.API_BASE_URL ||
-      (process.env.NODE_ENV === 'production'
-        ? 'https://api.souqnaa.com/api/v1'
-        : 'https://dev-api.souqnaa.com/api/v1'),
+      (process.env.RENDER_EXTERNAL_URL
+        ? `${process.env.RENDER_EXTERNAL_URL.replace(/\/+$/, '')}${process.env.API_PREFIX || '/api/v1'}`
+        : process.env.NODE_ENV === 'production'
+          ? 'https://api.souqnaa.com/api/v1'
+          : 'https://dev-api.souqnaa.com/api/v1'),
     webBaseUrl:
       process.env.WEB_BASE_URL ||
       (process.env.NODE_ENV === 'production'
@@ -170,12 +173,12 @@ export const config = {
     routingProvider: process.env.ROUTING_PROVIDER || 'geoapify',
     // Never hardcode or log this key. Derived strictly from environment variables.
     geoapifyApiKey: process.env.GEOAPIFY_API_KEY || process.env.GEOAPIF_API_KEY || '',
-    // Tile URL template returned to Flutter for rendering — defaults to open CARTO/OSM when no key is set
+    // Tile URL template returned to Flutter for rendering — defaults to open OSM when no key is set
     geoapifyTileUrl: process.env.GEOAPIFY_TILE_URL ||
       process.env.GEOAPIF_TILE_URL ||
       (process.env.GEOAPIFY_API_KEY || process.env.GEOAPIF_API_KEY
         ? `https://maps.geoapify.com/v1/tile/osm-bright/{z}/{x}/{y}.png?apiKey=${process.env.GEOAPIFY_API_KEY || process.env.GEOAPIF_API_KEY}`
-        : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png'),
+        : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
   },
 
   rateLimits: {

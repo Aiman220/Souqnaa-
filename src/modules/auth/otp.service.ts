@@ -121,6 +121,9 @@ export class OtpService {
         where: { OR: [{ email: cleanTarget.toLowerCase() }, { phone: cleanTarget }] },
         data: { isVerified: true },
       });
+      // Store verified OTP token in Redis for 15 minutes to authorize email/phone profile updates
+      await redis.set(`otp_verified:${cleanTarget.toLowerCase()}`, '1', 900);
+      await redis.set(`otp_verified:${cleanTarget}`, '1', 900);
     }
 
     return true;

@@ -37,9 +37,13 @@ export interface PrintDocumentData {
   orderStatusIcon?: string;
   orderStatusColor?: string;
   orderStatusBg?: string;
+  deliveryMethodAr: string;
+  deliveryMethodEn: string;
+  deliveryScheduleType?: string;
   souqnaLogoDataUri: string;
   store: {
     name: string;
+    sellerName?: string;
     phone: string;
     email: string;
     address: string;
@@ -80,6 +84,7 @@ export interface PrintDocumentData {
     platformFundedDiscount: number;
     refundDeduction: number;
     otherAdjustments: number;
+    deliveryFee?: number;
     netSellerAmount: number;
     walletReleaseStatus: string;
     walletReleaseDate: string;
@@ -286,6 +291,56 @@ export class SellerOrderPrintService {
       bg: rawOrderStatus === 'DELIVERED' ? '#dcfce7' : (rawOrderStatus.includes('CANCEL') ? '#fee2e2' : '#f1f5f9'),
     };
 
+    // Authoritative Delivery Method resolution from canonical database fields
+    const delivMethod = sellerOrder.deliveryMethod || parentOrder.deliveryMethod;
+    const rawScheduleType = String(
+      sellerOrder.deliveryScheduleType ||
+      parentOrder.deliveryScheduleType ||
+      sellerOrder.deliveryQuoteSnapshot?.deliveryScheduleType ||
+      parentOrder.deliveryQuoteSnapshot?.deliveryScheduleType ||
+      ''
+    ).toUpperCase();
+
+    let deliveryMethodAr = '';
+    let deliveryMethodEn = '';
+
+    if (delivMethod?.nameAr || delivMethod?.nameEn) {
+      deliveryMethodAr = delivMethod.nameAr || delivMethod.nameEn || '';
+      deliveryMethodEn = delivMethod.nameEn || delivMethod.nameAr || '';
+    } else if (rawScheduleType === 'EXPRESS') {
+      deliveryMethodAr = 'توصيل سريع — إكسبرس';
+      deliveryMethodEn = 'Express Delivery';
+    } else if (rawScheduleType === 'SCHEDULED') {
+      const slot = parentOrder.deliveryTimeSlot || parentOrder.slotBooking?.timeSlot;
+      const slotText = slot?.nameAr || (slot?.startTime && slot?.endTime ? `${slot.startTime} - ${slot.endTime}` : '');
+      deliveryMethodAr = slotText ? `توصيل مجدول (${slotText})` : 'توصيل مجدول';
+      deliveryMethodEn = 'Scheduled Delivery';
+    } else if (rawScheduleType === 'ASAP') {
+      deliveryMethodAr = 'توصيل قياسي';
+      deliveryMethodEn = 'Standard Delivery';
+    } else if (parentOrder.shippingMethod || sellerOrder.shippingMethod) {
+      const sm = String(parentOrder.shippingMethod || sellerOrder.shippingMethod).toLowerCase();
+      if (sm === 'express') {
+        deliveryMethodAr = 'توصيل سريع — إكسبرس';
+        deliveryMethodEn = 'Express Delivery';
+      } else if (sm === 'pickup') {
+        deliveryMethodAr = 'استلام من المتجر';
+        deliveryMethodEn = 'Store Pickup';
+      } else if (sm === 'same_day') {
+        deliveryMethodAr = 'توصيل في نفس اليوم';
+        deliveryMethodEn = 'Same Day Delivery';
+      } else if (sm === 'standard') {
+        deliveryMethodAr = 'توصيل قياسي';
+        deliveryMethodEn = 'Standard Delivery';
+      } else {
+        deliveryMethodAr = parentOrder.shippingMethod || sellerOrder.shippingMethod;
+        deliveryMethodEn = deliveryMethodAr;
+      }
+    } else {
+      deliveryMethodAr = 'غير محدد';
+      deliveryMethodEn = 'Not Specified';
+    }
+
     // Safe customer fulfillment info
     const rawCustomerName = addr.recipientName || parentOrder.user?.firstName
       ? `${parentOrder.user?.firstName || ''} ${parentOrder.user?.lastName || ''}`.trim()
@@ -469,9 +524,13 @@ export class SellerOrderPrintService {
       orderStatusIcon: orderStatus.icon,
       orderStatusColor: orderStatus.color,
       orderStatusBg: orderStatus.bg,
+      deliveryMethodAr,
+      deliveryMethodEn,
+      deliveryScheduleType: rawScheduleType || undefined,
       souqnaLogoDataUri,
       store: {
         name: store.name || `${sellerUser.firstName || ''} ${sellerUser.lastName || ''}`.trim() || 'متجر سوقناا المعتمد',
+        sellerName: `${sellerUser.firstName || ''} ${sellerUser.lastName || ''}`.trim() || undefined,
         phone: store.phone || sellerUser.phone || '',
         email: store.email || sellerUser.email || '',
         address: store.addresses?.[0]?.street || store.addresses?.[0]?.cityName || 'اليمن',
@@ -512,6 +571,7 @@ export class SellerOrderPrintService {
         platformFundedDiscount: platformDisc,
         refundDeduction: 0,
         otherAdjustments: 0,
+        deliveryFee,
         netSellerAmount: sellerPayout,
         walletReleaseStatus,
         walletReleaseDate,
@@ -1154,6 +1214,7 @@ export class SellerOrderPrintService {
             <span class="store-name">${d.store.name}</span>
             ${d.store.isVerified ? '<span class="verified-icon" title="متجر موثق">موثق</span>' : ''}
           </div>
+          ${d.store.sellerName && d.store.sellerName !== d.store.name ? `<div class="store-sub">التاجر: <strong>${d.store.sellerName}</strong></div>` : ''}
           ${d.store.phone ? `<div class="store-sub">هاتف: <span dir="ltr">${d.store.phone}</span></div>` : ''}
           ${d.store.email ? `<div class="store-sub">البريد: <span dir="ltr">${d.store.email}</span></div>` : ''}
           ${d.store.address ? `<div class="store-sub">${d.store.address}</div>` : ''}
@@ -1181,6 +1242,7 @@ export class SellerOrderPrintService {
         <h3>بيانات الطلب والتسليم</h3>
         <div class="meta-row"><span class="lbl">تاريخ ووقت الشراء:</span><span class="val">${d.orderDateFormattedAr}</span></div>
         <div class="meta-row"><span class="lbl">حالة معالجة الطلب:</span><span class="val" style="color:${d.orderStatusColor}; font-weight:800;">${d.orderStatusAr}</span></div>
+        <div class="meta-row"><span class="lbl">طريقة التوصيل والشحن:</span><span class="val" style="font-weight:800;">${d.deliveryMethodAr}</span></div>
         <div class="meta-row"><span class="lbl">طريقة الدفع المختارة:</span><span class="val">${d.paymentMethodAr}</span></div>
       </div>
 
@@ -1201,7 +1263,7 @@ export class SellerOrderPrintService {
           <tr>
             <th style="width: 35px;" class="center">#</th>
             <th>المنتج والمواصفات</th>
-            <th style="width: 110px;">الرمز — SKU</th>
+            <th style="width: 110px; text-align: center;">الرمز — SKU</th>
             <th style="width: 60px;" class="center">الكمية</th>
             <th style="width: 105px;">سعر الوحدة</th>
             <th style="width: 85px;">الخصم</th>
@@ -1218,7 +1280,7 @@ export class SellerOrderPrintService {
                 <div class="item-title">${it.productName}</div>
                 <div class="item-variant-tag">${it.variant}</div>
               </td>
-              <td><span class="item-sku-code" dir="ltr">${it.sku}</span></td>
+              <td style="text-align: center;"><span class="item-sku-code" dir="ltr" style="display: inline-block;">${it.sku}</span></td>
               <td class="center"><strong>${it.quantity}</strong></td>
               <td>${SellerOrderPrintService.formatNumber(it.unitPrice)} ${d.totals.currency}</td>
               <td style="color: #059669; font-weight: 700;">${it.discount > 0 ? `-${SellerOrderPrintService.formatNumber(it.discount)} ${d.totals.currency}` : '0.00'}</td>
@@ -1423,6 +1485,7 @@ export class SellerOrderPrintService {
   ${souqnaLogoHtml}
   <div class="center bold title-souqnaa">سوقناا • SOUQNAA</div>
   <div class="center" style="font-size: 11px;">المتجر: <span class="bold">${d.store.name}</span></div>
+  ${d.store.sellerName && d.store.sellerName !== d.store.name ? `<div class="center" style="font-size: 10px;">التاجر: <span class="bold">${d.store.sellerName}</span></div>` : ''}
   <div class="divider"></div>
 
   <div class="row tight"><span>رقم طلب البائع:</span><span class="bold" dir="ltr">${d.sellerOrderNumber}</span></div>
@@ -1464,6 +1527,7 @@ export class SellerOrderPrintService {
 
   <div class="row tight"><span>طريقة الدفع:</span><span class="bold">${d.paymentMethodAr}</span></div>
   <div class="row tight"><span>حالة الدفع:</span><span class="bold">${d.paymentStatusAr}</span></div>
+  <div class="row tight"><span>طريقة التوصيل:</span><span class="bold">${d.deliveryMethodAr}</span></div>
   <div class="row tight"><span>العميل:</span><span>${d.customer.name}</span></div>
   <div class="row tight"><span>الهاتف:</span><span dir="ltr">${d.customer.phone}</span></div>
   <div class="row tight"><span>العنوان:</span><span>${d.customer.deliveryAddress.cityName} - ${d.customer.deliveryAddress.neighborhood || d.customer.deliveryAddress.street || ''}</span></div>
@@ -1591,6 +1655,7 @@ export class SellerOrderPrintService {
 
   <div class="center bold" style="font-size: 13px;">سوقناا • SOUQNAA</div>
   <div class="center" style="font-size: 9.5px;">${d.store.name}</div>
+  ${d.store.sellerName && d.store.sellerName !== d.store.name ? `<div class="center" style="font-size: 8.5px;">التاجر: ${d.store.sellerName}</div>` : ''}
   <div class="divider"></div>
 
   <div class="row"><span>طلب المتجر:</span><span class="bold" dir="ltr">${d.sellerOrderNumber}</span></div>
@@ -1623,6 +1688,7 @@ export class SellerOrderPrintService {
 
   <div class="row"><span>الدفع:</span><span>${d.paymentMethodAr}</span></div>
   <div class="row"><span>الحالة:</span><span>${d.paymentStatusAr}</span></div>
+  <div class="row"><span>التوصيل:</span><span class="bold">${d.deliveryMethodAr}</span></div>
   <div class="row"><span>العميل:</span><span>${d.customer.name}</span></div>
   <div class="row"><span>الهاتف:</span><span dir="ltr">${d.customer.phone}</span></div>
   ${d.customer.deliveryAddress.plusCode ? `<div class="row"><span>Plus Code:</span><span dir="ltr" class="bold" style="font-family: monospace;">${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
@@ -1825,7 +1891,7 @@ export class SellerOrderPrintService {
         <div>
           <div style="font-weight: 900; font-size: 16px; color:#0f172a;">بوليصة تجهيز وتعبئة الشحنة</div>
           <div class="badge">PACKING SLIP • قسم المستودع والتغليف</div>
-          <div style="margin-top: 4px; font-size: 12px; color: #475569;">المتجر: <strong>${d.store.name}</strong></div>
+          <div style="margin-top: 4px; font-size: 12px; color: #475569;">المتجر: <strong>${d.store.name}</strong>${d.store.sellerName && d.store.sellerName !== d.store.name ? ` • التاجر: <strong>${d.store.sellerName}</strong>` : ''}</div>
         </div>
       </div>
       <div style="display: flex; align-items: center; gap: 12px;">
@@ -1843,6 +1909,7 @@ export class SellerOrderPrintService {
       <div class="recipient-grid">
         <div>اسم العميل المستلم: <strong>${d.customer.name}</strong></div>
         <div>رقم هاتف التواصل: <strong dir="ltr">${d.customer.phone}</strong></div>
+        <div style="grid-column: span 2;">طريقة الشحن والتوصيل: <strong style="color: #0284c7;">${d.deliveryMethodAr}</strong></div>
         <div style="grid-column: span 2;">عنوان التوصيل: <strong>${d.customer.deliveryAddress.formatted}</strong></div>
         ${d.customer.deliveryAddress.plusCode ? `<div style="grid-column: span 2;">رمز الموقع الرقمي: <strong dir="ltr" style="font-family: monospace; color: #0284c7;">${d.customer.deliveryAddress.plusCode}</strong></div>` : ''}
         ${d.deliveryNotes ? `
@@ -1860,7 +1927,7 @@ export class SellerOrderPrintService {
           <tr>
             <th style="width: 40px; text-align: center;">#</th>
             <th>اسم المنتج ومواصفاته</th>
-            <th style="width: 130px;">الرمز — SKU</th>
+            <th style="width: 130px; text-align: center;">الرمز — SKU</th>
             <th style="width: 80px; text-align: center;">الكمية</th>
             <th style="width: 100px; text-align: center;">فحص المستودع</th>
           </tr>
@@ -1875,7 +1942,7 @@ export class SellerOrderPrintService {
                 <strong>${it.productName}</strong>
                 <div style="font-size: 11px; color: #0284c7; font-weight: 600;">المواصفات: ${it.variant}</div>
               </td>
-              <td><code dir="ltr" style="font-family: 'Inter', monospace; font-weight: bold;">${it.sku}</code></td>
+              <td style="text-align: center;"><code dir="ltr" style="font-family: 'Inter', monospace; font-weight: bold;">${it.sku}</code></td>
               <td style="text-align: center; font-size: 15px; font-weight: 900; color: #0f172a;">${it.quantity}</td>
               <td style="text-align: center;">
                 <span class="check-box-cell"></span>
@@ -1961,6 +2028,7 @@ export class SellerOrderPrintService {
   <div class="divider"></div>
 
   <div>المتجر: <span class="bold">${d.store.name}</span></div>
+  ${d.store.sellerName && d.store.sellerName !== d.store.name ? `<div>التاجر: <span class="bold">${d.store.sellerName}</span></div>` : ''}
   <div>طلب المتجر: <span class="bold" dir="ltr">${d.sellerOrderNumber}</span></div>
   <div>الرئيسي: <span dir="ltr">${d.mainOrderNumber}</span></div>
   <div>التاريخ: <span>${d.orderDateFormattedAr}</span></div>
@@ -1969,6 +2037,7 @@ export class SellerOrderPrintService {
   <div>العميل: <span class="bold">${d.customer.name}</span></div>
   <div>الهاتف: <span dir="ltr">${d.customer.phone}</span></div>
   <div>العنوان: <span>${d.customer.deliveryAddress.formatted}</span></div>
+  <div>طريقة الشحن: <span class="bold">${d.deliveryMethodAr}</span></div>
   ${d.customer.deliveryAddress.plusCode ? `<div>رمز الموقع: <span class="bold" dir="ltr" style="font-family: monospace; color: #0284c7;">${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
   ${d.deliveryNotes ? `<div>ملاحظات التوصيل: <span class="bold">${d.deliveryNotes}</span></div>` : ''}
   <div class="divider"></div>
@@ -2045,6 +2114,7 @@ export class SellerOrderPrintService {
   <div class="divider"></div>
 
   <div>المتجر: <span class="bold">${d.store.name}</span></div>
+  ${d.store.sellerName && d.store.sellerName !== d.store.name ? `<div>التاجر: <span class="bold">${d.store.sellerName}</span></div>` : ''}
   <div>الطلب: <span class="bold" dir="ltr">${d.sellerOrderNumber}</span></div>
   <div>الرئيسي: <span dir="ltr">${d.shortOrderNumber || d.mainOrderNumber}</span></div>
   <div>التاريخ: <span>${d.orderDateFormattedAr}</span></div>
@@ -2053,6 +2123,7 @@ export class SellerOrderPrintService {
   <div>العميل: <span class="bold">${d.customer.name}</span></div>
   <div>الهاتف: <span dir="ltr">${d.customer.phone}</span></div>
   <div>العنوان: <span>${d.customer.deliveryAddress.formatted}</span></div>
+  <div>الشحن: <span class="bold">${d.deliveryMethodAr}</span></div>
   ${d.customer.deliveryAddress.plusCode ? `<div>رمز الموقع: <span class="bold" dir="ltr" style="font-family: monospace; color: #0284c7;">${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
   ${d.deliveryNotes ? `<div>ملاحظات: <span class="bold">${d.deliveryNotes}</span></div>` : ''}
   <div class="divider"></div>
@@ -2137,10 +2208,12 @@ export class SellerOrderPrintService {
   <div class="divider"></div>
 
   <div>المتجر: <span class="bold">${d.store.name}</span></div>
+  ${d.store.sellerName && d.store.sellerName !== d.store.name ? `<div>التاجر: <span class="bold">${d.store.sellerName}</span></div>` : ''}
   <div>طلب المتجر: <span class="bold" dir="ltr">${d.sellerOrderNumber}</span></div>
   <div>الطلب الرئيسي: <span dir="ltr">${d.mainOrderNumber}</span></div>
   <div>التاريخ: <span>${d.orderDateFormattedAr}</span></div>
   <div>حالة الطلب: <span class="bold" style="color: ${d.orderStatusColor};">${d.orderStatusAr}</span></div>
+  <div>طريقة التوصيل: <span class="bold">${d.deliveryMethodAr}</span></div>
   <div>طريقة دفع العميل: <span>${d.paymentMethodAr} — ${d.paymentStatusAr}</span></div>
   <div class="divider"></div>
 
@@ -2167,6 +2240,11 @@ export class SellerOrderPrintService {
   <div class="row">
     <span>استقطاعات المرتجع:</span>
     <span style="color: #dc2626;">-${SellerOrderPrintService.formatNumber(fin.refundDeduction)} ${d.totals.currency}</span>
+  </div>` : ''}
+  ${d.totals.deliveryFee > 0 ? `
+  <div class="row">
+    <span>رسوم توصيل المتجر:</span>
+    <span style="color: #16a34a;">+${SellerOrderPrintService.formatNumber(d.totals.deliveryFee)} ${d.totals.currency}</span>
   </div>` : ''}
 
   <div class="divider"></div>
@@ -2245,9 +2323,11 @@ export class SellerOrderPrintService {
   <div class="divider"></div>
 
   <div>المتجر: <span class="bold">${d.store.name}</span></div>
+  ${d.store.sellerName && d.store.sellerName !== d.store.name ? `<div>التاجر: <span class="bold">${d.store.sellerName}</span></div>` : ''}
   <div>الطلب: <span class="bold" dir="ltr">${d.sellerOrderNumber}</span></div>
   <div>التاريخ: <span>${d.orderDateFormattedAr}</span></div>
   <div>الحالة: <span class="bold">${d.orderStatusAr}</span></div>
+  <div>التوصيل: <span class="bold">${d.deliveryMethodAr}</span></div>
   <div class="divider"></div>
 
   <div class="row">
@@ -2267,6 +2347,11 @@ export class SellerOrderPrintService {
   <div class="row">
     <span>المرتجع:</span>
     <span>-${SellerOrderPrintService.formatNumber(fin.refundDeduction)}</span>
+  </div>` : ''}
+  ${d.totals.deliveryFee > 0 ? `
+  <div class="row">
+    <span>توصيل المتجر:</span>
+    <span style="color: #16a34a;">+${SellerOrderPrintService.formatNumber(d.totals.deliveryFee)}</span>
   </div>` : ''}
 
   <div class="divider"></div>
@@ -2454,7 +2539,7 @@ export class SellerOrderPrintService {
         <div>
           <div style="font-weight: 900; font-size: 16px; color:#0f172a;">كشف حساب ومستحقات المتجر المالية</div>
           <div class="badge">SELLER FINANCIAL STATEMENT • وثيقة تسوية داخلية</div>
-          <div style="margin-top: 4px; font-size: 12px; color: #475569;">المتجر: <strong>${d.store.name}</strong></div>
+          <div style="margin-top: 4px; font-size: 12px; color: #475569;">المتجر: <strong>${d.store.name}</strong>${d.store.sellerName && d.store.sellerName !== d.store.name ? ` • التاجر: <strong>${d.store.sellerName}</strong>` : ''}</div>
         </div>
       </div>
       <div style="display: flex; align-items: center; gap: 12px;">
@@ -2471,6 +2556,7 @@ export class SellerOrderPrintService {
     <div class="info-grid">
       <div>تاريخ الطلب: <strong>${d.orderDateFormattedAr}</strong></div>
       <div>حالة الطلب: <strong style="color: ${d.orderStatusColor};">${d.orderStatusAr}</strong></div>
+      <div>طريقة التوصيل: <strong>${d.deliveryMethodAr}</strong></div>
       <div>طريقة دفع العميل: <strong>${d.paymentMethodAr}</strong> — ${d.paymentStatusAr}</div>
       <div>حالة استحقاق المحفظة: <strong style="color: ${fin.walletReleaseStatus.includes('مكتمل') ? '#059669' : '#d97706'};">${fin.walletReleaseStatus}</strong></div>
       ${fin.walletReleaseDate ? `<div>موعد تحرير الرصيد المتوقع: <strong>${fin.walletReleaseDate}</strong></div>` : ''}
@@ -2517,6 +2603,14 @@ export class SellerOrderPrintService {
               <td>استقطاعات المرتجعات</td>
               <td style="text-align: left; color: #dc2626; font-weight: bold;">-${SellerOrderPrintService.formatNumber(fin.refundDeduction)}</td>
               <td>تسوية المنتجات المسترجعة أو التالفة</td>
+            </tr>`
+        : ''
+      }
+          ${d.totals.deliveryFee > 0
+        ? `<tr>
+              <td>رسوم توصيل المتجر</td>
+              <td style="text-align: left; color: #059669; font-weight: bold;">+${SellerOrderPrintService.formatNumber(d.totals.deliveryFee)}</td>
+              <td>رسوم التوصيل المستحقة للمتجر لترتيب التوصيل</td>
             </tr>`
         : ''
       }

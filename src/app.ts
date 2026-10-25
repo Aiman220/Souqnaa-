@@ -304,6 +304,7 @@ export const createApp = (): Application => {
   app.get(
     '/.well-known/apple-app-site-association',
     (req: Request, res: Response) => {
+      const appleTeamId = process.env.APPLE_TEAM_ID || '$(APPLE_TEAM_ID)';
       res.setHeader('Content-Type', 'application/json');
       res.setHeader('Cache-Control', 'public, max-age=3600');
       res.json({
@@ -312,7 +313,7 @@ export const createApp = (): Application => {
           details: [
             {
               // Customer app — handles all customer-facing paths
-              appIDs: ['$(APPLE_TEAM_ID).com.souqnaa.app'],
+              appIDs: [`${appleTeamId}.com.souqnaa.app`],
               components: [
                 { '/': '/products/*',  comment: 'Product detail pages' },
                 { '/': '/store/*',     comment: 'Seller storefronts' },
@@ -329,7 +330,7 @@ export const createApp = (): Application => {
           ],
         },
         webcredentials: {
-          apps: ['$(APPLE_TEAM_ID).com.souqnaa.app'],
+          apps: [`${appleTeamId}.com.souqnaa.app`],
         },
       });
     }
@@ -340,6 +341,7 @@ export const createApp = (): Application => {
   app.get(
     '/.well-known/apple-app-site-association/seller',
     (req: Request, res: Response) => {
+      const appleTeamId = process.env.APPLE_TEAM_ID || '$(APPLE_TEAM_ID)';
       res.setHeader('Content-Type', 'application/json');
       res.setHeader('Cache-Control', 'public, max-age=3600');
       res.json({
@@ -347,7 +349,7 @@ export const createApp = (): Application => {
           apps: [],
           details: [
             {
-              appIDs: ['$(APPLE_TEAM_ID).com.souqnaa.seller'],
+              appIDs: [`${appleTeamId}.com.souqnaa.seller`],
               components: [
                 { '/': '/seller/*', comment: 'Seller dashboard and management' },
                 { '/': '/*',        comment: 'All other seller paths' },

@@ -512,6 +512,16 @@ export async function createReview(input: CreateReviewInput) {
       entityId: review.id,
       payload: { rating },
     }).catch(() => {});
+  } catch (err) {}
+
+  // Invalidate customer order summary cache and notify client in real-time
+  try {
+    const { redis } = await import('../../database/redis');
+    await redis.del(`order_summary:${userId}`);
+    SocketService.get()?.emitToUser(userId, 'order:summary_updated', {
+      userId,
+      filter: 'TO_REVIEW',
+    });
   } catch (_) {}
 
   return review;
