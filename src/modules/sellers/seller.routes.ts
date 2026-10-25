@@ -46,7 +46,7 @@ async function getSeller(userId: string) {
         },
       },
       balance: true,
-      user: { select: { id: true, email: true, phone: true, firstName: true, lastName: true, avatar: true, isVerified: true, role: true, isActive: true } },
+      user: { select: { id: true, email: true, phone: true, firstName: true, lastName: true, avatar: true, isVerified: true, role: true, isActive: true, createdAt: true, updatedAt: true } },
     },
   });
 
@@ -94,7 +94,7 @@ async function getSeller(userId: string) {
             },
           },
           balance: true,
-          user: { select: { id: true, email: true, phone: true, firstName: true, lastName: true, avatar: true, isVerified: true, role: true, isActive: true } },
+          user: { select: { id: true, email: true, phone: true, firstName: true, lastName: true, avatar: true, isVerified: true, role: true, isActive: true, createdAt: true, updatedAt: true } },
         },
       });
     });
