@@ -99,7 +99,10 @@ export class AppAttestProvider {
     if (clientOsVersion) {
       const major = parseInt(clientOsVersion.split('.')[0], 10);
       if (!isNaN(major) && major < 14) {
-        return _unavailable([`APP_ATTEST_NOT_SUPPORTED_IOS_${major}_REQUIRES_14_PLUS`]);
+        return _unavailable([
+          `APP_ATTEST_NOT_SUPPORTED_ON_IOS_${major}`,
+          `APP_ATTEST_NOT_SUPPORTED_IOS_${major}_REQUIRES_14_PLUS`,
+        ]);
       }
     }
 
@@ -110,10 +113,16 @@ export class AppAttestProvider {
 
     // 3. Server-side configuration check
     if (!process.env.APP_ATTEST_ENABLED || process.env.APP_ATTEST_ENABLED !== 'true') {
-      return _unavailable(['APP_ATTEST_BACKEND_NOT_ENABLED']);
+      return _unavailable([
+        'APP_ATTEST_BACKEND_CREDENTIALS_NOT_CONFIGURED',
+        'APP_ATTEST_BACKEND_NOT_ENABLED',
+      ]);
     }
     if (!process.env.APPLE_TEAM_ID) {
-      return _unavailable(['APP_ATTEST_APPLE_TEAM_ID_NOT_CONFIGURED']);
+      return _unavailable([
+        'APP_ATTEST_BACKEND_CREDENTIALS_NOT_CONFIGURED',
+        'APP_ATTEST_APPLE_TEAM_ID_NOT_CONFIGURED',
+      ]);
     }
 
     // 4. Route: attestation (first-time registration) vs assertion (ongoing)
@@ -315,45 +324,55 @@ export class AppAttestProvider {
       }
 
       // ── 6. Counter strictly advances (replay prevention) ──────────────────
-      const counterKey = `${REDIS_KEY_COUNTER}${keyId}`;
-      const lock = await redisService.acquireLock(`lock:${counterKey}`, 5);
-
-      if (!lock.acquired) {
-        return _invalid(['APP_ATTEST_COUNTER_LOCK_CONTENTION_POSSIBLE_REPLAY'], 35);
-      }
-
-      let counterUpdated = false;
-      try {
-        const storedCounter = await redisService.getCounter(counterKey);
-        const incomingCounter = authDataParsed.counter;
-
-        if (incomingCounter <= storedCounter) {
-          return {
-            status: DeviceIntegrityStatus.REJECTED,
-            provider: IntegrityProvider.APPLE_APP_ATTEST,
-            reasons: [
-              `APP_ATTEST_COUNTER_REPLAY:incoming=${incomingCounter}<=stored=${storedCounter}`,
-            ],
-            riskScoreModifier: 45,
-            details: { counter: incomingCounter, keyId, appId: expectedAppId },
-          };
-        }
-
-        await redisService.setCounter(counterKey, incomingCounter);
-        counterUpdated = true;
-
-        return {
-          status: DeviceIntegrityStatus.VERIFIED,
-          provider: IntegrityProvider.APPLE_APP_ATTEST,
-          reasons: [],
-          riskScoreModifier: -15,
-          details: { counter: incomingCounter, keyId, appId: expectedAppId },
-        };
-      } finally {
-        await redisService.releaseLock(`lock:${counterKey}`, lock.token);
-      }
+      return await this.verifyAssertionCounter(keyId, authDataParsed, expectedAppId);
     } catch (err: any) {
       return _invalid([`APP_ATTEST_ASSERTION_EXCEPTION:${err?.constructor?.name ?? 'Error'}`], 30);
+    }
+  }
+
+  /**
+   * Validates assertion counter strictly advances in Redis (replay prevention).
+   */
+  public static async verifyAssertionCounter(
+    keyId: string,
+    authData: { counter: number },
+    expectedAppId: string
+  ): Promise<AppAttestVerificationResult> {
+    const counterKey = `${REDIS_KEY_COUNTER}${keyId}`;
+    const lock = await redisService.acquireLock(`lock:${counterKey}`, 5);
+
+    if (!lock.acquired) {
+      return _invalid(['APP_ATTEST_COUNTER_LOCK_CONTENTION_POSSIBLE_REPLAY'], 35);
+    }
+
+    try {
+      const storedCounter = await redisService.getCounter(counterKey);
+      const incomingCounter = authData.counter;
+
+      if (incomingCounter <= storedCounter) {
+        return {
+          status: DeviceIntegrityStatus.REJECTED,
+          provider: IntegrityProvider.APPLE_APP_ATTEST,
+          reasons: [
+            'APP_ATTEST_COUNTER_REPLAY_DETECTED',
+            `APP_ATTEST_COUNTER_REPLAY:incoming=${incomingCounter}<=stored=${storedCounter}`,
+          ],
+          riskScoreModifier: 45,
+          details: { counter: incomingCounter, keyId, appId: expectedAppId },
+        };
+      }
+
+      await redisService.setCounter(counterKey, incomingCounter);
+
+      return {
+        status: DeviceIntegrityStatus.VERIFIED,
+        provider: IntegrityProvider.APPLE_APP_ATTEST,
+        reasons: [],
+        riskScoreModifier: -15,
+        details: { counter: incomingCounter, keyId, appId: expectedAppId },
+      };
+    } finally {
+      await redisService.releaseLock(`lock:${counterKey}`, lock.token);
     }
   }
 }

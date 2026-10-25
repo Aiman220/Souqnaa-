@@ -265,7 +265,7 @@ export class PlayIntegrityProvider {
       return {
         status: DeviceIntegrityStatus.EXPIRED,
         provider: IntegrityProvider.GOOGLE_PLAY_INTEGRITY,
-        reasons: ['INTEGRITY_TOKEN_STALE_EXCEEDS_10_MINUTE_TOLERANCE'],
+        reasons: ['INTEGRITY_TOKEN_EXPIRED', 'INTEGRITY_TOKEN_STALE_EXCEEDS_10_MINUTE_TOLERANCE'],
         riskScoreModifier: 20,
       };
     }

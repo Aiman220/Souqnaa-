@@ -47,7 +47,11 @@ export const authenticate = async (
       }
     }
 
-    req.user = payload;
+    // Ensure req.user reflects authoritative role from the database
+    req.user = {
+      ...payload,
+      role: user.role,
+    };
     next();
   } catch (error) {
     next(error);

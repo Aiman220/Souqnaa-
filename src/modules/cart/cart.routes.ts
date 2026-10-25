@@ -37,7 +37,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
                     createdAt: true,
                   },
                 },
-                images: { orderBy: [{ isPrimary: 'desc' }, { order: 'asc' }], take: 5 },
+                images: { orderBy: [{ isPrimary: 'desc' }, { sortOrder: 'asc' }], take: 5 },
               },
             },
 
