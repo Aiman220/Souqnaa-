@@ -997,7 +997,7 @@ export class AuthController {
         300
       );
 
-      res.send(renderOAuthResultHtml(true, 'تم تسجيل الدخول بنجاح!', oauthState.sessionKey, result.accessToken, result.refreshToken));
+      res.send(renderOAuthResultHtml(true, 'تم تسجيل الدخول بنجاح!', oauthState.sessionKey, result.accessToken, result.refreshToken, oauthState.role));
     } catch (error: any) {
       console.error('[Social OAuth Callback Error]', error);
       res.status(500).send(renderOAuthResultHtml(false, error.message || 'حدث خطأ أثناء إتمام تسجيل الدخول'));
@@ -1172,11 +1172,14 @@ function renderOAuthResultHtml(
   message: string,
   sessionKey?: string,
   accessToken?: string,
-  refreshToken?: string
+  refreshToken?: string,
+  role?: string
 ): string {
-  let deepLink = 'souqnaa://auth/callback';
+  const isSeller = role === 'SELLER';
+  const scheme = isSeller ? 'souqnaa-seller' : 'souqnaa-customer';
+  let deepLink = `${scheme}://auth/callback`;
   if (sessionKey) {
-    deepLink = `souqnaa://auth/callback?sessionKey=${encodeURIComponent(sessionKey)}&status=${success ? 'success' : 'error'}`;
+    deepLink = `${scheme}://auth/callback?sessionKey=${encodeURIComponent(sessionKey)}&status=${success ? 'success' : 'error'}`;
     if (accessToken) {
       deepLink += `&token=${encodeURIComponent(accessToken)}`;
     }
