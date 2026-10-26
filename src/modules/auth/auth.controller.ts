@@ -429,6 +429,12 @@ export class AuthController {
         } catch (_) {}
       }
 
+      let isPhoneVerified = false;
+      if (user.phone) {
+        const phoneVerifiedInRedis = await redis.get(`phone_verified:${user.phone}`);
+        isPhoneVerified = phoneVerifiedInRedis === '1';
+      }
+
       const sanitizedUser = {
         id: user.id,
         email: user.email,
@@ -437,6 +443,7 @@ export class AuthController {
         lastName: user.lastName,
         role: user.role.toLowerCase(),
         isVerified: user.isVerified,
+        isPhoneVerified,
         isActive: user.isActive,
         avatar: user.avatar,
         membership: membershipSummary,
@@ -516,6 +523,7 @@ export class AuthController {
             const isPhoneOtpVerified = await redis.get(`otp_verified:${cleanPhone}`);
             if (isPhoneOtpVerified === '1') {
               await redis.del(`otp_verified:${cleanPhone}`);
+              await redis.set(`phone_verified:${cleanPhone}`, '1', 31536000);
             }
           }
         }
@@ -529,6 +537,12 @@ export class AuthController {
         data: dataToUpdate,
       });
 
+      let isPhoneVerified = false;
+      if (updatedUser.phone) {
+        const phoneVerifiedInRedis = await redis.get(`phone_verified:${updatedUser.phone}`);
+        isPhoneVerified = phoneVerifiedInRedis === '1';
+      }
+
       const sanitizedUser = {
         id: updatedUser.id,
         email: updatedUser.email,
@@ -537,6 +551,7 @@ export class AuthController {
         lastName: updatedUser.lastName,
         role: updatedUser.role.toLowerCase(),
         isVerified: updatedUser.isVerified,
+        isPhoneVerified,
         isActive: updatedUser.isActive,
         avatar: updatedUser.avatar,
         createdAt: updatedUser.createdAt.toISOString(),
@@ -816,8 +831,8 @@ export class AuthController {
 
         res.redirect(authUrl.toString());
       } else if (providerParam === 'facebook') {
-        if (!config.oauth.facebook.appId) {
-          throw new AppError('معرف تطبيق Facebook غير مهيأ على الخادم.', 500);
+        if (!config.oauth.facebook.appId || !config.oauth.facebook.appSecret) {
+          throw new AppError('معرف تطبيق Facebook أو المفتاح السري غير مهيأ على الخادم.', 500);
         }
         const authUrl = new URL('https://www.facebook.com/v20.0/dialog/oauth');
         authUrl.searchParams.set('client_id', config.oauth.facebook.appId);
@@ -966,9 +981,10 @@ export class AuthController {
         const tokenRes = await fetch(fbUrl);
 
         if (!tokenRes.ok) {
-          const errData = await tokenRes.json().catch(() => ({}));
+          const errData = (await tokenRes.json().catch(() => ({}))) as any;
           console.error('[Facebook OAuth Token Error]', errData);
-          throw new AppError('فشل تبادل رمز الدخول مع مزود Facebook.', 401);
+          const fbMsg = errData?.error?.message || errData?.message || 'فشل تبادل رمز الدخول مع مزود Facebook.';
+          throw new AppError(`فشل مع مزود Facebook: ${fbMsg}`, 401);
         }
 
         const tokenData = (await tokenRes.json()) as any;
