@@ -2491,6 +2491,9 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
                 variant: { select: { id: true, image: true } },
               },
             },
+            deliveryMethod: true,
+            deliveryOrder: true,
+            deliveryQuoteSnapshot: true,
             cancellationRequests: true,
             returnRequests: { orderBy: { createdAt: 'desc' } },
             refundRequests: {

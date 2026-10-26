@@ -124,6 +124,11 @@ export class OtpService {
       // Store verified OTP token in Redis for 15 minutes to authorize email/phone profile updates
       await redis.set(`otp_verified:${cleanTarget.toLowerCase()}`, '1', 900);
       await redis.set(`otp_verified:${cleanTarget}`, '1', 900);
+
+      // If verifying phone, record permanent verification flag in Redis (1 year TTL)
+      if (type === 'phone' || !cleanTarget.includes('@')) {
+        await redis.set(`phone_verified:${cleanTarget}`, '1', 31536000);
+      }
     }
 
     return true;

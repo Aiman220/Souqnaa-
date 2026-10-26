@@ -337,8 +337,8 @@ export class SellerOrderPrintService {
         deliveryMethodEn = deliveryMethodAr;
       }
     } else {
-      deliveryMethodAr = 'غير محدد';
-      deliveryMethodEn = 'Not Specified';
+      deliveryMethodAr = 'توصيل قياسي';
+      deliveryMethodEn = 'Standard Delivery';
     }
 
     // Safe customer fulfillment info

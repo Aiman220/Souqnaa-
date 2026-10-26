@@ -351,23 +351,72 @@ router.post('/', conversationCreationLimiter, async (req: Request, res: Response
     // 1. Resolve from orderId if provided
     if (orderId && typeof orderId === 'string' && orderId.trim()) {
       const trimmedOrderId = orderId.trim();
-      const sellerOrder = await prisma.sellerOrder.findFirst({
-        where: {
-          OR: [
-            { id: trimmedOrderId },
-            { orderId: trimmedOrderId },
-            { order: { orderNumber: trimmedOrderId } },
-          ],
-        },
-        include: {
-          order: { select: { userId: true, orderNumber: true } },
-          seller: {
-            include: {
-              stores: { take: 1, select: { name: true } },
+
+      // Check if storeId or sellerId was explicitly requested to disambiguate multi-seller orders
+      const sellerMatchCriteria: any[] = [];
+      if (sellerId && typeof sellerId === 'string' && sellerId.trim()) {
+        const sId = sellerId.trim();
+        sellerMatchCriteria.push(
+          { sellerId: sId },
+          { seller: { id: sId } },
+          { seller: { userId: sId } }
+        );
+      }
+      if (storeId && typeof storeId === 'string' && storeId.trim() && storeId.trim() !== 'store') {
+        const sid = storeId.trim();
+        sellerMatchCriteria.push(
+          { seller: { stores: { some: { id: sid } } } },
+          { seller: { stores: { some: { slug: sid } } } }
+        );
+      }
+
+      let sellerOrder = null;
+      if (sellerMatchCriteria.length > 0) {
+        sellerOrder = await prisma.sellerOrder.findFirst({
+          where: {
+            AND: [
+              {
+                OR: [
+                  { id: trimmedOrderId },
+                  { orderId: trimmedOrderId },
+                  { order: { orderNumber: trimmedOrderId } },
+                  { sellerOrderNumber: trimmedOrderId },
+                ],
+              },
+              { OR: sellerMatchCriteria },
+            ],
+          },
+          include: {
+            order: { select: { userId: true, orderNumber: true } },
+            seller: {
+              include: {
+                stores: { take: 1, select: { name: true } },
+              },
             },
           },
-        },
-      });
+        });
+      }
+
+      if (!sellerOrder) {
+        sellerOrder = await prisma.sellerOrder.findFirst({
+          where: {
+            OR: [
+              { id: trimmedOrderId },
+              { orderId: trimmedOrderId },
+              { order: { orderNumber: trimmedOrderId } },
+              { sellerOrderNumber: trimmedOrderId },
+            ],
+          },
+          include: {
+            order: { select: { userId: true, orderNumber: true } },
+            seller: {
+              include: {
+                stores: { take: 1, select: { name: true } },
+              },
+            },
+          },
+        });
+      }
 
       if (sellerOrder) {
         if (currentUserId === sellerOrder.seller?.userId) {

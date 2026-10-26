@@ -104,6 +104,8 @@ export class OrderStateMachine {
 
   /**
    * Recalculate and update parent Order status from all its child SellerOrders.
+   * Partitions sub-orders into active fulfillment vs terminal states to prevent
+   * premature confirmation and erroneous reversion to PENDING when partial deliveries occur.
    */
   static async syncParentOrderStatus(orderId: string, tx: any = prisma): Promise<OrderStatus> {
     const allSellerOrders = await tx.sellerOrder.findMany({
@@ -115,37 +117,81 @@ export class OrderStateMachine {
 
     const statuses: string[] = allSellerOrders.map((so: any) => String(so.status));
 
+    const isTerminalCancelled = (s: string) =>
+      s.startsWith('CANCELLED_') || s === 'REJECTED_BY_SELLER';
+    const isTerminalRefundedOrReturned = (s: string) =>
+      s === 'REFUNDED' || s === 'RETURNED';
+    const isTerminal = (s: string) =>
+      isTerminalCancelled(s) || isTerminalRefundedOrReturned(s);
+
+    const activeStatuses = statuses.filter((s) => !isTerminal(s));
+
     let parentStatus: OrderStatus = OrderStatus.PENDING;
 
-    if (statuses.every((s: string) => s === 'DELIVERED')) {
-      parentStatus = OrderStatus.DELIVERED;
-    } else if (statuses.every((s: string) => s.startsWith('CANCELLED_') || s === 'REJECTED_BY_SELLER')) {
-      // If all are cancelled by customer
+    if (activeStatuses.length === 0) {
+      // All sub-orders have reached terminal states
       if (statuses.every((s: string) => s === 'CANCELLED_BY_CUSTOMER')) {
         parentStatus = OrderStatus.CANCELLED_BY_CUSTOMER;
       } else if (statuses.every((s: string) => s === 'REJECTED_BY_SELLER')) {
         parentStatus = OrderStatus.REJECTED_BY_SELLER;
+      } else if (statuses.every((s: string) => s === 'CANCELLED_BY_ADMIN')) {
+        parentStatus = OrderStatus.CANCELLED_BY_ADMIN;
+      } else if (statuses.every((s: string) => s === 'REFUNDED')) {
+        parentStatus = OrderStatus.REFUNDED;
+      } else if (statuses.every((s: string) => s === 'RETURNED')) {
+        parentStatus = OrderStatus.RETURNED;
+      } else if (statuses.some((s: string) => s === 'REFUNDED')) {
+        parentStatus = OrderStatus.REFUNDED;
       } else {
         parentStatus = OrderStatus.CANCELLED_BY_SELLER;
       }
-    } else if (statuses.every((s: string) => s === 'REFUNDED')) {
-      parentStatus = OrderStatus.REFUNDED;
-    } else if (statuses.some((s: string) => s === 'SHIPPED')) {
-      parentStatus = OrderStatus.SHIPPED;
-    } else if (statuses.some((s: string) => s === 'READY_TO_SHIP')) {
-      parentStatus = OrderStatus.READY_TO_SHIP;
-    } else if (statuses.some((s: string) => s === 'PROCESSING')) {
-      parentStatus = OrderStatus.PROCESSING;
-    } else if (statuses.some((s: string) => s === 'CONFIRMED')) {
-      parentStatus = OrderStatus.CONFIRMED;
-    } else if (statuses.some((s: string) => s === 'CANCELLATION_REQUESTED')) {
-      parentStatus = OrderStatus.CANCELLATION_REQUESTED;
-    } else if (statuses.some((s: string) => s === 'RETURN_REQUESTED')) {
-      parentStatus = OrderStatus.RETURN_REQUESTED;
-    } else if (statuses.some((s: string) => s === 'RETURN_APPROVED')) {
-      parentStatus = OrderStatus.RETURN_APPROVED;
-    } else if (statuses.some((s: string) => s === 'RETURNED')) {
-      parentStatus = OrderStatus.RETURNED;
+    } else {
+      // At least one sub-order is in active fulfillment
+      if (activeStatuses.every((s: string) => s === 'DELIVERED')) {
+        parentStatus = OrderStatus.DELIVERED;
+      } else if (activeStatuses.some((s: string) => s === 'SHIPPED')) {
+        parentStatus = OrderStatus.SHIPPED;
+      } else if (activeStatuses.some((s: string) => s === 'READY_TO_SHIP')) {
+        parentStatus = OrderStatus.READY_TO_SHIP;
+      } else if (activeStatuses.some((s: string) => s === 'PROCESSING')) {
+        parentStatus = OrderStatus.PROCESSING;
+      } else if (activeStatuses.some((s: string) => s === 'PENDING')) {
+        // If any active seller sub-order is still pending acceptance,
+        // the parent order must NOT prematurely appear confirmed.
+        parentStatus = OrderStatus.PENDING;
+      } else if (activeStatuses.every((s: string) => s === 'CONFIRMED' || s === 'DELIVERED')) {
+        parentStatus = OrderStatus.CONFIRMED;
+      } else if (activeStatuses.some((s: string) => s === 'RETURN_REQUESTED')) {
+        parentStatus = OrderStatus.RETURN_REQUESTED;
+      } else if (activeStatuses.some((s: string) => s === 'RETURN_APPROVED')) {
+        parentStatus = OrderStatus.RETURN_APPROVED;
+      } else if (activeStatuses.some((s: string) => s === 'CANCELLATION_REQUESTED')) {
+        parentStatus = OrderStatus.CANCELLATION_REQUESTED;
+      } else {
+        parentStatus = OrderStatus.PENDING;
+      }
+    }
+
+    const currentOrder = typeof tx.order?.findUnique === 'function'
+      ? await tx.order.findUnique({
+          where: { id: orderId },
+          select: { status: true },
+        })
+      : null;
+
+    if (currentOrder && currentOrder.status !== parentStatus && typeof tx.orderStatusHistory?.create === 'function') {
+      await tx.orderStatusHistory.create({
+        data: {
+          orderId,
+          sellerOrderId: null,
+          fromStatus: currentOrder.status,
+          toStatus: parentStatus,
+          status: parentStatus,
+          changedBy: 'SYSTEM',
+          changedByRole: 'SYSTEM',
+          note: `تحديث الحالة العامة للطلب إلى ${parentStatus}`,
+        },
+      });
     }
 
     await tx.order.update({
@@ -185,7 +231,13 @@ export class OrderStateMachine {
       where: { id: sellerOrderId },
       include: {
         items: true,
-        seller: { select: { id: true, userId: true } },
+        seller: {
+          select: {
+            id: true,
+            userId: true,
+            stores: { select: { id: true, name: true }, take: 1 },
+          },
+        },
         order: {
           include: {
             payment: true,
@@ -196,6 +248,20 @@ export class OrderStateMachine {
     });
 
     if (!sellerOrder) throw new AppError('طلب المتجر غير موجود', 404);
+
+    // Defense-in-depth authorization check: Ensure sellers can only act on their own sub-orders
+    if (changedByRole === 'SELLER') {
+      const isAuthorizedSeller =
+        sellerOrder.seller?.userId === changedBy ||
+        sellerOrder.sellerId === changedBy;
+      if (!isAuthorizedSeller) {
+        throw new AppError('غير مصرح لك بتعديل هذا الطلب لأنه تابع لمتجر آخر', 403, 'FORBIDDEN');
+      }
+    } else if (changedByRole === 'CUSTOMER') {
+      if (sellerOrder.order?.userId !== changedBy) {
+        throw new AppError('غير مصرح لك بتعديل هذا الطلب', 403, 'FORBIDDEN');
+      }
+    }
 
     const currentStatus = sellerOrder.status as string;
     const targetStatusStr = targetStatus as string;
@@ -801,13 +867,23 @@ export class OrderStateMachine {
       };
       const eventType = orderEvtMap[targetStatusStr];
       if (eventType && sellerOrder.order?.userId) {
+        const storeName = sellerOrder.seller?.stores?.[0]?.name || null;
+        const subOrderNum = sellerOrder.sellerOrderNumber || null;
+        const effectiveOrderDisplay = subOrderNum
+          ? (storeName ? `${subOrderNum} (${storeName})` : subOrderNum)
+          : (storeName ? `${sellerOrder.order.orderNumber} - ${storeName}` : sellerOrder.order.orderNumber);
+        const subOrderTotal = Number(
+          (sellerOrder.subtotal + (sellerOrder.customerDeliveryCharge ?? sellerOrder.deliveryFee ?? 0) + (sellerOrder.taxAmount ?? 0) - (sellerOrder.voucherDiscountAmount ?? 0)).toFixed(2)
+        );
+
         notificationDispatcher.dispatch(
           NotificationEventFactory.orderEvent({
             eventType,
             recipientId: sellerOrder.order.userId,
             orderId: sellerOrder.orderId,
-            orderNumber: sellerOrder.order.orderNumber,
-            totalAmount: Number(sellerOrder.order.subtotal || 0),
+            orderNumber: effectiveOrderDisplay,
+            sellerName: storeName || undefined,
+            totalAmount: subOrderTotal,
             cancelReason: reason,
           })
         ).catch(() => {});

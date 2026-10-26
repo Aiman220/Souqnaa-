@@ -129,6 +129,15 @@ async function getSeller(userId: string) {
     seller.stores.push(store);
   }
 
+  if (seller && seller.user) {
+    let isPhoneVerified = false;
+    if (seller.user.phone) {
+      const redisVerified = await redis.get(`phone_verified:${seller.user.phone}`);
+      isPhoneVerified = redisVerified === '1';
+    }
+    (seller.user as any).isPhoneVerified = isPhoneVerified;
+  }
+
   return seller!;
 }
 
@@ -422,6 +431,7 @@ router.patch('/me', async (req: Request, res: Response, next: NextFunction) => {
           const isPhoneOtpVerified = await redis.get(`otp_verified:${cleanPhone}`);
           if (isPhoneOtpVerified === '1') {
             await redis.del(`otp_verified:${cleanPhone}`);
+            await redis.set(`phone_verified:${cleanPhone}`, '1', 31536000);
           }
         }
       }
@@ -1869,6 +1879,7 @@ router.get('/me/orders', async (req: Request, res: Response, next: NextFunction)
               deliveryScheduleType: true,
               deliveryDate: true,
               deliveryTimeSlot: true,
+              deliveryMethod: true,
               slotBooking: { include: { timeSlot: true } },
               addressSnapshot: true,
               notes: true,
@@ -1922,8 +1933,30 @@ router.get('/me/orders', async (req: Request, res: Response, next: NextFunction)
           }
         });
       }
+
+      const delivMethod = o.deliveryMethod || o.order?.deliveryMethod;
+      const scheduleType = String(o.order?.deliveryScheduleType || (o as any).deliveryScheduleType || '').toUpperCase();
+      let deliveryMethodName = delivMethod?.nameAr || delivMethod?.nameEn || '';
+      let deliveryMethodCode = delivMethod?.code || '';
+      if (!deliveryMethodName) {
+        if (scheduleType === 'EXPRESS') {
+          deliveryMethodName = 'توصيل سريع — إكسبرس';
+          deliveryMethodCode = 'express';
+        } else if (scheduleType === 'SCHEDULED') {
+          const slot = o.order?.deliveryTimeSlot || (o.order?.slotBooking as any)?.timeSlot;
+          const slotText = slot?.nameAr || '';
+          deliveryMethodName = slotText ? `توصيل مجدول (${slotText})` : 'توصيل مجدول';
+          deliveryMethodCode = 'scheduled';
+        } else {
+          deliveryMethodName = 'توصيل قياسي';
+          deliveryMethodCode = 'standard';
+        }
+      }
+
       return {
         ...o,
+        deliveryMethodName,
+        deliveryMethodCode,
         items: (o.items || []).map((item: any) => ({
           ...item,
           productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
@@ -1969,6 +2002,7 @@ router.get('/me/orders/:id', async (req: Request, res: Response, next: NextFunct
         order: {
           include: {
             addressSnapshot: true,
+            deliveryMethod: true,
             deliveryTimeSlot: true,
             slotBooking: { include: { timeSlot: true } },
             user: { select: { firstName: true, lastName: true, phone: true, email: true } },
@@ -2025,8 +2059,29 @@ router.get('/me/orders/:id', async (req: Request, res: Response, next: NextFunct
       });
     }
 
+    const delivMethod = order.deliveryMethod || order.order?.deliveryMethod;
+    const scheduleType = String(order.order?.deliveryScheduleType || (order as any).deliveryScheduleType || '').toUpperCase();
+    let deliveryMethodName = delivMethod?.nameAr || delivMethod?.nameEn || '';
+    let deliveryMethodCode = delivMethod?.code || '';
+    if (!deliveryMethodName) {
+      if (scheduleType === 'EXPRESS') {
+        deliveryMethodName = 'توصيل سريع — إكسبرس';
+        deliveryMethodCode = 'express';
+      } else if (scheduleType === 'SCHEDULED') {
+        const slot = order.order?.deliveryTimeSlot || (order.order?.slotBooking as any)?.timeSlot;
+        const slotText = slot?.nameAr || (slot?.startTime && slot?.endTime ? `${slot.startTime} - ${slot.endTime}` : '');
+        deliveryMethodName = slotText ? `توصيل مجدول (${slotText})` : 'توصيل مجدول';
+        deliveryMethodCode = 'scheduled';
+      } else {
+        deliveryMethodName = 'توصيل قياسي';
+        deliveryMethodCode = 'standard';
+      }
+    }
+
     const enrichedOrder = {
       ...order,
+      deliveryMethodName,
+      deliveryMethodCode,
       items: (order.items || []).map((item: any) => ({
         ...item,
         productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
@@ -4011,10 +4066,11 @@ router.patch('/me/orders/:id/status', async (req: Request, res: Response, next: 
   try {
     const seller = await getSeller(req.user!.userId);
     const id = String(req.params.id);
+    const resolvedId = await resolveSellerOrderId(seller.id, id);
     const { status: newStatus, note, reason } = req.body;
 
     const result = await OrderStateMachine.transitionSellerOrder({
-      sellerOrderId: id,
+      sellerOrderId: resolvedId,
       targetStatus: newStatus as SellerOrderStatus,
       changedBy: req.user!.userId,
       changedByRole: 'SELLER',
@@ -4231,6 +4287,7 @@ router.get('/me/orders/:id', async (req: Request, res: Response, next: NextFunct
           include: {
             user: { select: { firstName: true, lastName: true, phone: true, email: true } },
             addressSnapshot: true,
+            deliveryMethod: true,
             deliveryTimeSlot: true,
             slotBooking: { include: { timeSlot: true } },
             payment: true,
@@ -4249,7 +4306,30 @@ router.get('/me/orders/:id', async (req: Request, res: Response, next: NextFunct
 
     if (!sellerOrder) throw new AppError('الطلب غير موجود', 404);
 
-    ResponseUtil.success(res, sellerOrder);
+    const delivMethod = sellerOrder.deliveryMethod || sellerOrder.order?.deliveryMethod;
+    const scheduleType = String(sellerOrder.order?.deliveryScheduleType || (sellerOrder as any).deliveryScheduleType || '').toUpperCase();
+    let deliveryMethodName = delivMethod?.nameAr || delivMethod?.nameEn || '';
+    let deliveryMethodCode = delivMethod?.code || '';
+    if (!deliveryMethodName) {
+      if (scheduleType === 'EXPRESS') {
+        deliveryMethodName = 'توصيل سريع — إكسبرس';
+        deliveryMethodCode = 'express';
+      } else if (scheduleType === 'SCHEDULED') {
+        const slot = sellerOrder.order?.deliveryTimeSlot || (sellerOrder.order?.slotBooking as any)?.timeSlot;
+        const slotText = slot?.nameAr || (slot?.startTime && slot?.endTime ? `${slot.startTime} - ${slot.endTime}` : '');
+        deliveryMethodName = slotText ? `توصيل مجدول (${slotText})` : 'توصيل مجدول';
+        deliveryMethodCode = 'scheduled';
+      } else {
+        deliveryMethodName = 'توصيل قياسي';
+        deliveryMethodCode = 'standard';
+      }
+    }
+
+    ResponseUtil.success(res, {
+      ...sellerOrder,
+      deliveryMethodName,
+      deliveryMethodCode,
+    });
   } catch (error) {
     next(error);
   }
