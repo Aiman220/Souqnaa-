@@ -201,6 +201,20 @@ export class SellerReserveService {
       }
 
       await prisma.$transaction(async (tx) => {
+        // Concurrency safeguard: acquire row-level lock and re-verify status post-lock
+        await tx.sellerReserveAllocation.update({
+          where: { id: alloc.id },
+          data: { updatedAt: new Date() },
+        });
+
+        const freshAlloc = await tx.sellerReserveAllocation.findUnique({
+          where: { id: alloc.id },
+        });
+        if (!freshAlloc || freshAlloc.status !== 'RESERVED') {
+          // Concurrency safety: Already released or modified by concurrent cycle/admin
+          return;
+        }
+
         let remainingReserve = alloc.amount;
         let appliedDebt = 0;
 

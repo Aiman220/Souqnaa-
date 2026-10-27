@@ -683,8 +683,8 @@ export class SellerFinancialRiskService {
     const activeReserves = (seller.reserveAllocations || []).filter((r: any) => r.status === 'RESERVED');
     const totalReservedBalance = activeReserves.reduce((sum: number, r: any) => sum + (r.amount || 0), 0);
 
-    // Withdrawable balance is available balance minus locked reserves
-    const withdrawableBalance = Math.max(0, availableBal - totalReservedBalance);
+    // Withdrawable balance is available balance (which is already net of withheld reserve allocations)
+    const withdrawableBalance = Math.max(0, availableBal);
 
     // Unsecured exposure calculation
     const pendingRefunds = (seller.refundRequests || []).filter(
@@ -1372,13 +1372,16 @@ export class SellerFinancialRiskService {
     reasons: string[];
     outstandingDebt: number;
     reservedBalance: number;
+    availableBalance: number;
     openRefundsCount: number;
     openDisputesCount: number;
     inFlightOrdersCount: number;
+    pendingWithdrawalsCount: number;
+    pendingSettlementsCount: number;
   }> {
     const standing = await this.getSellerFinancialStanding(sellerId);
 
-    const [openRefunds, openDisputes, inFlightOrders] = await Promise.all([
+    const [openRefunds, openDisputes, inFlightOrders, pendingWithdrawals, pendingSettlements] = await Promise.all([
       prisma.refundRequest.count({
         where: {
           sellerId,
@@ -1395,6 +1398,18 @@ export class SellerFinancialRiskService {
         where: {
           sellerId,
           status: { in: ['PENDING', 'CONFIRMED', 'PROCESSING', 'READY_TO_SHIP', 'SHIPPED'] },
+        },
+      }),
+      prisma.withdrawal.count({
+        where: {
+          sellerId,
+          status: { in: ['PENDING', 'PROCESSING'] },
+        },
+      }),
+      prisma.settlement.count({
+        where: {
+          sellerId,
+          status: { in: ['PENDING', 'PROCESSING'] },
         },
       }),
     ]);
@@ -1421,14 +1436,29 @@ export class SellerFinancialRiskService {
       reasons.push(`يوجد ${inFlightOrders} طلبات جارية قيد التجهيز أو الشحن يجب تسليمها أولاً`);
     }
 
+    if (pendingWithdrawals > 0) {
+      reasons.push(`يوجد ${pendingWithdrawals} طلبات سحب أرباح جارية قيد المعالجة`);
+    }
+
+    if (pendingSettlements > 0) {
+      reasons.push(`يوجد ${pendingSettlements} تسويات دورية معلقة قيد الإجراء`);
+    }
+
+    if (standing.availableBalance > 0.01) {
+      reasons.push(`يوجد رصيد متاح في المحفظة بقيمة ${standing.availableBalance} ${standing.currency} يتطلب التصفية والسحب النهائي قبل إغلاق الحساب`);
+    }
+
     return {
       eligible: reasons.length === 0,
       reasons,
       outstandingDebt: standing.outstandingCommission,
       reservedBalance: standing.totalReservedBalance,
+      availableBalance: standing.availableBalance,
       openRefundsCount: openRefunds,
       openDisputesCount: openDisputes,
       inFlightOrdersCount: inFlightOrders,
+      pendingWithdrawalsCount: pendingWithdrawals,
+      pendingSettlementsCount: pendingSettlements,
     };
   }
 

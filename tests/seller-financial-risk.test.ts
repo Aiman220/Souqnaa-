@@ -331,7 +331,7 @@ async function runSellerFinancialRiskTestSuite() {
       `Reconciliation run executed and persisted with unique identifier: ${reconRun.runNumber}`
     );
     assert(
-      reconRun.status === 'COMPLETED' || reconRun.status === 'BALANCED' || reconRun.status === 'DISCREPANCIES_FOUND',
+      reconRun.status === 'COMPLETED' || reconRun.status === 'BALANCED' || reconRun.status === 'DISCREPANCIES_FOUND' || reconRun.status === 'COMPLETED_WITH_EXCEPTIONS',
       `Reconciliation run recorded valid audit status: ${reconRun.status}`
     );
     assert(

@@ -591,10 +591,10 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
     });
 
     for (const s of orderSellers) {
-      if (s.riskProfile?.newOrdersPaused) {
+      if (s.riskProfile?.newOrdersPaused || s.isFinanciallyRestricted) {
         const storeName = s.stores[0]?.name || 'أحد المتاجر';
         throw new AppError(
-          `المتجر "${storeName}" متوقف مؤقتاً عن استقبال طلبات جديدة لتجاوز السقف المالي للمخاطر. يرجى إزالة منتجات هذا المتجر للمتابعة.`,
+          `المتجر "${storeName}" متوقف مؤقتاً عن استقبال طلبات جديدة لتجاوز السقف المالي للمخاطر (${s.financialRestrictionReason || 'تقييد مالي نشط'}). يرجى إزالة منتجات هذا المتجر للمتابعة.`,
           400,
           'SELLER_NEW_ORDERS_PAUSED'
         );

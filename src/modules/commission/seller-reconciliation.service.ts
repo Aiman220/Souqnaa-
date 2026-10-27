@@ -77,7 +77,11 @@ export class SellerReconciliationService {
     // Fetch all sellers with balance, outstandings, reserves, and risk profile
     const sellers = await prisma.seller.findMany({
       include: {
-        balance: true,
+        balance: {
+          include: {
+            transactions: true,
+          },
+        },
         outstandings: {
           where: { status: { in: ['OPEN', 'PARTIALLY_PAID'] } },
         },
@@ -150,7 +154,30 @@ export class SellerReconciliationService {
         });
       }
 
-      // 4. Calculate Net Exposure
+      // 4. Invariant: Independent double-entry ledger verification
+      if (seller.balance?.transactions && seller.balance.transactions.length > 0) {
+        const ledgerNet = seller.balance.transactions.reduce((sum: number, tx: any) => {
+          if (tx.type === 'CREDIT') return sum + Math.abs(tx.amount);
+          if (tx.type === 'REFUND' || tx.type === 'WITHDRAWAL' || tx.type === 'DEBIT') return sum - Math.abs(tx.amount);
+          return sum;
+        }, 0);
+
+        const driftLedger = Math.abs(available - ledgerNet);
+        if (driftLedger > 0.05) {
+          exceptions.push({
+            sellerId: seller.id,
+            entityType: 'WALLET_LEDGER',
+            entityId: seller.balance.id,
+            severity: driftLedger > 1000 ? 'HIGH' : 'MEDIUM',
+            expectedAmount: parseFloat(ledgerNet.toFixed(2)),
+            actualAmount: parseFloat(available.toFixed(2)),
+            discrepancy: parseFloat((available - ledgerNet).toFixed(2)),
+            description: `انحراف بين رصيد المحفظة المسجل (${available} ر.ي) وصافي حركة قيود الأستاذ العام (${ledgerNet.toFixed(2)} ر.ي)`,
+          });
+        }
+      }
+
+      // 5. Calculate Net Exposure
       const unsecuredExposure = Math.max(0, sumOutstandings - sumReserves);
       totalExposure += unsecuredExposure;
     }

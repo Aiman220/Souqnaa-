@@ -9,6 +9,7 @@ import { SellerReconciliationService } from '../../modules/commission/seller-rec
 export class SellerReserveScheduler {
   private static timer: NodeJS.Timeout | null = null;
   private static cycleCounter = 0;
+  private static isCycleRunning = false;
 
   static start(intervalMs = 60 * 60 * 1000): void { // Hourly check
     if (this.timer) return;
@@ -30,6 +31,11 @@ export class SellerReserveScheduler {
   }
 
   private static async runCycle(): Promise<void> {
+    if (this.isCycleRunning) {
+      console.warn('[SellerReserveScheduler] Previous cycle is still running. Skipping to prevent race conditions.');
+      return;
+    }
+    this.isCycleRunning = true;
     try {
       this.cycleCounter++;
 
@@ -55,6 +61,8 @@ export class SellerReserveScheduler {
       }
     } catch (err) {
       console.error('[SellerReserveScheduler] Error during scheduled reserve cycle:', err);
+    } finally {
+      this.isCycleRunning = false;
     }
   }
 }

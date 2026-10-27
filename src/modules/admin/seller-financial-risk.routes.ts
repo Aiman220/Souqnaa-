@@ -88,7 +88,7 @@ router.get(
       const mapped = sellers.map((s) => {
         const availableBalance = s.balance?.availableBalance ?? 0;
         const reservedBalance = s.riskProfile?.totalReservedBalance ?? 0;
-        const withdrawableBalance = Math.max(0, availableBalance - reservedBalance);
+        const withdrawableBalance = Math.max(0, availableBalance);
         const outstandingCommission = s.balance?.outstandingCommission ?? 0;
 
         return {
