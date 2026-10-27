@@ -512,9 +512,57 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
       sellerGroups.set(sellerId, group);
     }
 
+    const isExpress = deliveryMethodCode === 'express' || deliveryScheduleType === 'EXPRESS';
+    const finalScheduleType = isExpress ? 'EXPRESS' : (deliveryScheduleType === 'SCHEDULED' ? 'SCHEDULED' : 'ASAP');
+
+    // Authoritative resolution of active Delivery Methods
+    const activeDeliveryMethods = await prisma.deliveryMethod.findMany({
+      where: { isActive: true },
+    });
+    const deliveryMethodCodeMap = new Map(
+      activeDeliveryMethods.map((m) => [m.code.toLowerCase(), m])
+    );
+    const checkoutDeliveryMethodCode = String(deliveryMethodCode || (isExpress ? 'express' : 'standard')).toLowerCase();
+    const defaultDeliveryMethod = deliveryMethodCodeMap.get(checkoutDeliveryMethodCode)
+      || deliveryMethodCodeMap.get('standard')
+      || activeDeliveryMethods[0]
+      || null;
+
+    // Resolve per-seller delivery methods with strict validation against active methods
+    const rawSellerMethodOverrides = (req.body.sellerDeliveryMethods && typeof req.body.sellerDeliveryMethods === 'object')
+      ? req.body.sellerDeliveryMethods
+      : {};
+    const resolvedSellerDeliveryMethods = new Map<string, typeof defaultDeliveryMethod>();
+    for (const sellerId of sellerGroups.keys()) {
+      const customCode = rawSellerMethodOverrides[sellerId];
+      if (customCode && typeof customCode === 'string') {
+        const validatedMethod = deliveryMethodCodeMap.get(customCode.trim().toLowerCase());
+        if (validatedMethod) {
+          resolvedSellerDeliveryMethods.set(sellerId, validatedMethod);
+          continue;
+        }
+      }
+      resolvedSellerDeliveryMethods.set(sellerId, defaultDeliveryMethod);
+    }
+
+    // Determine parent order deliveryMethodId: only populated if ALL sellers share the EXACT same delivery method
+    const distinctMethodIds = new Set(
+      Array.from(resolvedSellerDeliveryMethods.values())
+        .map((m) => m?.id)
+        .filter(Boolean)
+    );
+    const parentDeliveryMethodId = distinctMethodIds.size === 1 ? Array.from(distinctMethodIds)[0] : null;
+
     const sellerOrdersInput = Array.from(sellerGroups.keys()).map((sellerId) => {
       const storeId = sellerGroups.get(sellerId)?.[0]?.product?.storeId || '';
-      return { sellerId, storeId };
+      const resolvedMethod = resolvedSellerDeliveryMethods.get(sellerId) || defaultDeliveryMethod;
+      const isSellerExpress = resolvedMethod?.code?.toLowerCase() === 'express';
+      return {
+        sellerId,
+        storeId,
+        deliveryMethod: resolvedMethod?.code || (isExpress ? 'express' : 'standard'),
+        isExpress: isSellerExpress,
+      };
     });
 
     // Authoritative COD validation: Enforce that all sellers in order permit COD and are not financially restricted
@@ -533,8 +581,25 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
       }
     }
 
-    const isExpress = deliveryMethodCode === 'express' || deliveryScheduleType === 'EXPRESS';
-    const finalScheduleType = isExpress ? 'EXPRESS' : (deliveryScheduleType === 'SCHEDULED' ? 'SCHEDULED' : 'ASAP');
+    // Authoritative New Orders restriction check (Risk Policy & Debt limit enforcement)
+    const orderSellers = await prisma.seller.findMany({
+      where: { id: { in: Array.from(sellerGroups.keys()) } },
+      include: {
+        riskProfile: true,
+        stores: { select: { name: true } },
+      },
+    });
+
+    for (const s of orderSellers) {
+      if (s.riskProfile?.newOrdersPaused) {
+        const storeName = s.stores[0]?.name || 'أحد المتاجر';
+        throw new AppError(
+          `المتجر "${storeName}" متوقف مؤقتاً عن استقبال طلبات جديدة لتجاوز السقف المالي للمخاطر. يرجى إزالة منتجات هذا المتجر للمتابعة.`,
+          400,
+          'SELLER_NEW_ORDERS_PAUSED'
+        );
+      }
+    }
 
     let quote;
     try {
@@ -736,6 +801,10 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
         customerId: req.user!.userId,
         items: cartEvalItems,
         shippingFee: quote.totalDeliveryFee,
+        sellerDeliveryFees: quote.sellerQuotes.map((sq) => ({
+          sellerId: sq.sellerId,
+          deliveryFee: sq.deliveryFee,
+        })),
         vouchers: activeVouchers,
         currency: config.marketplace.currency || 'YER',
       });
@@ -884,44 +953,6 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
       subtotal - (platformDiscount + sellerDiscount) - coinDiscount + deliveryFee + (taxResult.priceIncludesTax ? 0 : taxAmount)
     );
 
-    // Authoritative resolution of active Delivery Methods
-    const activeDeliveryMethods = await prisma.deliveryMethod.findMany({
-      where: { isActive: true },
-    });
-    const deliveryMethodCodeMap = new Map(
-      activeDeliveryMethods.map((m) => [m.code.toLowerCase(), m])
-    );
-    const checkoutDeliveryMethodCode = String(deliveryMethodCode || (isExpress ? 'express' : 'standard')).toLowerCase();
-    const defaultDeliveryMethod = deliveryMethodCodeMap.get(checkoutDeliveryMethodCode)
-      || deliveryMethodCodeMap.get('standard')
-      || activeDeliveryMethods[0]
-      || null;
-
-    // Resolve per-seller delivery methods with strict validation against active methods
-    const rawSellerMethodOverrides = (req.body.sellerDeliveryMethods && typeof req.body.sellerDeliveryMethods === 'object')
-      ? req.body.sellerDeliveryMethods
-      : {};
-    const resolvedSellerDeliveryMethods = new Map<string, typeof defaultDeliveryMethod>();
-    for (const sellerId of sellerGroups.keys()) {
-      const customCode = rawSellerMethodOverrides[sellerId];
-      if (customCode && typeof customCode === 'string') {
-        const validatedMethod = deliveryMethodCodeMap.get(customCode.trim().toLowerCase());
-        if (validatedMethod) {
-          resolvedSellerDeliveryMethods.set(sellerId, validatedMethod);
-          continue;
-        }
-      }
-      resolvedSellerDeliveryMethods.set(sellerId, defaultDeliveryMethod);
-    }
-
-    // Determine parent order deliveryMethodId: only populated if ALL sellers share the EXACT same delivery method
-    const distinctMethodIds = new Set(
-      Array.from(resolvedSellerDeliveryMethods.values())
-        .map((m) => m?.id)
-        .filter(Boolean)
-    );
-    const parentDeliveryMethodId = distinctMethodIds.size === 1 ? Array.from(distinctMethodIds)[0] : null;
-
     // 0. Atomically reserve sequence and generate public order numbers
     const orderNumberData = await OrderNumberService.generateNextOrderNumber();
 
@@ -1047,20 +1078,30 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
         const sellerAlloc = (universalCalculation?.sellerBreakdown?.find((b: any) => b.sellerId === sellerId)) ||
           (firstOrderCalculation?.sellerBreakdown?.find((b) => b.sellerId === sellerId));
         const sq = quote.sellerQuotes.find((q) => q.sellerId === sellerId);
+        const sellerBreakdown = voucherCalcResult?.sellerBreakdowns?.[sellerId];
+        const sellerVoucherDiscount = sellerBreakdown?.sellerDiscount || 0;
+        const sellerPlatformDiscount = sellerBreakdown?.platformDiscount || 0;
+        const sellerVoucherShipDiscount = sellerBreakdown?.shippingDiscount || 0;
+        const sellerVoucherShipFunding = sellerBreakdown?.shippingFundingType || 'PLATFORM';
+
         const origSellerDelivery = sellerAlloc?.originalDeliveryFee ?? (sq?.deliveryFee ?? 0.0);
-        const sellerShipDiscount = sellerAlloc?.shippingPromotionDiscount ?? 0.0;
-        const sellerCustCharge = sellerAlloc?.customerDeliveryCharge ?? (sq?.deliveryFee ?? 0.0);
-        const sellerPlatSubsidy = sellerAlloc?.platformShippingSubsidy ?? 0.0;
-        const sellerContrib = sellerAlloc?.sellerShippingContribution ?? 0.0;
-        const sellerReimburse = sellerAlloc?.sellerDeliveryReimbursement ?? 0.0;
+        const promoShipDiscount = sellerAlloc?.shippingPromotionDiscount ?? 0.0;
+        const totalSellerShipDiscount = Math.min(origSellerDelivery, promoShipDiscount + sellerVoucherShipDiscount);
+        const sellerCustCharge = Math.max(0, origSellerDelivery - totalSellerShipDiscount);
+
+        const promoPlatSubsidy = sellerAlloc?.platformShippingSubsidy ?? 0.0;
+        const promoContrib = sellerAlloc?.sellerShippingContribution ?? 0.0;
+
+        const voucherPlatSubsidy = sellerVoucherShipFunding === 'PLATFORM' ? sellerVoucherShipDiscount : 0.0;
+        const voucherContrib = sellerVoucherShipFunding === 'SELLER' ? sellerVoucherShipDiscount : 0.0;
+
+        const sellerPlatSubsidy = promoPlatSubsidy + voucherPlatSubsidy;
+        const sellerContrib = promoContrib + voucherContrib;
+        const sellerReimburse = sellerPlatSubsidy;
 
         // Seller delivery entitlement:
         // Sum of customer-paid delivery charge and platform delivery reimbursement (net of seller contribution).
         const effectiveSellerDeliveryEntitlement = TaxMath.add(sellerCustCharge, sellerReimburse);
-
-        const sellerBreakdown = voucherCalcResult?.sellerBreakdowns?.[sellerId];
-        const sellerVoucherDiscount = sellerBreakdown?.sellerDiscount || 0;
-        const sellerPlatformDiscount = sellerBreakdown?.platformDiscount || 0;
 
         const sellerPayout = TaxMath.round(
           Math.max(
@@ -1085,12 +1126,12 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
             subtotal: sellerSubtotal,
             deliveryFee: sellerCustCharge,
             originalDeliveryFee: origSellerDelivery,
-            shippingPromotionDiscount: sellerShipDiscount,
+            shippingPromotionDiscount: totalSellerShipDiscount,
             customerDeliveryCharge: sellerCustCharge,
             platformShippingSubsidy: sellerPlatSubsidy,
             sellerShippingContribution: sellerContrib,
             sellerDeliveryReimbursement: sellerReimburse,
-            shippingCostBearer: promoCostBearer,
+            shippingCostBearer: promoCostBearer || (sellerVoucherShipDiscount > 0 ? sellerVoucherShipFunding : null),
             taxAmount: sellerTaxAmount,
             commissionAmount: totalCommissionAmount,
             sellerPayout,
@@ -1224,6 +1265,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           currency: config.marketplace.currency || 'YER',
           vouchers: appliedVouchersList,
           allocations: voucherCalcResult.allocations,
+          shippingDiscount: voucherCalcResult.shippingDiscount,
           idempotencyKey: (req.headers['idempotency-key'] as string) || undefined,
         });
       }
@@ -1333,6 +1375,44 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
                 description: 'مساهمة البائع في رسوم التوصيل للطلب الأول',
               },
             });
+          }
+        }
+      } else if (rawVoucherShippingDiscount > 0) {
+        // Platform or Seller-funded Voucher Free Shipping Ledger Entries
+        const shippingVoucher = appliedVouchersList.find((v) => v.voucherType === 'FREE_SHIPPING');
+        const fundingType = shippingVoucher?.fundingType || 'PLATFORM';
+
+        if (fundingType === 'PLATFORM') {
+          await tx.financialTransaction.create({
+            data: {
+              transactionNumber: `FTX-SUB-${orderNumberData.orderNumber}`,
+              type: 'SHIPPING_SUBSIDY_PLATFORM' as any,
+              orderId: createdOrder.id,
+              amount: rawVoucherShippingDiscount,
+              direction: 'DEBIT',
+              currency: 'YER',
+              description: `دعم المنصة لرسوم التوصيل - قسيمة شحن مجاني (${shippingVoucher?.code || 'VOUCHER'})`,
+            },
+          });
+
+          // Record seller delivery reimbursements per child seller order
+          for (const sOrder of sellerOrdersList) {
+            const sBreakdown = voucherCalcResult?.sellerBreakdowns?.[sOrder.sellerId];
+            const sShipDiscount = sBreakdown?.shippingDiscount || 0;
+            if (sShipDiscount > 0) {
+              await tx.financialTransaction.create({
+                data: {
+                  transactionNumber: `FTX-REIMB-${orderNumberData.orderNumber}-${sOrder.sellerId.slice(0, 6)}`,
+                  type: 'SELLER_DELIVERY_REIMBURSEMENT' as any,
+                  orderId: createdOrder.id,
+                  sellerId: sOrder.sellerId,
+                  amount: sShipDiscount,
+                  direction: 'CREDIT',
+                  currency: 'YER',
+                  description: `تعويض المنصة للمتجر عن قسيمة التوصيل المجاني للطلب الفرعي #${sOrder.sellerOrderNumber}`,
+                },
+              });
+            }
           }
         }
       }
@@ -1475,6 +1555,10 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
     for (const so of createdSellerOrders) {
       const sq = quote.sellerQuotes.find((q) => q.sellerId === so.sellerId);
       if (sq) {
+        const sellerAlloc = (universalCalculation?.sellerBreakdown?.find((b: any) => b.sellerId === so.sellerId)) ||
+          (firstOrderCalculation?.sellerBreakdown?.find((b) => b.sellerId === so.sellerId));
+        const sellerCustCharge = sellerAlloc?.customerDeliveryCharge ?? (sq?.deliveryFee ?? 0.0);
+        const sellerShipDiscount = sellerAlloc?.shippingPromotionDiscount ?? 0.0;
         await deliveryQuoteService.saveSnapshot(so.id, sq, {
           deliveryScheduleType: finalScheduleType,
           deliveryDate,
@@ -1482,6 +1566,9 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           timeSlotNameAr: quote.timeSlotNameAr,
           timeSlotStart: quote.timeSlotStart,
           timeSlotEnd: quote.timeSlotEnd,
+          actualCustomerDeliveryFee: sellerCustCharge,
+          promotionalDiscount: sellerShipDiscount,
+          discountFundedBy: promoCostBearer || undefined,
         });
       }
     }
@@ -1700,7 +1787,6 @@ function buildCustomerPurchaseFilterWhere(userId: string, filter: string): any {
     case 'PENDING':
       return {
         ...baseWhere,
-        status: OrderStatus.PENDING,
         NOT: {
           OR: [
             { payment: { is: null } },
@@ -1713,30 +1799,57 @@ function buildCustomerPurchaseFilterWhere(userId: string, filter: string): any {
             },
           ],
         },
+        OR: [
+          { status: OrderStatus.PENDING },
+          { sellerOrders: { some: { status: SellerOrderStatus.PENDING } } },
+        ],
       };
 
     case 'TO_SHIP':
       return {
         ...baseWhere,
-        status: {
-          in: [
-            OrderStatus.CONFIRMED,
-            OrderStatus.PROCESSING,
-            OrderStatus.READY_TO_SHIP,
-          ],
-        },
+        OR: [
+          {
+            status: {
+              in: [
+                OrderStatus.CONFIRMED,
+                OrderStatus.PROCESSING,
+                OrderStatus.READY_TO_SHIP,
+              ],
+            },
+          },
+          {
+            sellerOrders: {
+              some: {
+                status: {
+                  in: [
+                    SellerOrderStatus.CONFIRMED,
+                    SellerOrderStatus.PROCESSING,
+                    SellerOrderStatus.READY_TO_SHIP,
+                  ],
+                },
+              },
+            },
+          },
+        ],
       };
 
     case 'SHIPPED':
       return {
         ...baseWhere,
-        status: OrderStatus.SHIPPED,
+        OR: [
+          { status: OrderStatus.SHIPPED },
+          { sellerOrders: { some: { status: SellerOrderStatus.SHIPPED } } },
+        ],
       };
 
     case 'TO_RECEIVE':
       return {
         ...baseWhere,
-        status: OrderStatus.SHIPPED,
+        OR: [
+          { status: OrderStatus.SHIPPED },
+          { sellerOrders: { some: { status: SellerOrderStatus.SHIPPED } } },
+        ],
       };
 
     case 'COMPLETED':
@@ -1750,6 +1863,17 @@ function buildCustomerPurchaseFilterWhere(userId: string, filter: string): any {
             OR: [
               { returnRequests: { some: {} } },
               { refundRequests: { some: {} } },
+              {
+                status: {
+                  notIn: [
+                    SellerOrderStatus.DELIVERED,
+                    SellerOrderStatus.CANCELLED_BY_CUSTOMER,
+                    SellerOrderStatus.CANCELLED_BY_SELLER,
+                    SellerOrderStatus.REJECTED_BY_SELLER,
+                    SellerOrderStatus.CANCELLED_BY_ADMIN,
+                  ],
+                },
+              },
             ],
           },
         },
@@ -1761,7 +1885,16 @@ function buildCustomerPurchaseFilterWhere(userId: string, filter: string): any {
         OR: [
           { status: { in: [OrderStatus.REFUND_PENDING, OrderStatus.REFUNDED] } },
           { refundRequests: { some: {} } },
-          { sellerOrders: { some: { refundRequests: { some: {} } } } },
+          {
+            sellerOrders: {
+              some: {
+                OR: [
+                  { status: { in: [SellerOrderStatus.REFUND_PENDING, SellerOrderStatus.REFUNDED] } },
+                  { refundRequests: { some: {} } },
+                ],
+              },
+            },
+          },
         ],
       };
 
@@ -1771,7 +1904,16 @@ function buildCustomerPurchaseFilterWhere(userId: string, filter: string): any {
         OR: [
           { status: { in: [OrderStatus.RETURN_REQUESTED, OrderStatus.RETURN_APPROVED, OrderStatus.RETURNED] } },
           { returnRequests: { some: {} } },
-          { sellerOrders: { some: { returnRequests: { some: {} } } } },
+          {
+            sellerOrders: {
+              some: {
+                OR: [
+                  { status: { in: [SellerOrderStatus.RETURN_REQUESTED, SellerOrderStatus.RETURN_APPROVED, SellerOrderStatus.RETURNED] } },
+                  { returnRequests: { some: {} } },
+                ],
+              },
+            },
+          },
         ],
       };
 
@@ -1792,19 +1934,22 @@ function buildCustomerPurchaseFilterWhere(userId: string, filter: string): any {
             },
           },
           { cancellationRequests: { some: {} } },
-          { sellerOrders: { some: { cancellationRequests: { some: {} } } } },
         ],
       };
 
     case 'TO_REVIEW':
       return {
         ...baseWhere,
-        status: OrderStatus.DELIVERED,
+        OR: [
+          { status: OrderStatus.DELIVERED },
+          { sellerOrders: { some: { status: SellerOrderStatus.DELIVERED } } },
+        ],
         sellerOrders: {
           some: {
+            status: SellerOrderStatus.DELIVERED,
             items: {
               some: {
-                productReviews: { none: {} },
+                productReviews: { none: { userId } },
               },
             },
           },
@@ -1864,6 +2009,7 @@ router.get('/summary', async (req: Request, res: Response, next: NextFunction) =
         sellerOrders: {
           select: {
             id: true,
+            status: true,
             sellerOrderNumber: true,
             returnRequests: { select: { id: true, status: true } },
             refundRequests: { select: { id: true, status: true } },
@@ -1871,7 +2017,10 @@ router.get('/summary', async (req: Request, res: Response, next: NextFunction) =
             items: {
               select: {
                 id: true,
-                productReviews: { select: { id: true } },
+                productReviews: {
+                  where: { userId },
+                  select: { id: true },
+                },
               },
             },
           },
@@ -1929,26 +2078,55 @@ router.get('/summary', async (req: Request, res: Response, next: NextFunction) =
       const isPaid = o.payment?.paidAt != null || o.payment?.status === PaymentStatus.PAID;
       const isToPay = !isTerminal && !isCod && !isPaid;
 
-      const isPending = o.status === OrderStatus.PENDING && !isToPay;
+      const hasPendingSuborder = (o.sellerOrders || []).some(
+        (so: any) => so.status === SellerOrderStatus.PENDING
+      );
+      const isPending = (o.status === OrderStatus.PENDING || hasPendingSuborder) && !isToPay;
+
+      const hasToShipSuborder = (o.sellerOrders || []).some(
+        (so: any) =>
+          so.status === SellerOrderStatus.CONFIRMED ||
+          so.status === SellerOrderStatus.PROCESSING ||
+          so.status === SellerOrderStatus.READY_TO_SHIP
+      );
       const isToShip = (
         [OrderStatus.CONFIRMED, OrderStatus.PROCESSING, OrderStatus.READY_TO_SHIP] as OrderStatus[]
-      ).includes(o.status);
-      const isShipped = o.status === OrderStatus.SHIPPED;
-      const isToReceive = o.status === OrderStatus.SHIPPED;
+      ).includes(o.status) || hasToShipSuborder;
+
+      const hasShippedSuborder = (o.sellerOrders || []).some(
+        (so: any) => so.status === SellerOrderStatus.SHIPPED
+      );
+      const isShipped = o.status === OrderStatus.SHIPPED || hasShippedSuborder;
+      const isToReceive = isShipped;
 
       const hasReturns =
         (
           [OrderStatus.RETURN_REQUESTED, OrderStatus.RETURN_APPROVED, OrderStatus.RETURNED] as OrderStatus[]
         ).includes(o.status) ||
         (o.returnRequests && o.returnRequests.length > 0) ||
-        o.sellerOrders.some((so: any) => so.returnRequests && so.returnRequests.length > 0);
+        (o.sellerOrders || []).some((so: any) => so.returnRequests && so.returnRequests.length > 0);
 
       const hasRefunds =
         ([OrderStatus.REFUND_PENDING, OrderStatus.REFUNDED] as OrderStatus[]).includes(o.status) ||
         (o.refundRequests && o.refundRequests.length > 0) ||
-        o.sellerOrders.some((so: any) => so.refundRequests && so.refundRequests.length > 0);
+        (o.sellerOrders || []).some((so: any) => so.refundRequests && so.refundRequests.length > 0);
 
-      const isCompleted = o.status === OrderStatus.DELIVERED && !hasReturns && !hasRefunds;
+      const nonCancelledSuborders = (o.sellerOrders || []).filter(
+        (so: any) =>
+          ![
+            SellerOrderStatus.CANCELLED_BY_CUSTOMER,
+            SellerOrderStatus.CANCELLED_BY_SELLER,
+            SellerOrderStatus.REJECTED_BY_SELLER,
+            SellerOrderStatus.CANCELLED_BY_ADMIN,
+          ].includes(so.status)
+      );
+
+      const isCompleted =
+        o.status === OrderStatus.DELIVERED &&
+        !hasReturns &&
+        !hasRefunds &&
+        (nonCancelledSuborders.length === 0 ||
+          nonCancelledSuborders.every((so: any) => so.status === SellerOrderStatus.DELIVERED));
 
       const isCanceled =
         (
@@ -1960,14 +2138,15 @@ router.get('/summary', async (req: Request, res: Response, next: NextFunction) =
             OrderStatus.CANCELLATION_REQUESTED,
           ] as OrderStatus[]
         ).includes(o.status) ||
-        (o.cancellationRequests && o.cancellationRequests.length > 0) ||
-        o.sellerOrders.some((so: any) => so.cancellationRequests && so.cancellationRequests.length > 0);
+        (o.cancellationRequests && o.cancellationRequests.length > 0);
 
-      const isToReview =
-        o.status === OrderStatus.DELIVERED &&
-        o.sellerOrders.some((so: any) =>
-          so.items.some((item: any) => !item.productReviews || item.productReviews.length === 0)
-        );
+      const isToReview = (o.sellerOrders || []).some(
+        (so: any) =>
+          (so.status === SellerOrderStatus.DELIVERED || o.status === OrderStatus.DELIVERED) &&
+          (so.items || []).some(
+            (item: any) => !item.productReviews || item.productReviews.length === 0
+          )
+      );
 
       // ALL
       totals['ALL']++;
@@ -2031,11 +2210,11 @@ router.get('/summary', async (req: Request, res: Response, next: NextFunction) =
         if (isOrderUnread) unreads['CANCELED']++;
       }
 
-      // TO_REVIEW
+      // TO_REVIEW (Actionable delivered unreviewed orders count)
       if (isToReview) {
         totals['TO_REVIEW']++;
-        if (isOrderUnread) unreads['TO_REVIEW']++;
         actionables['TO_REVIEW']++;
+        // Note: unreads['TO_REVIEW'] is intentionally 0. Badge is derived from totalCount/actionableCount.
       }
     }
 
@@ -2070,6 +2249,11 @@ router.post('/mark-filter-read', async (req: Request, res: Response, next: NextF
   try {
     const userId = req.user!.userId;
     const filter = (req.body?.filter || req.query?.filter) as string | undefined;
+
+    // TO_REVIEW represents actionable review items, not unread notifications
+    if (filter === 'TO_REVIEW') {
+      return ResponseUtil.success(res, { markedCount: 0, filter: 'TO_REVIEW' }, 'تم');
+    }
 
     const targetOrderIds: string[] = [];
 
@@ -2109,7 +2293,10 @@ router.post('/mark-filter-read', async (req: Request, res: Response, next: NextF
               cancellationRequests: { select: { id: true, status: true } },
               items: {
                 include: {
-                  productReviews: { select: { id: true } },
+                  productReviews: {
+                    where: { userId },
+                    select: { id: true },
+                  },
                 },
               },
             },
@@ -2131,26 +2318,63 @@ router.post('/mark-filter-read', async (req: Request, res: Response, next: NextF
         const isCod = o.payment?.method === PaymentMethodType.CASH_ON_DELIVERY;
         const isPaid = o.payment?.paidAt != null || o.payment?.status === PaymentStatus.PAID;
         const isToPay = !isTerminal && !isCod && !isPaid;
-        const isPending = o.status === OrderStatus.PENDING && !isToPay;
+
+        const hasPendingSuborder = (o.sellerOrders || []).some(
+          (so: any) => so.status === SellerOrderStatus.PENDING
+        );
+        const isPending = (o.status === OrderStatus.PENDING || hasPendingSuborder) && !isToPay;
+
+        const hasToShipSuborder = (o.sellerOrders || []).some(
+          (so: any) =>
+            so.status === SellerOrderStatus.CONFIRMED ||
+            so.status === SellerOrderStatus.PROCESSING ||
+            so.status === SellerOrderStatus.READY_TO_SHIP
+        );
         const isToShip = (
           [OrderStatus.CONFIRMED, OrderStatus.PROCESSING, OrderStatus.READY_TO_SHIP] as OrderStatus[]
-        ).includes(o.status);
-        const isShipped = o.status === OrderStatus.SHIPPED;
-        const isToReceive = o.status === OrderStatus.SHIPPED;
+        ).includes(o.status) || hasToShipSuborder;
+
+        const hasShippedSuborder = (o.sellerOrders || []).some(
+          (so: any) => so.status === SellerOrderStatus.SHIPPED
+        );
+        const isShipped = o.status === OrderStatus.SHIPPED || hasShippedSuborder;
+        const isToReceive = isShipped;
 
         const hasReturns =
           (
             [OrderStatus.RETURN_REQUESTED, OrderStatus.RETURN_APPROVED, OrderStatus.RETURNED] as OrderStatus[]
           ).includes(o.status) ||
           (o.returnRequests && o.returnRequests.length > 0) ||
-          o.sellerOrders.some((so: any) => so.returnRequests && so.returnRequests.length > 0);
+          (o.sellerOrders || []).some((so: any) =>
+            [SellerOrderStatus.RETURN_REQUESTED, SellerOrderStatus.RETURN_APPROVED, SellerOrderStatus.RETURNED].includes(so.status) ||
+            (so.returnRequests && so.returnRequests.length > 0)
+          );
 
         const hasRefunds =
           ([OrderStatus.REFUND_PENDING, OrderStatus.REFUNDED] as OrderStatus[]).includes(o.status) ||
           (o.refundRequests && o.refundRequests.length > 0) ||
-          o.sellerOrders.some((so: any) => so.refundRequests && so.refundRequests.length > 0);
+          (o.sellerOrders || []).some((so: any) =>
+            [SellerOrderStatus.REFUND_PENDING, SellerOrderStatus.REFUNDED].includes(so.status) ||
+            (so.refundRequests && so.refundRequests.length > 0)
+          );
 
-        const isCompleted = o.status === OrderStatus.DELIVERED && !hasReturns && !hasRefunds;
+        const nonCancelledSuborders = (o.sellerOrders || []).filter(
+          (so: any) =>
+            ![
+              SellerOrderStatus.CANCELLED_BY_CUSTOMER,
+              SellerOrderStatus.CANCELLED_BY_SELLER,
+              SellerOrderStatus.REJECTED_BY_SELLER,
+              SellerOrderStatus.CANCELLED_BY_ADMIN,
+            ].includes(so.status)
+        );
+
+        const isCompleted =
+          o.status === OrderStatus.DELIVERED &&
+          !hasReturns &&
+          !hasRefunds &&
+          (nonCancelledSuborders.length === 0 ||
+            nonCancelledSuborders.every((so: any) => so.status === SellerOrderStatus.DELIVERED));
+
         const isCanceled =
           (
             [
@@ -2161,14 +2385,7 @@ router.post('/mark-filter-read', async (req: Request, res: Response, next: NextF
               OrderStatus.CANCELLATION_REQUESTED,
             ] as OrderStatus[]
           ).includes(o.status) ||
-          (o.cancellationRequests && o.cancellationRequests.length > 0) ||
-          o.sellerOrders.some((so: any) => so.cancellationRequests && so.cancellationRequests.length > 0);
-
-        const isToReview =
-          o.status === OrderStatus.DELIVERED &&
-          o.sellerOrders.some((so: any) =>
-            so.items.some((item: any) => !item.productReviews || item.productReviews.length === 0)
-          );
+          (o.cancellationRequests && o.cancellationRequests.length > 0);
 
         let matches = false;
         switch (filter) {
@@ -2181,7 +2398,6 @@ router.post('/mark-filter-read', async (req: Request, res: Response, next: NextF
           case 'REFUND': matches = hasRefunds; break;
           case 'RETURN': matches = hasReturns; break;
           case 'CANCELED': matches = isCanceled; break;
-          case 'TO_REVIEW': matches = isToReview; break;
         }
 
         if (matches) {

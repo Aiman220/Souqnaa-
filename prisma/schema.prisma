@@ -739,6 +739,10 @@ model Seller {
   financialTransactions FinancialTransaction[]
   deposits              WalletDeposit[]      @relation("SellerDeposits")
   outstandings          SellerOutstanding[]  @relation("SellerOutstandings")
+  riskProfile           SellerRiskProfile?
+  reserveAllocations    SellerReserveAllocation[]
+  debtRecoveryAllocations DebtRecoveryAllocation[]
+  financialRestrictions FinancialRestriction[]
   recommendationEvents  RecommendationEvent[]
   // SOUQNAA Coins & Rewards Relations
   coinCampaigns         CoinCampaign[]
@@ -2901,6 +2905,8 @@ model WalletDeposit {
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 
+  debtRecoveryAllocations DebtRecoveryAllocation[]
+
   @@index([userId])
   @@index([sellerId])
   @@index([userType])
@@ -2920,7 +2926,7 @@ model SellerOutstanding {
   id              String            @id @default(uuid())
   sellerId        String
   seller          Seller            @relation("SellerOutstandings", fields: [sellerId], references: [id], onDelete: Cascade)
-  sourceType      String            @default("ORDER_COMMISSION") // ORDER_COMMISSION, ADJUSTMENT, MANUAL
+  sourceType      String            @default("ORDER_COMMISSION") // ORDER_COMMISSION, ADJUSTMENT, MANUAL, REFUND_LIABILITY
   sourceReference String?           // sellerOrderId or orderNumber
   amount          Float             // Initial outstanding liability amount
   paidAmount      Float             @default(0.0)
@@ -2933,10 +2939,190 @@ model SellerOutstanding {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
+  recoveryAllocations DebtRecoveryAllocation[]
+
   @@index([sellerId])
   @@index([status])
   @@index([createdAt])
   @@index([sellerId, status])
+}
+
+enum SellerRiskTier {
+  LOW
+  NORMAL
+  ELEVATED
+  HIGH
+  CRITICAL
+  UNDER_REVIEW
+}
+
+enum ReserveStatus {
+  RESERVED
+  RELEASED
+  APPLIED_TO_DEBT
+  EXTENDED
+  DISPUTED
+}
+
+enum RestrictionType {
+  WITHDRAWAL_PAUSED
+  NEW_ORDERS_PAUSED
+  COD_DISABLED
+  SETTLEMENT_HOLD
+}
+
+enum RestrictionReasonCode {
+  OUTSTANDING_REFUND_DEBT
+  EXPOSURE_LIMIT_EXCEEDED
+  INSUFFICIENT_RESERVE_COVERAGE
+  FINANCIAL_REVIEW_REQUIRED
+  REPAYMENT_FAILURE
+  COMPLIANCE_HOLD
+  MANUAL_FINANCE_REVIEW
+}
+
+model SellerRiskProfile {
+  id                     String         @id @default(uuid())
+  sellerId               String         @unique
+  seller                 Seller         @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  riskTier               SellerRiskTier @default(NORMAL)
+  riskScore              Float          @default(0.0) // 0 - 100
+  reservePercentage      Float          @default(0.10) // 10% baseline
+  reserveHoldingDays     Int            @default(30)   // 30 days baseline
+  maxReservePercentage   Float          @default(0.30) // 30% cap
+  maxExposureLimit       Float          @default(50000.0)
+  totalReservedBalance   Float          @default(0.0)
+  totalUnsecuredExposure Float          @default(0.0)
+  totalDebtRecovered     Float          @default(0.0)
+  newOrdersPaused        Boolean        @default(false)
+  withdrawalsRestricted  Boolean        @default(false)
+  lastEvaluatedAt        DateTime       @default(now())
+  evaluationNotes        String?
+  policyVersion          String         @default("1.0.0")
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+
+  @@index([sellerId])
+  @@index([riskTier])
+  @@index([newOrdersPaused])
+  @@index([withdrawalsRestricted])
+}
+
+model SellerReserveAllocation {
+  id                 String         @id @default(uuid())
+  sellerId           String
+  seller             Seller         @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  settlementId       String?
+  settlement         Settlement?    @relation(fields: [settlementId], references: [id], onDelete: SetNull)
+  amount             Float
+  currency           String         @default("YER")
+  reservePercentage  Float          @default(0.10)
+  riskTier           String         @default("NORMAL")
+  holdingDays        Int            @default(30)
+  releaseEligibleAt  DateTime
+  status             ReserveStatus  @default(RESERVED)
+  reason             String?
+  releasedAt         DateTime?
+  releasedByAdminId  String?
+  appliedToDebtAt    DateTime?
+  metadata           String?        // JSON
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  @@index([sellerId])
+  @@index([settlementId])
+  @@index([status])
+  @@index([releaseEligibleAt])
+  @@index([sellerId, status])
+}
+
+model DebtRecoveryAllocation {
+  id              String             @id @default(uuid())
+  sellerId        String
+  seller          Seller             @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  settlementId    String?
+  settlement      Settlement?        @relation(fields: [settlementId], references: [id], onDelete: SetNull)
+  depositId       String?
+  deposit         WalletDeposit?     @relation(fields: [depositId], references: [id], onDelete: SetNull)
+  outstandingId   String
+  outstanding     SellerOutstanding  @relation(fields: [outstandingId], references: [id], onDelete: Cascade)
+  amount          Float
+  currency        String             @default("YER")
+  recoveredFrom   String             // SETTLEMENT, DEPOSIT, RESERVE
+  transactionRef  String?
+  notes           String?
+  createdAt       DateTime           @default(now())
+
+  @@index([sellerId])
+  @@index([settlementId])
+  @@index([depositId])
+  @@index([outstandingId])
+  @@index([createdAt])
+}
+
+model FinancialRestriction {
+  id                 String                @id @default(uuid())
+  sellerId           String
+  seller             Seller                @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  restrictionType    RestrictionType
+  reasonCode         RestrictionReasonCode
+  status             String                @default("ACTIVE") // ACTIVE, RELEASED, EXPIRED
+  triggeredAt        DateTime              @default(now())
+  releasedAt         DateTime?
+  releasedByAdminId  String?
+  releaseReason      String?
+  metadata           String?               // JSON
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  @@index([sellerId])
+  @@index([restrictionType])
+  @@index([status])
+  @@index([sellerId, status])
+}
+
+model ReconciliationRun {
+  id                   String                    @id @default(uuid())
+  runNumber            String                    @unique
+  status               String                    @default("COMPLETED") // RUNNING, COMPLETED, FAILED, COMPLETED_WITH_EXCEPTIONS
+  totalSellersChecked  Int                       @default(0)
+  totalDiscrepancies   Int                       @default(0)
+  totalExposure        Float                     @default(0.0)
+  totalReserves        Float                     @default(0.0)
+  totalDebt            Float                     @default(0.0)
+  startedAt            DateTime                  @default(now())
+  completedAt          DateTime?
+  summary              String?                   // JSON
+  exceptions           ReconciliationException[]
+
+  @@index([runNumber])
+  @@index([status])
+  @@index([startedAt])
+}
+
+model ReconciliationException {
+  id                 String             @id @default(uuid())
+  runId              String
+  run                ReconciliationRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  sellerId           String?
+  entityType         String             // WALLET_LEDGER, SELLER_OUTSTANDING, RESERVE_ALLOCATION, REFUND, SETTLEMENT
+  entityId           String?
+  severity           String             @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
+  status             String             @default("OPEN")   // OPEN, INVESTIGATING, RESOLVED, ESCALATED
+  expectedAmount     Float?
+  actualAmount       Float?
+  discrepancy        Float?
+  description        String
+  resolvedByAdminId  String?
+  resolvedAt         DateTime?
+  resolutionNotes    String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([runId])
+  @@index([sellerId])
+  @@index([status])
+  @@index([severity])
 }
 
 model SellerSavedWallet {
@@ -5745,6 +5931,9 @@ model Settlement {
   deliveryReimbursementTotal  Float              @default(0.0)
   sellerShippingContributionTotal Float          @default(0.0)
   netSettlementAmount   Float              @default(0.0)
+  reserveAmount         Float              @default(0.0)
+  debtRecoveredAmount   Float              @default(0.0)
+  payableSettlementAmount Float            @default(0.0)
   paymentReference      String?
   payoutMethod          String?            // BANK_TRANSFER, WALLET, CASH
   withdrawalId          String?
@@ -5755,6 +5944,8 @@ model Settlement {
 
   items                 SettlementItem[]
   statements            FinancialStatement[]
+  reserveAllocations    SellerReserveAllocation[]
+  debtRecoveryAllocations DebtRecoveryAllocation[]
 
   @@index([sellerId])
   @@index([status])

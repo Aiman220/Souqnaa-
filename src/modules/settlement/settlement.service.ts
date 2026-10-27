@@ -1,8 +1,9 @@
 /**
  * SOUQNAA Marketplace — Authoritative Settlement Engine
  * Manages seller settlement calculation, order item linking, settlement lifecycle
- * (PENDING -> PROCESSING -> COMPLETED / FAILED / REVERSED / CANCELLED), and payout reconciliation.
- * Version: 1.0.3
+ * (PENDING -> PROCESSING -> COMPLETED / FAILED / REVERSED / CANCELLED), risk-based
+ * reserve retention (10% baseline / 30-day holding), and automatic debt recovery.
+ * Version: 2.1.0
  */
 
 import { prisma } from '../../database/prisma';
@@ -10,6 +11,9 @@ import { AppError } from '../../middleware/error.middleware';
 import { SettlementStatus, SellerOrderStatus } from '@prisma/client';
 import { TaxMath } from '../tax/tax.math';
 import { config } from '../../config';
+import { SellerFinancialRiskService } from '../commission/seller-financial-risk.service';
+import { SellerReserveService } from '../commission/seller-reserve.service';
+import { remoteConfigService } from '../remote-config/remote-config.service';
 
 export interface CreateSettlementInput {
   sellerId: string;
@@ -31,7 +35,7 @@ export interface TransitionSettlementStatusInput {
 }
 
 export class SettlementEngine {
-  public static readonly VERSION = '1.0.3';
+  public static readonly VERSION = '2.1.0';
 
   /**
    * Generates a unique, concurrency-safe Settlement Number: SET-YYYY-XXXXXX
@@ -57,7 +61,7 @@ export class SettlementEngine {
 
   /**
    * Authoritative calculation and creation of a seller settlement.
-   * Consumes completed/delivered SellerOrders and authoritative deductions.
+   * Consumes completed/delivered SellerOrders and calculates risk-based reserve and debt recovery.
    */
   public static async createSettlement(input: CreateSettlementInput) {
     const seller = await prisma.seller.findUnique({
@@ -142,7 +146,7 @@ export class SettlementEngine {
       const sellerShippingContribution = so.sellerShippingContribution ?? 0;
 
       // Net Seller Settlement per order:
-      // Product Subtotal - Seller Funded Discounts - Commission + Delivery Compensation (Customer Fee + Platform Subsidy) - Refunds
+      // Product Subtotal - Seller Funded Discounts - Commission + Delivery Compensation - Refunds
       const orderNet = Math.max(
         0,
         TaxMath.subtract(
@@ -182,6 +186,45 @@ export class SettlementEngine {
       });
     }
 
+    // 2. Risk-Based Reserve Calculation
+    const thresholds = await SellerFinancialRiskService.getRiskThresholds();
+    const riskProfile = await prisma.sellerRiskProfile.findUnique({
+      where: { sellerId: input.sellerId },
+    });
+
+    const isRiskReserveActive = await remoteConfigService.isFeatureActive('seller_risk_based_reserve_enabled');
+    const reserveRate = isRiskReserveActive
+      ? (riskProfile?.reservePercentage ?? thresholds.baseReservePercentage)
+      : 0;
+
+    const reserveAmount = parseFloat((netSettlementAmount * reserveRate).toFixed(2));
+    const availableForDebtRecovery = Math.max(0, netSettlementAmount - reserveAmount);
+
+    // 3. Collectible Debt Recovery Calculation
+    let debtRecoveredAmount = 0;
+    const isAutoDebtRecoveryActive = await remoteConfigService.isFeatureActive('seller_automatic_debt_recovery_enabled');
+
+    if (isAutoDebtRecoveryActive && availableForDebtRecovery > 0) {
+      const openDebts = await prisma.sellerOutstanding.findMany({
+        where: { sellerId: input.sellerId, status: { in: ['OPEN', 'PARTIALLY_PAID'] } },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      let remainingCapacity = availableForDebtRecovery;
+      for (const debt of openDebts) {
+        if (remainingCapacity <= 0) break;
+        const toRecover = Math.min(remainingCapacity, debt.remainingAmount);
+        debtRecoveredAmount = TaxMath.add(debtRecoveredAmount, toRecover);
+        remainingCapacity -= toRecover;
+      }
+    }
+
+    // Remaining Payable Settlement
+    const payableSettlementAmount = Math.max(
+      0,
+      TaxMath.subtract(TaxMath.subtract(netSettlementAmount, reserveAmount), debtRecoveredAmount)
+    );
+
     const settlementNumber = await this.generateSettlementNumber();
 
     return await prisma.$transaction(async (tx) => {
@@ -204,6 +247,9 @@ export class SettlementEngine {
           deliveryReimbursementTotal,
           sellerShippingContributionTotal,
           netSettlementAmount,
+          reserveAmount,
+          debtRecoveredAmount,
+          payableSettlementAmount,
           payoutMethod: input.payoutMethod || 'WALLET',
           paymentReference: input.paymentReference,
           notes: input.notes,
@@ -236,6 +282,8 @@ export class SettlementEngine {
           },
         },
         statements: true,
+        reserveAllocations: true,
+        debtRecoveryAllocations: true,
       },
     });
 
@@ -245,7 +293,8 @@ export class SettlementEngine {
 
   /**
    * Transitions settlement through lifecycle:
-   * PENDING -> PROCESSING -> COMPLETED / FAILED / REVERSED / CANCELLED
+   * PENDING -> PROCESSING -> COMPLETED / FAILED / REVERSED / CANCELLED.
+   * Atomically executes reserve hold, debt recovery, and net payout upon COMPLETED.
    */
   public static async transitionStatus(input: TransitionSettlementStatusInput) {
     const settlement = await prisma.settlement.findUnique({
@@ -279,7 +328,135 @@ export class SettlementEngine {
       updateData.processedAt = new Date();
       if (input.paymentReference) updateData.paymentReference = input.paymentReference;
       if (input.withdrawalId) updateData.withdrawalId = input.withdrawalId;
+
+      return await prisma.$transaction(async (tx) => {
+        // 1. Allocate Reserve if reserveAmount > 0
+        if (settlement.reserveAmount > 0) {
+          const riskProfile = await tx.sellerRiskProfile.findUnique({
+            where: { sellerId: settlement.sellerId },
+          });
+          const holdingDays = riskProfile?.reserveHoldingDays ?? 30;
+          const riskTier = riskProfile?.riskTier ?? 'NORMAL';
+          const reservePercentage = settlement.netSettlementAmount > 0
+            ? settlement.reserveAmount / settlement.netSettlementAmount
+            : 0.10;
+
+          await SellerReserveService.allocateReserveFromSettlement(tx, {
+            sellerId: settlement.sellerId,
+            settlementId: settlement.id,
+            eligibleSettlementAmount: settlement.netSettlementAmount,
+            reservePercentage,
+            holdingDays,
+            riskTier,
+            currency: settlement.currency,
+          });
+        }
+
+        // 2. Recover confirmed debt if debtRecoveredAmount > 0
+        if (settlement.debtRecoveredAmount > 0) {
+          const openDebts = await tx.sellerOutstanding.findMany({
+            where: { sellerId: settlement.sellerId, status: { in: ['OPEN', 'PARTIALLY_PAID'] } },
+            orderBy: { createdAt: 'asc' },
+          });
+
+          let unrecovered = settlement.debtRecoveredAmount;
+          for (const debt of openDebts) {
+            if (unrecovered <= 0) break;
+            const toPay = Math.min(unrecovered, debt.remainingAmount);
+            const newPaid = debt.paidAmount + toPay;
+            const newRemaining = debt.remainingAmount - toPay;
+            const newStatus = newRemaining <= 0.001 ? 'PAID' : 'PARTIALLY_PAID';
+
+            await tx.sellerOutstanding.update({
+              where: { id: debt.id },
+              data: {
+                paidAmount: newPaid,
+                remainingAmount: Math.max(0, newRemaining),
+                status: newStatus,
+              },
+            });
+
+            await tx.debtRecoveryAllocation.create({
+              data: {
+                sellerId: settlement.sellerId,
+                settlementId: settlement.id,
+                outstandingId: debt.id,
+                amount: toPay,
+                currency: settlement.currency,
+                recoveredFrom: 'SETTLEMENT',
+                transactionRef: settlement.settlementNumber,
+                notes: `استقطاع سداد مديونية تلقائي من تسوية الطلبات #${settlement.settlementNumber}`,
+              },
+            });
+
+            const sellerBal = await tx.sellerBalance.findUnique({
+              where: { sellerId: settlement.sellerId },
+            });
+            if (sellerBal) {
+              await tx.sellerTransaction.create({
+                data: {
+                  sellerBalanceId: sellerBal.id,
+                  amount: toPay,
+                  type: 'OUTSTANDING_PAYMENT',
+                  referenceId: settlement.id,
+                  description: `سداد مديونية عبر تسوية #${settlement.settlementNumber} (${toPay} ${settlement.currency})`,
+                },
+              });
+
+              await tx.sellerBalance.update({
+                where: { id: sellerBal.id },
+                data: {
+                  outstandingCommission: { decrement: toPay },
+                },
+              });
+            }
+
+            unrecovered -= toPay;
+          }
+        }
+
+        // 3. Credit remaining payable settlement to seller available balance
+        if (settlement.payableSettlementAmount > 0) {
+          const balance = await tx.sellerBalance.findUnique({
+            where: { sellerId: settlement.sellerId },
+          });
+          if (balance) {
+            await tx.sellerBalance.update({
+              where: { id: balance.id },
+              data: {
+                availableBalance: { increment: settlement.payableSettlementAmount },
+              },
+            });
+
+            await tx.sellerTransaction.create({
+              data: {
+                sellerBalanceId: balance.id,
+                amount: settlement.payableSettlementAmount,
+                type: 'CREDIT',
+                referenceId: settlement.id,
+                description: `إيداع صافي أرباح تسوية مبيعات #${settlement.settlementNumber} (بعد استقطاع الاحتياطي والمديونيات)`,
+              },
+            });
+          }
+        }
+
+        // 4. Update settlement status
+        const updatedSettlement = await tx.settlement.update({
+          where: { id: input.settlementId },
+          data: updateData,
+          include: {
+            items: true,
+            seller: { include: { stores: true } },
+          },
+        });
+
+        // 5. Re-evaluate restrictions
+        await SellerFinancialRiskService.evaluateAndApplyRestrictions(tx, settlement.sellerId);
+
+        return updatedSettlement;
+      });
     }
+
     if (input.notes) updateData.notes = input.notes;
 
     return await prisma.settlement.update({

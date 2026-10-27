@@ -149,8 +149,37 @@ export class CustomerActionCenterService {
         });
       }
 
-      // B. Email Verification: Email exists but user unverified
-      if (user.email && !user.isVerified) {
+      // B. Email Verification or Linking
+      const isPlaceholderEmail =
+        typeof user.email === 'string' &&
+        (user.email.endsWith('@social.souqna.ye') ||
+         user.email.endsWith('@facebook.com') ||
+         user.email.startsWith('facebook_') ||
+         user.email.trim() === '');
+
+      if (isPlaceholderEmail) {
+        actions.push({
+          id: `act_link_email_${user.id}`,
+          type: CustomerActionType.VERIFY_EMAIL,
+          category: CustomerActionCategory.SECURITY,
+          priority: CustomerActionPriority.MEDIUM,
+          status: CustomerActionStatus.PENDING,
+          titleAr: 'ربط بريد إلكتروني',
+          titleEn: 'Link Your Email Address',
+          descriptionAr: 'اربط بريدك الإلكتروني لتأمين حسابك وتلقي الفواتير وإشعارات الطلبات.',
+          descriptionEn: 'Link an email address to secure your account and receive receipts.',
+          icon: 'mail',
+          ctaLabelAr: 'ربط الآن',
+          ctaLabelEn: 'Link Now',
+          deepLink: '/profile/email',
+          dismissible: true,
+          snoozable: true,
+          requiresAction: true,
+          deduplicationKey: 'LINK_EMAIL',
+          metadata: {},
+          createdAt: user.createdAt.toISOString(),
+        });
+      } else if (user.email && !user.isVerified) {
         actions.push({
           id: `act_verify_email_${user.id}`,
           type: CustomerActionType.VERIFY_EMAIL,

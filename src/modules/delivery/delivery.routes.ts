@@ -203,9 +203,26 @@ router.post('/quote', authenticate, async (req: Request, res: Response, next: Ne
     });
     if (!address) throw new AppError('Address not found or does not belong to you', 404);
 
+    const rawSellerMethodOverrides = (req.body.sellerDeliveryMethods && typeof req.body.sellerDeliveryMethods === 'object')
+      ? req.body.sellerDeliveryMethods
+      : {};
+
+    const enrichedSellerOrders = sellerOrders.map((so: any) => {
+      const customMethod = so.deliveryMethod || rawSellerMethodOverrides[so.sellerId];
+      const isSellerExpress = typeof so.isExpress === 'boolean'
+        ? so.isExpress
+        : (customMethod?.toLowerCase() === 'express' || isExpress);
+      return {
+        sellerId: so.sellerId,
+        storeId: so.storeId,
+        deliveryMethod: customMethod || deliveryMethod,
+        isExpress: isSellerExpress,
+      };
+    });
+
     const result = await deliveryQuoteService.createQuote({
       customerAddressId,
-      sellerOrders,
+      sellerOrders: enrichedSellerOrders,
       deliveryMethod,
       isExpress,
       deliveryScheduleType,

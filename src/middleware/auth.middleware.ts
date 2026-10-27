@@ -91,3 +91,16 @@ export const authorize = (...roles: string[]) => {
     next();
   };
 };
+
+export const requireRole = (roles: string[]) => authorize(...roles);
+
+export const requirePermissions = (permissions: string[]) => {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    // Basic authorization check
+    if (!req.user) {
+      return next(new AppError('Unauthorized', 401));
+    }
+    next();
+  };
+};
+

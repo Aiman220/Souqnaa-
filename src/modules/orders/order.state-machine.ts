@@ -407,6 +407,10 @@ export class OrderStateMachine {
                 status: isOrderFullyRefunded ? PaymentStatus.REFUNDED : PaymentStatus.PARTIALLY_REFUNDED,
               },
             });
+
+            if (isSingleSubOrder || allOthersTerminated) {
+              await OrderStateMachine.releasePromotionsAndVouchersOnCancellation(tx, sellerOrder.orderId);
+            }
           }
         }
       } else if (targetStatusStr === 'DELIVERED') {
@@ -1436,6 +1440,13 @@ export class OrderStateMachine {
         console.error('[Rewards] Failed to reverse/refund coins on order cancellation:', err);
       }
 
+      // SOUQNAA Promotions & Vouchers Reversal on Order Cancellation
+      try {
+        await OrderStateMachine.releasePromotionsAndVouchersOnCancellation(prisma, order.id);
+      } catch (err) {
+        console.error('[Promotions] Failed to release promotions on direct cancellation:', err);
+      }
+
       // SOUQNAA Customer Membership & VIP Tiers update on direct cancellation
       if (order.userId) {
         try {
@@ -1451,5 +1462,74 @@ export class OrderStateMachine {
     }
 
     return result.updatedOrder;
+  }
+
+  /**
+   * Release promotion usages and customer vouchers when an unconfirmed order is cancelled/rejected.
+   */
+  static async releasePromotionsAndVouchersOnCancellation(tx: any, orderId: string) {
+    try {
+      // 1. Release PromotionUsage
+      const usages = await tx.promotionUsage.findMany({
+        where: { orderId, status: 'CONSUMED' },
+      });
+
+      for (const usage of usages) {
+        await tx.promotionUsage.update({
+          where: { id: usage.id },
+          data: { status: 'CANCELLED' },
+        });
+
+        // If it was first order promotion with platform subsidy, restore consumedBudget
+        if (usage.promotionType === 'FIRST_ORDER_FREE_SHIPPING' && usage.platformSubsidy > 0) {
+          const activeConfig = await tx.firstOrderFreeShippingConfig.findFirst({
+            orderBy: { createdAt: 'asc' },
+          });
+          if (activeConfig) {
+            await tx.firstOrderFreeShippingConfig.update({
+              where: { id: activeConfig.id },
+              data: {
+                consumedBudget: Math.max(0, activeConfig.consumedBudget - usage.platformSubsidy),
+              },
+            });
+          }
+        }
+      }
+
+      // 2. Release CustomerVoucher and decrement Voucher usageCount
+      const redemptions = await tx.voucherRedemption.findMany({
+        where: { orderId },
+      });
+
+      for (const r of redemptions) {
+        // Restore CustomerVoucher
+        const custVoucher = await tx.customerVoucher.findFirst({
+          where: { voucherId: r.voucherId, customerId: r.customerId, status: 'USED' },
+        });
+        if (custVoucher) {
+          await tx.customerVoucher.update({
+            where: { id: custVoucher.id },
+            data: {
+              status: 'CLAIMED',
+              usageCount: Math.max(0, custVoucher.usageCount - 1),
+            },
+          });
+        }
+
+        // Decrement Voucher usageCount
+        const vRec = await tx.voucher.findUnique({ where: { id: r.voucherId } });
+        if (vRec && vRec.usageCount > 0) {
+          await tx.voucher.update({
+            where: { id: r.voucherId },
+            data: {
+              usageCount: { decrement: 1 },
+              ...(vRec.status === 'DEPLETED' ? { status: 'ACTIVE' } : {}),
+            },
+          });
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[OrderStateMachine] Warning releasing promotions/vouchers for order ${orderId}:`, err.message);
+    }
   }
 }

@@ -129,12 +129,12 @@ export class VoucherValidationService {
 
     // 4. Customer-specific validations (if user logged in)
     if (customerId) {
-      // First order only check
+      // First order only check (only confirmed/qualifying prior orders count)
       if (voucher.firstOrderOnly) {
         const orderCount = await prisma.order.count({
           where: {
             userId: customerId,
-            status: { notIn: ['CANCELLED_BY_CUSTOMER', 'CANCELLED_BY_SELLER', 'CANCELLED_BY_ADMIN'] },
+            status: { in: ['CONFIRMED', 'PROCESSING', 'READY_TO_SHIP', 'SHIPPED', 'DELIVERED'] },
           },
         });
         if (orderCount > 0) {
@@ -185,20 +185,7 @@ export class VoucherValidationService {
       }
     }
 
-    // 5. Minimum Order Amount Check
-    if (voucher.minimumOrderAmount && subtotal < voucher.minimumOrderAmount) {
-      return {
-        isValid: false,
-        eligibleItems: [],
-        eligibleAmount: 0,
-        error: new VoucherValidationError(
-          VoucherErrorCode.VOUCHER_MINIMUM_ORDER_NOT_MET,
-          `Minimum order of ${voucher.minimumOrderAmount} ${voucher.currency} required`
-        ),
-      };
-    }
-
-    // 6. Free Shipping Eligibility Check
+    // 5. Free Shipping Eligibility Check
     if (voucher.voucherType === 'FREE_SHIPPING') {
       if (shippingFee <= 0) {
         return {
@@ -210,12 +197,13 @@ export class VoucherValidationService {
       }
     }
 
-    // 7. Filter items by scope (Seller, Store, Product, Category)
+    // 6. Filter items by scope (Seller, Store, Product, Category)
     const eligibleItems = this.filterEligibleItems(voucher, items);
+    const isSellerScoped = voucher.scopeType === 'SELLER' || voucher.scopeType === 'STORE';
 
-    if (eligibleItems.length === 0 && voucher.voucherType !== 'FREE_SHIPPING') {
+    if (eligibleItems.length === 0 && (voucher.voucherType !== 'FREE_SHIPPING' || isSellerScoped)) {
       const scopeError =
-        voucher.scopeType === 'SELLER' || voucher.scopeType === 'STORE'
+        isSellerScoped
           ? VoucherErrorCode.VOUCHER_SELLER_NOT_ELIGIBLE
           : voucher.scopeType === 'CATEGORY'
           ? VoucherErrorCode.VOUCHER_CATEGORY_NOT_ELIGIBLE
@@ -229,11 +217,27 @@ export class VoucherValidationService {
       };
     }
 
-    // 8. Calculate eligible subtotal
+    // 7. Calculate eligible subtotal
     const eligibleAmount = eligibleItems.reduce((sum, item) => {
       const price = item.unitPrice;
       return sum + price * item.quantity;
     }, 0);
+
+    // 8. Minimum Order Amount Check:
+    // For seller/store-scoped vouchers, evaluate against seller's items subtotal in the cart.
+    // For platform/cart-scoped vouchers, evaluate against the whole cart subtotal.
+    const relevantSubtotal = isSellerScoped ? eligibleAmount : subtotal;
+    if (voucher.minimumOrderAmount && relevantSubtotal < voucher.minimumOrderAmount) {
+      return {
+        isValid: false,
+        eligibleItems,
+        eligibleAmount,
+        error: new VoucherValidationError(
+          VoucherErrorCode.VOUCHER_MINIMUM_ORDER_NOT_MET,
+          `Minimum order of ${voucher.minimumOrderAmount} ${voucher.currency} required${isSellerScoped ? ' for this seller' : ''}`
+        ),
+      };
+    }
 
     // 9. Minimum Eligible Amount Check
     if (voucher.minimumEligibleAmount && eligibleAmount < voucher.minimumEligibleAmount) {

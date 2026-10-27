@@ -26,6 +26,7 @@ import { NotificationEventFactory } from '../../notifications/events/domain-even
 import { notificationDispatcher } from '../../notifications/services/notification-dispatcher';
 import { TaxEngine } from '../../tax/tax.service';
 import { MembershipEligibilityService } from '../../membership/membership-eligibility.service';
+import { SellerFinancialRiskService } from '../../commission/seller-financial-risk.service';
 
 export interface CreateRefundInput {
   orderId: string;
@@ -184,12 +185,7 @@ export class RefundService {
         );
       }
 
-      // Synchronize Order and SellerOrder status to RETURN_REQUESTED (Awaiting seller review)
-      await tx.order.update({
-        where: { id: order.id },
-        data: { status: OrderStatus.RETURN_REQUESTED },
-      });
-
+      // Synchronize target SellerOrder status to RETURN_REQUESTED
       if (sellerOrderId) {
         await tx.sellerOrder.update({
           where: { id: sellerOrderId },
@@ -199,6 +195,32 @@ export class RefundService {
         await tx.sellerOrder.updateMany({
           where: { orderId: order.id },
           data: { status: SellerOrderStatus.RETURN_REQUESTED },
+        });
+      }
+
+      // Check whether ALL active seller orders are now in return/refund/terminal state
+      const allSuborders = await tx.sellerOrder.findMany({
+        where: { orderId: order.id },
+        select: { id: true, status: true },
+      });
+      const allReturnOrTerminal = allSuborders.every((so: any) =>
+        [
+          SellerOrderStatus.RETURN_REQUESTED,
+          SellerOrderStatus.RETURN_APPROVED,
+          SellerOrderStatus.RETURNED,
+          SellerOrderStatus.REFUND_PENDING,
+          SellerOrderStatus.REFUNDED,
+          SellerOrderStatus.CANCELLED_BY_CUSTOMER,
+          SellerOrderStatus.CANCELLED_BY_SELLER,
+          SellerOrderStatus.REJECTED_BY_SELLER,
+          SellerOrderStatus.CANCELLED_BY_ADMIN,
+        ].includes(so.status)
+      );
+
+      if (allReturnOrTerminal) {
+        await tx.order.update({
+          where: { id: order.id },
+          data: { status: OrderStatus.RETURN_REQUESTED },
         });
       }
 
@@ -230,7 +252,7 @@ export class RefundService {
       });
 
       return req;
-    });
+    }, { maxWait: 10000, timeout: 25000 });
 
     // Notify seller and customer via centralized SOUQNAA Notification Platform
     try {
@@ -347,16 +369,36 @@ export class RefundService {
         include: { items: true, sellerDecisions: true, statusHistory: true, order: true },
       });
 
-      // Synchronize order and sellerOrder status to RETURN_APPROVED
-      await tx.order.update({
-        where: { id: refund.orderId },
-        data: { status: OrderStatus.RETURN_APPROVED },
-      });
-
+      // Synchronize target sellerOrder status to RETURN_APPROVED
       if (refund.sellerOrderId) {
         await tx.sellerOrder.update({
           where: { id: refund.sellerOrderId },
           data: { status: SellerOrderStatus.RETURN_APPROVED },
+        });
+      }
+
+      // Only update parent order if ALL active suborders are approved/terminal
+      const allSubordersOnAccept = await tx.sellerOrder.findMany({
+        where: { orderId: refund.orderId },
+        select: { id: true, status: true },
+      });
+      const allSubordersApproved = allSubordersOnAccept.every((so: any) =>
+        [
+          SellerOrderStatus.RETURN_APPROVED,
+          SellerOrderStatus.RETURNED,
+          SellerOrderStatus.REFUND_PENDING,
+          SellerOrderStatus.REFUNDED,
+          SellerOrderStatus.CANCELLED_BY_CUSTOMER,
+          SellerOrderStatus.CANCELLED_BY_SELLER,
+          SellerOrderStatus.REJECTED_BY_SELLER,
+          SellerOrderStatus.CANCELLED_BY_ADMIN,
+        ].includes(so.status)
+      );
+
+      if (allSubordersApproved) {
+        await tx.order.update({
+          where: { id: refund.orderId },
+          data: { status: OrderStatus.RETURN_APPROVED },
         });
       }
 
@@ -405,7 +447,7 @@ export class RefundService {
       });
 
       return updated;
-    });
+    }, { maxWait: 10000, timeout: 25000 });
 
     notificationDispatcher.dispatch(
       NotificationEventFactory.refundEvent({
@@ -1368,24 +1410,35 @@ export class RefundService {
             data: { status: newStatus },
           });
 
-          // Synchronize Order and SellerOrder status to REFUNDED upon full refund
-          if (newStatus === PaymentStatus.REFUNDED) {
+          // Always synchronize the target sellerOrder to REFUNDED upon refund completion
+          if (refund.sellerOrderId) {
+            await tx.sellerOrder.update({
+              where: { id: refund.sellerOrderId },
+              data: { status: SellerOrderStatus.REFUNDED },
+            });
+          }
+
+          // Check if ALL active seller orders of this order are now refunded or terminal
+          const remainingSuborders = await tx.sellerOrder.findMany({
+            where: { orderId: refund.orderId },
+            select: { id: true, status: true },
+          });
+          const allFullyRefunded = remainingSuborders.every((so: any) =>
+            [
+              SellerOrderStatus.REFUNDED,
+              SellerOrderStatus.CANCELLED_BY_CUSTOMER,
+              SellerOrderStatus.CANCELLED_BY_SELLER,
+              SellerOrderStatus.REJECTED_BY_SELLER,
+              SellerOrderStatus.CANCELLED_BY_ADMIN,
+            ].includes(so.status)
+          );
+
+          if (allFullyRefunded || newStatus === PaymentStatus.REFUNDED) {
             await tx.order.update({
               where: { id: refund.orderId },
               data: { status: OrderStatus.REFUNDED },
             });
-
-            if (refund.sellerOrderId) {
-              await tx.sellerOrder.update({
-                where: { id: refund.sellerOrderId },
-                data: { status: SellerOrderStatus.REFUNDED },
-              });
-            } else {
-              await tx.sellerOrder.updateMany({
-                where: { orderId: refund.orderId },
-                data: { status: SellerOrderStatus.REFUNDED },
-              });
-            }
+          }
 
             await tx.returnRequest.updateMany({
               where: {
@@ -1414,7 +1467,6 @@ export class RefundService {
             });
           }
         }
-      }
 
       // 5. Notify customer
       await tx.notification.create({
@@ -1451,6 +1503,23 @@ export class RefundService {
       await this.adjustSellerSettlement(refund, approvedAmount, tx);
     } else {
       // Destination 3: ORIGINAL_PAYMENT_METHOD, BANK_TRANSFER, etc.
+      const orderPayment = refund.orderId ? await tx.payment.findUnique({ where: { orderId: refund.orderId } }) : null;
+      if (orderPayment && orderPayment.method === PaymentMethodType.CASH_ON_DELIVERY) {
+        // Automatically credit customer wallet for COD refunds
+        await CustomerWalletService.creditRefund(
+          {
+            refundId: refund.id,
+            customerId: refund.customerId,
+            amount: approvedAmount,
+            currency: refund.currency || 'YER',
+            orderNumber: refund.order?.orderNumber || refund.orderId,
+            refundNumber: refund.refundNumber,
+            adminUserId,
+          },
+          tx
+        );
+      }
+
       // 1. Adjust Seller Settlement immediately upon refund commitment
       await this.adjustSellerSettlement(refund, approvedAmount, tx);
 
@@ -1470,20 +1539,29 @@ export class RefundService {
           toStatus: RefundStatus.REFUND_COMPLETED,
           changedBy: adminUserId || refund.customerId,
           actorType: adminUserId ? RefundActorType.ADMIN : RefundActorType.SYSTEM,
-          reason: 'اعتماد الاسترداد المالي وإعادة قيد المبالغ على حساب المتجر',
+          reason: orderPayment?.method === PaymentMethodType.CASH_ON_DELIVERY
+            ? 'اعتماد الاسترداد المالي للطلب نقداً عند الاستلام وإيداع المبلغ في محفظة العميل'
+            : 'اعتماد الاسترداد المالي وإعادة قيد المبالغ على حساب المتجر',
         },
       });
 
-      // 3. Update payment and order statuses if exists
-      if (refund.orderId) {
-        await tx.payment.updateMany({
-          where: { orderId: refund.orderId },
-          data: { status: PaymentStatus.REFUNDED },
+      // 3. Update payment and order statuses accurately (partial vs full)
+      if (refund.orderId && orderPayment) {
+        const completedRefunds = await tx.refundRequest.findMany({
+          where: {
+            orderId: refund.orderId,
+            status: RefundStatus.REFUND_COMPLETED,
+          },
+          select: { approvedAmount: true },
         });
+        const totalRefunded = completedRefunds.reduce((sum: number, r: { approvedAmount: number | null }) => sum + (r.approvedAmount || 0), 0);
+        const newPaymentStatus = totalRefunded >= (orderPayment.amount - 0.01)
+          ? PaymentStatus.REFUNDED
+          : PaymentStatus.PARTIALLY_REFUNDED;
 
-        await tx.order.update({
-          where: { id: refund.orderId },
-          data: { status: OrderStatus.REFUNDED },
+        await tx.payment.update({
+          where: { id: orderPayment.id },
+          data: { status: newPaymentStatus },
         });
 
         if (refund.sellerOrderId) {
@@ -1491,10 +1569,26 @@ export class RefundService {
             where: { id: refund.sellerOrderId },
             data: { status: SellerOrderStatus.REFUNDED },
           });
-        } else {
-          await tx.sellerOrder.updateMany({
-            where: { orderId: refund.orderId },
-            data: { status: SellerOrderStatus.REFUNDED },
+        }
+
+        const remainingSuborders = await tx.sellerOrder.findMany({
+          where: { orderId: refund.orderId },
+          select: { id: true, status: true },
+        });
+        const allFullyRefunded = remainingSuborders.every((so: any) =>
+          [
+            SellerOrderStatus.REFUNDED,
+            SellerOrderStatus.CANCELLED_BY_CUSTOMER,
+            SellerOrderStatus.CANCELLED_BY_SELLER,
+            SellerOrderStatus.REJECTED_BY_SELLER,
+            SellerOrderStatus.CANCELLED_BY_ADMIN,
+          ].includes(so.status)
+        );
+
+        if (allFullyRefunded || newPaymentStatus === PaymentStatus.REFUNDED) {
+          await tx.order.update({
+            where: { id: refund.orderId },
+            data: { status: OrderStatus.REFUNDED },
           });
         }
       }
@@ -1722,5 +1816,16 @@ export class RefundService {
         }),
       },
     });
+
+    // Authoritatively re-evaluate seller financial restrictions & risk tiers post-transaction
+    if (refund.sellerId) {
+      setImmediate(async () => {
+        try {
+          await SellerFinancialRiskService.evaluateAndApplyRestrictions(prisma, refund.sellerId);
+        } catch (err) {
+          console.error('[Refund] Error evaluating seller financial restrictions post-refund:', err);
+        }
+      });
+    }
   }
 }

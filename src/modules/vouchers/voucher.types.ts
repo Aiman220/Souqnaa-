@@ -183,6 +183,8 @@ export interface SellerCartBreakdown {
   platformDiscount: number;
   sellerVoucher?: any | null;
   netSubtotal: number;
+  shippingDiscount?: number;
+  shippingFundingType?: 'PLATFORM' | 'SELLER';
 }
 
 export interface ItemDiscountAllocation {

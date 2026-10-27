@@ -71,6 +71,7 @@ import {
   remoteConfigPublicRoutes,
   remoteConfigAdminRoutes,
 } from './modules/remote-config/remote-config.routes';
+import sellerFinancialRiskAdminRoutes from './modules/admin/seller-financial-risk.routes';
 import taxRoutes, { taxAdminRoutes } from './modules/tax/tax.routes';
 import { sellerStatementsRouter, adminStatementsRouter } from './modules/statements/statement.routes';
 import { sellerAnalyticsRouter, adminAnalyticsRouter, analyticsRouter } from './modules/analytics/analytics.routes';
@@ -535,6 +536,9 @@ export const createApp = (): Application => {
 
   app.use(`${p}/admin`, adminRoutes);
   app.use('/admin', adminRoutes);
+  // Authoritative Seller Financial Risk & Reserves Engine
+  app.use(`${p}/admin/finance/risk`, sellerFinancialRiskAdminRoutes);
+  app.use(`${p}/admin/financial-risk`, sellerFinancialRiskAdminRoutes);
   app.use(`${p}/upload`, uploadRoutes);
   app.use(`${p}/storage`, storageRoutes);
   app.use(`${p}/follows`, followRoutes);

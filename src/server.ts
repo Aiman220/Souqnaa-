@@ -10,6 +10,7 @@ import { RecommendationJobs } from './modules/recommendations/jobs/recommendatio
 import { RewardsScheduler } from './services/jobs/rewards.job';
 import { NotificationScheduler } from './modules/notifications/services/notification-scheduler';
 import { CartAbandonmentJob } from './services/jobs/cart-abandonment.job';
+import { SellerReserveScheduler } from './services/jobs/seller-reserve.job';
 import { prisma } from './database/prisma';
 import { redis } from './database/redis';
 
@@ -45,6 +46,9 @@ const startServer = async () => {
 
     // Initialize SOUQNA Cart Abandonment Reminder Engine
     CartAbandonmentJob.start(5);
+
+    // Initialize SOUQNA Seller Financial Risk Reserve & Invariant Reconciliation Worker
+    SellerReserveScheduler.start(60 * 60 * 1000); // Hourly check for 30-day mature releases
 
     server.listen(config.port, () => {
       console.log(`

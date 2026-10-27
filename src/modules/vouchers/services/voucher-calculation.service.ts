@@ -18,10 +18,25 @@ export class VoucherCalculationService {
     customerId?: string;
     items: CartEvaluationItem[];
     shippingFee?: number;
+    sellerDeliveryFees?: Record<string, number> | Array<{ sellerId: string; deliveryFee: number }>;
     vouchers: any[];
     currency?: string;
   }): Promise<VoucherCalculationResult> {
-    const { customerId, items, shippingFee = 0, vouchers, currency = config.marketplace.currency || 'YER' } = params;
+    const { customerId, items, shippingFee = 0, sellerDeliveryFees, vouchers, currency = config.marketplace.currency || 'YER' } = params;
+
+    // Build seller delivery map if provided
+    const sellerDeliveryMap = new Map<string, number>();
+    if (sellerDeliveryFees) {
+      if (Array.isArray(sellerDeliveryFees)) {
+        for (const it of sellerDeliveryFees) {
+          sellerDeliveryMap.set(it.sellerId, it.deliveryFee);
+        }
+      } else {
+        for (const [sId, fee] of Object.entries(sellerDeliveryFees)) {
+          sellerDeliveryMap.set(sId, fee);
+        }
+      }
+    }
 
     // 1. Group items by seller
     const sellerMap = new Map<string, CartEvaluationItem[]>();
@@ -242,17 +257,55 @@ export class VoucherCalculationService {
     // 6. Free Shipping Voucher Calculation
     const shippingVoucher = stackResult.stack.freeShippingVoucher;
     if (shippingVoucher && shippingFee > 0) {
-      appliedVouchers.push(shippingVoucher);
-      let shipDiscount = shippingFee;
-      if (shippingVoucher.maximumShippingDiscount && shipDiscount > shippingVoucher.maximumShippingDiscount) {
-        shipDiscount = shippingVoucher.maximumShippingDiscount;
-      }
-      totalShippingDiscount = Math.min(shipDiscount, shippingFee);
+      const isSellerScoped =
+        (shippingVoucher.scopeType === 'SELLER' || shippingVoucher.scopeType === 'STORE') &&
+        (shippingVoucher.sellerId || shippingVoucher.ownerId);
+      const targetSellerId = isSellerScoped ? (shippingVoucher.sellerId || shippingVoucher.ownerId) : null;
 
-      if (shippingVoucher.fundingType === 'PLATFORM') {
-        platformFunding += totalShippingDiscount;
-      } else {
-        sellerFunding += totalShippingDiscount;
+      let eligibleShippingFee = shippingFee;
+      if (targetSellerId) {
+        eligibleShippingFee = sellerDeliveryMap.get(targetSellerId) ?? 0;
+      }
+
+      if (eligibleShippingFee > 0) {
+        appliedVouchers.push(shippingVoucher);
+        let shipDiscount = eligibleShippingFee;
+        if (shippingVoucher.maximumShippingDiscount && shipDiscount > shippingVoucher.maximumShippingDiscount) {
+          shipDiscount = shippingVoucher.maximumShippingDiscount;
+        }
+        totalShippingDiscount = Math.min(shipDiscount, eligibleShippingFee);
+
+        const fundingType = (shippingVoucher.fundingType || (isSellerScoped ? 'SELLER' : 'PLATFORM')) as 'PLATFORM' | 'SELLER';
+        if (fundingType === 'PLATFORM') {
+          platformFunding += totalShippingDiscount;
+        } else {
+          sellerFunding += totalShippingDiscount;
+        }
+
+        // Apportion shipping discount across sellerBreakdowns
+        if (targetSellerId) {
+          if (sellerBreakdowns[targetSellerId]) {
+            sellerBreakdowns[targetSellerId].shippingDiscount = totalShippingDiscount;
+            sellerBreakdowns[targetSellerId].shippingFundingType = fundingType;
+          }
+        } else {
+          // Platform-wide voucher: distribute pro-rata across sellers based on delivery fees
+          let remainingShipDiscount = totalShippingDiscount;
+          const sellerEntries = Object.entries(sellerBreakdowns);
+          for (let i = 0; i < sellerEntries.length; i++) {
+            const [sId, breakdown] = sellerEntries[i];
+            const isLast = i === sellerEntries.length - 1;
+            const sDelivery = sellerDeliveryMap.get(sId) ?? (shippingFee / sellerEntries.length);
+            const ratio = shippingFee > 0 ? sDelivery / shippingFee : 1 / sellerEntries.length;
+            const sShipDiscount = isLast
+              ? remainingShipDiscount
+              : Math.min(sDelivery, Math.round(totalShippingDiscount * ratio * 100) / 100);
+            remainingShipDiscount = Math.max(0, remainingShipDiscount - sShipDiscount);
+
+            breakdown.shippingDiscount = sShipDiscount;
+            breakdown.shippingFundingType = fundingType;
+          }
+        }
       }
     }
 

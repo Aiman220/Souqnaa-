@@ -1,6 +1,6 @@
 import { prisma } from '../../../database/prisma';
 import { AppError } from '../../../middleware/error.middleware';
-import { RefundStatus, OrderStatus, PaymentStatus, DisputeStatus, ReturnRequestStatus } from '@prisma/client';
+import { RefundStatus, OrderStatus, PaymentStatus, DisputeStatus, ReturnRequestStatus, SellerOrderStatus } from '@prisma/client';
 
 export interface RefundableItemCheck {
   orderItemId: string;
@@ -174,23 +174,19 @@ export class RefundEligibilityService {
     // 4. Determine eligibility reason
     let orderIneligibleReason: string | undefined;
 
-    if (!isDelivered) {
+    const hasAnyDeliveredSuborder = isDelivered || order.sellerOrders.some((so) => so.status === 'DELIVERED');
+
+    if (!hasAnyDeliveredSuborder) {
       orderIneligibleReason =
-        'يمكن طلب الاسترجاع فقط بعد توصيل الطلب واستلامه بالكامل (DELIVERED).';
+        'يمكن طلب الاسترجاع فقط بعد توصيل الطلب أو أحد متاجره واستلامه (DELIVERED).';
     } else if (hasPriorDispute) {
       const isResolved =
         existingDispute.status === DisputeStatus.RESOLVED ||
         existingDispute.status === DisputeStatus.REJECTED;
-      orderIneligibleReason = isResolved
-        ? 'تم البت في النزاع والتحكيم لهذا الطلب مسبقاً، ولا يمكن تقديم طلب استرجاع جديد.'
-        : 'يوجد نزاع مفتوح قيد المتابعة والتحكيم لدى المنصة لهذا الطلب حالياً.';
-    } else if (hasPriorRefund) {
-      orderIneligibleReason =
-        'تم تقديم طلب استرجاع لهذا الطلب مسبقاً. يُسمح بتقديم طلب استرجاع واحد فقط لكل طلب وفقاً لسياسة المنصة.';
-    } else if (hasPriorReturn) {
-      orderIneligibleReason =
-        'تم تقديم طلب استرجاع لهذا الطلب مسبقاً ولا يمكن تقديم أكثر من طلب واحد.';
-    } else if (refundWindowEnabled && !isWithinWindow) {
+      if (!isResolved) {
+        orderIneligibleReason = 'يوجد نزاع مفتوح قيد المتابعة والتحكيم لدى المنصة لهذا الطلب حالياً.';
+      }
+    } else if (refundWindowEnabled && !isWithinWindow && !order.sellerOrders.some((so) => so.status === 'DELIVERED')) {
       orderIneligibleReason =
         'انتهت مدة طلب الاسترجاع أو الاسترداد لهذا الطلب (REFUND_WINDOW_EXPIRED). الحد الأقصى المسموح به هو 14 يوماً من تاريخ التوصيل.';
     }
@@ -202,6 +198,7 @@ export class RefundEligibilityService {
     let totalOrderRemaining = 0;
 
     for (const sellerOrder of order.sellerOrders) {
+      const isSuborderDelivered = isDelivered || sellerOrder.status === 'DELIVERED';
       for (const item of sellerOrder.items) {
         const itemRefundRequests = existingRefunds.flatMap((r) =>
           r.items.filter((ri) => ri.orderItemId === item.id)
@@ -232,15 +229,21 @@ export class RefundEligibilityService {
         const remainingQty = Math.max(0, item.quantity - alreadyRefundedQty - pendingRefundQty);
         const remainingAmount = Math.max(0, effectiveTotal - alreadyRefundedAmount - pendingRefundAmount);
 
-        let itemEligible = !orderIneligibleReason && remainingQty > 0 && remainingAmount > 0;
-        let itemReason: string | undefined = orderIneligibleReason;
+        let itemEligible = isSuborderDelivered && remainingQty > 0 && remainingAmount > 0;
+        let itemReason: string | undefined;
 
-        if (pendingRefundQty > 0) {
+        if (!isSuborderDelivered) {
+          itemEligible = false;
+          itemReason = 'لم يتم توصيل منتجات هذا المتجر بعد. يمكن طلب الاسترجاع بعد تسليم الشحنة.';
+        } else if (pendingRefundQty > 0) {
           itemEligible = false;
           itemReason = 'يوجد طلب استرجاع نشط قيد المراجعة حالياً لهذا المنتج';
         } else if (remainingQty <= 0 || remainingAmount <= 0) {
           itemEligible = false;
           itemReason = 'تم استرداد كامل قيمة هذا المنتج مسبقاً';
+        } else if (refundWindowEnabled && !isWithinWindow && deliveredAtDate) {
+          itemEligible = false;
+          itemReason = 'انتهت مدة طلب الاسترجاع لهذا المنتج (14 يوماً من تاريخ التوصيل)';
         }
 
         totalSuccessfulRefunded += alreadyRefundedAmount;

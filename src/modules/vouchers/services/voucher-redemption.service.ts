@@ -15,9 +15,10 @@ export class VoucherRedemptionService {
     currency: string;
     vouchers: any[];
     allocations: ItemDiscountAllocation[];
+    shippingDiscount?: number;
     idempotencyKey?: string;
   }): Promise<void> {
-    const { tx, orderId, customerId, currency, vouchers, allocations, idempotencyKey } = params;
+    const { tx, orderId, customerId, currency, vouchers, allocations, shippingDiscount = 0, idempotencyKey } = params;
     const now = new Date();
 
     for (const voucher of vouchers) {
@@ -73,7 +74,10 @@ export class VoucherRedemptionService {
 
       // Calculate total discount from this voucher across allocations
       const voucherAllocations = allocations.filter((a) => a.voucherId === voucher.id);
-      const voucherDiscountAmount = voucherAllocations.reduce((sum, a) => sum + a.discountAmount, 0);
+      let voucherDiscountAmount = voucherAllocations.reduce((sum, a) => sum + a.discountAmount, 0);
+      if (voucher.voucherType === 'FREE_SHIPPING' && voucherDiscountAmount === 0 && shippingDiscount > 0) {
+        voucherDiscountAmount = shippingDiscount;
+      }
 
       // 3. Atomically increment usage count
       const updatedVoucher = await tx.voucher.update({

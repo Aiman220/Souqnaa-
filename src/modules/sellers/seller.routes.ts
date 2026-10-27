@@ -2957,14 +2957,22 @@ router.get('/me/balance', async (req: Request, res: Response, next: NextFunction
       id: seller.balance?.id,
       sellerId: seller.id,
       availableBalance: standing.availableBalance,
+      withdrawableBalance: standing.withdrawableBalance,
       pendingBalance: standing.pendingBalance,
       withdrawnBalance: standing.withdrawnBalance,
       outstandingCommission: standing.outstandingCommission,
+      totalReservedBalance: standing.totalReservedBalance,
+      unsecuredExposure: standing.unsecuredExposure,
       isFinanciallyRestricted: standing.isFinanciallyRestricted,
       financialRestrictionLevel: standing.financialRestrictionLevel,
       financialRestrictionReason: standing.financialRestrictionReason,
       financialRestrictedAt: standing.financialRestrictedAt,
       cashOnDeliveryEnabled: standing.cashOnDeliveryEnabled,
+      newOrdersPaused: standing.newOrdersPaused,
+      withdrawalsRestricted: standing.withdrawalsRestricted,
+      riskTier: standing.riskTier,
+      reservePercentage: standing.reservePercentage,
+      reserveHoldingDays: standing.reserveHoldingDays,
       amountNeededToUnblock: standing.amountNeededToUnblock,
       thresholds: standing.thresholds,
       currency: standing.currency,
@@ -2984,6 +2992,102 @@ router.get('/me/financial-standing', async (req: Request, res: Response, next: N
     const seller = await getSeller(req.user!.userId);
     const standing = await SellerFinancialRiskService.getSellerFinancialStanding(seller.id);
     ResponseUtil.success(res, standing);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── GET /me/finance/reserves ───────────────────────────────────────────────────
+router.get('/me/finance/reserves', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const seller = await getSeller(req.user!.userId);
+    const page = parseInt(req.query.page as string, 10) || 1;
+    const limit = parseInt(req.query.limit as string, 10) || 20;
+
+    const [total, reserves] = await Promise.all([
+      prisma.sellerReserveAllocation.count({ where: { sellerId: seller.id } }),
+      prisma.sellerReserveAllocation.findMany({
+        where: { sellerId: seller.id },
+        include: {
+          settlement: { select: { settlementNumber: true, periodStart: true, periodEnd: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ]);
+
+    ResponseUtil.success(res, {
+      items: reserves,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── GET /me/finance/debt-recoveries ────────────────────────────────────────────
+router.get('/me/finance/debt-recoveries', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const seller = await getSeller(req.user!.userId);
+    const page = parseInt(req.query.page as string, 10) || 1;
+    const limit = parseInt(req.query.limit as string, 10) || 20;
+
+    const [total, recoveries] = await Promise.all([
+      prisma.debtRecoveryAllocation.count({ where: { sellerId: seller.id } }),
+      prisma.debtRecoveryAllocation.findMany({
+        where: { sellerId: seller.id },
+        include: {
+          settlement: { select: { settlementNumber: true } },
+          outstanding: { select: { sourceType: true, sourceReference: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ]);
+
+    ResponseUtil.success(res, {
+      items: recoveries,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── POST /me/account-closure-request ──────────────────────────────────────────
+router.post('/me/account-closure-request', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const seller = await getSeller(req.user!.userId);
+    const check = await SellerFinancialRiskService.checkAccountClosureEligibility(seller.id);
+
+    if (!check.eligible) {
+      throw new AppError(
+        `لا يمكن تقديم طلب إغلاق الحساب حالياً نظراً لوجود التزامات مالية أو تشغيلية قائمة:\n${check.reasons.join('\n')}`,
+        400
+      );
+    }
+
+    // Record closure pending status
+    await prisma.seller.update({
+      where: { id: seller.id },
+      data: {
+        status: 'SUSPENDED',
+        verificationNotes: `طلب إغلاق حساب مقدم من البائع بتاريخ ${new Date().toISOString()}`,
+      },
+    });
+
+    ResponseUtil.success(res, {
+      message: 'تم التحقق من خلو الالتزامات المالية وتقديم طلب الإغلاق بنجاح',
+      check,
+    });
   } catch (error) {
     next(error);
   }
@@ -3369,8 +3473,23 @@ router.post('/me/withdrawals', async (req: Request, res: Response, next: NextFun
       throw new AppError(`الحد الأدنى لطلب السحب هو ${minWithdrawal} ريال يمني`, 400);
     }
 
-    if (!seller.balance || seller.balance.availableBalance < withdrawAmount) {
-      throw new AppError('الرصيد المتاح غير كافٍ لطلب هذا المبلغ', 400);
+    if (!seller.balance) {
+      throw new AppError('محفظة البائع غير موجودة', 400);
+    }
+
+    const standing = await SellerFinancialRiskService.getSellerFinancialStanding(seller.id);
+    if (standing.withdrawalsRestricted || standing.isFinanciallyRestricted) {
+      throw new AppError(
+        `سحب الأرباح مقيد حالياً بسبب التزامات مالية معلقة (${standing.financialRestrictionReason || 'تقييد مالي نشط'}). يرجى تسوية المديونية أولاً`,
+        403
+      );
+    }
+
+    if (withdrawAmount > standing.withdrawableBalance) {
+      throw new AppError(
+        `المبلغ المطلوب (${withdrawAmount} ${standing.currency}) يتجاوز الرصيد القابل للسحب (${standing.withdrawableBalance} ${standing.currency}). يرجى ملاحظة أن هناك (${standing.totalReservedBalance} ${standing.currency}) محجوزة كاحتياطي مالي نظامي`,
+        400
+      );
     }
 
     let finalProvider = walletProvider;
@@ -3407,7 +3526,7 @@ router.post('/me/withdrawals', async (req: Request, res: Response, next: NextFun
       finalMasked = adapter.maskWalletNumber(finalFull);
     }
 
-    const currency = (seller.balance.currency && seller.balance.currency !== 'SAR') ? seller.balance.currency : 'YER';
+    const currency = (seller.balance?.currency && seller.balance?.currency !== 'SAR') ? seller.balance?.currency : 'YER';
 
     const withdrawal = await prisma.$transaction(async (tx) => {
       await tx.sellerBalance.update({

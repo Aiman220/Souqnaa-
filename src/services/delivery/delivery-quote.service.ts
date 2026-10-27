@@ -14,6 +14,8 @@ import { deliverySlotService } from './delivery-slot.service';
 export interface SellerOrderInput {
   sellerId: string;
   storeId: string;
+  deliveryMethod?: string;
+  isExpress?: boolean;
 }
 
 export interface StoreAvailabilityStatus {
@@ -221,7 +223,7 @@ export class DeliveryQuoteService {
     // 2. For each seller, get store coordinates + evaluate availability + calculate quote
     const storesStatusList: StoreAvailabilityStatus[] = [];
 
-    const sellerQuotePromises = sellerOrders.map(async ({ sellerId, storeId }) => {
+    const sellerQuotePromises = sellerOrders.map(async ({ sellerId, storeId, deliveryMethod: itemDeliveryMethod, isExpress: itemExpress }) => {
       let store = storeId ? await prisma.store.findUnique({ where: { id: storeId } }) : null;
       if (!store && sellerId) {
         store = await prisma.store.findFirst({ where: { sellerId } });
@@ -247,8 +249,12 @@ export class DeliveryQuoteService {
       storeLat = storeLat ?? 15.3500;
       storeLng = storeLng ?? 44.2000;
 
+      const sellerIsExpress = typeof itemExpress === 'boolean'
+        ? itemExpress
+        : (itemDeliveryMethod?.toLowerCase() === 'express' || isExpress);
+
       const options: DeliveryFeeOptions = {
-        isExpress,
+        isExpress: sellerIsExpress,
         discountAmount,
         discountFundedBy,
         slotFee, // applied per seller quote
@@ -338,6 +344,9 @@ export class DeliveryQuoteService {
       timeSlotNameAr?: string;
       timeSlotStart?: string;
       timeSlotEnd?: string;
+      actualCustomerDeliveryFee?: number;
+      promotionalDiscount?: number;
+      discountFundedBy?: string;
     },
   ): Promise<void> {
     if (!quote.deliveryAvailable) return;
@@ -351,6 +360,16 @@ export class DeliveryQuoteService {
       timeSlotEnd: scheduleInfo.timeSlotEnd,
     } : {};
 
+    const effectiveFee = scheduleInfo?.actualCustomerDeliveryFee !== undefined
+      ? scheduleInfo.actualCustomerDeliveryFee
+      : quote.deliveryFee;
+
+    const effectiveDiscount = scheduleInfo?.promotionalDiscount !== undefined && scheduleInfo.promotionalDiscount > 0
+      ? (quote.deliveryDiscount + scheduleInfo.promotionalDiscount)
+      : quote.deliveryDiscount;
+
+    const effectiveFundedBy = scheduleInfo?.discountFundedBy || quote.discountFundedBy;
+
     await prisma.deliveryQuoteSnapshot.upsert({
       where: { sellerOrderId },
       update: {
@@ -362,9 +381,9 @@ export class DeliveryQuoteService {
         weightFee: quote.weightFee,
         expressFee: quote.expressFee,
         slotFee: quote.slotFee ?? 0,
-        deliveryDiscount: quote.deliveryDiscount,
-        discountFundedBy: quote.discountFundedBy as any,
-        deliveryFee: quote.deliveryFee,
+        deliveryDiscount: effectiveDiscount,
+        discountFundedBy: effectiveFundedBy as any,
+        deliveryFee: effectiveFee,
         currency: quote.currency,
         pricingVersion: quote.pricingVersion,
         isExpress: quote.isExpress,
@@ -382,9 +401,9 @@ export class DeliveryQuoteService {
         weightFee: quote.weightFee,
         expressFee: quote.expressFee,
         slotFee: quote.slotFee ?? 0,
-        deliveryDiscount: quote.deliveryDiscount,
-        discountFundedBy: quote.discountFundedBy as any,
-        deliveryFee: quote.deliveryFee,
+        deliveryDiscount: effectiveDiscount,
+        discountFundedBy: effectiveFundedBy as any,
+        deliveryFee: effectiveFee,
         currency: quote.currency,
         pricingVersion: quote.pricingVersion,
         isExpress: quote.isExpress,
@@ -393,14 +412,17 @@ export class DeliveryQuoteService {
       },
     });
 
-    // Update SellerOrder with distance snapshot (§16)
+    // Update SellerOrder with distance snapshot and authoritative customer charge (§16)
+    // Never overwrite an already discounted customer delivery charge with undiscounted quote.deliveryFee
     await prisma.sellerOrder.update({
       where: { id: sellerOrderId },
       data: {
         distanceKm: quote.distanceKm,
         durationMinutes: quote.durationMinutes,
         deliveryZoneName: quote.zoneName,
-        deliveryFee: quote.deliveryFee,
+        ...(scheduleInfo?.actualCustomerDeliveryFee !== undefined
+          ? { deliveryFee: scheduleInfo.actualCustomerDeliveryFee }
+          : {}),
       },
     });
   }

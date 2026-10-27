@@ -7,6 +7,14 @@ import { AppError } from '../../middleware/error.middleware';
 const router = Router();
 router.use(authenticate);
 
+const formatAddressResponse = (addr: any) => {
+  if (!addr) return addr;
+  return {
+    ...addr,
+    country: 'اليمن',
+  };
+};
+
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const addresses = await prisma.address.findMany({
@@ -18,7 +26,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       },
       orderBy: { isDefault: 'desc' },
     });
-    ResponseUtil.success(res, addresses);
+    ResponseUtil.success(res, addresses.map(formatAddressResponse));
   } catch (error) {
     next(error);
   }
@@ -99,7 +107,7 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
       include: { city: true, district: true, neighborhood: true },
     });
 
-    ResponseUtil.created(res, address, 'Address added successfully');
+    ResponseUtil.created(res, formatAddressResponse(address), 'Address added successfully');
   } catch (error) {
     next(error);
   }
@@ -113,7 +121,7 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
       include: { city: true, district: true, neighborhood: true },
     });
     if (!address) throw new AppError('Address not found', 404);
-    ResponseUtil.success(res, address);
+    ResponseUtil.success(res, formatAddressResponse(address));
   } catch (error) {
     next(error);
   }
@@ -152,7 +160,7 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
       include: { city: true, district: true, neighborhood: true },
     });
 
-    ResponseUtil.success(res, address, 'Address updated successfully');
+    ResponseUtil.success(res, formatAddressResponse(address), 'Address updated successfully');
   } catch (error) {
     next(error);
   }
@@ -183,7 +191,7 @@ const setDefaultHandler = async (req: Request, res: Response, next: NextFunction
       data: { isDefault: true },
     });
 
-    ResponseUtil.success(res, address, 'Default address set');
+    ResponseUtil.success(res, formatAddressResponse(address), 'Default address set');
   } catch (error) {
     next(error);
   }

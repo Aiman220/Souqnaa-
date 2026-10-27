@@ -285,6 +285,10 @@ export class SocketService {
         }
 
         const token = rawToken.replace(/^Bearer\s+/i, '').trim();
+        if (!token) {
+          socket.data.user = { userId: `guest_${socket.id}`, role: 'GUEST' };
+          return next();
+        }
         try {
           const payload = JwtUtil.verifyAccessToken(token);
           socket.data.user = payload;

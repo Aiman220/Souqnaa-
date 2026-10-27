@@ -816,82 +816,9 @@ async function main() {
     }
   }
 
-  // 15. Seed Vouchers for Mega Campaign & Platform
-  console.log('🎟️ Seeding Vouchers for Mega Campaign & Platform...');
-  const vouchersList = [
-    {
-      code: 'MEGA50',
-      normalizedCode: 'MEGA50',
-      name: 'قسيمة خصم 50 ريال للحملة الكبرى',
-      description: 'خصم فوري 50 ريال على أي طلب بقيمة 200 ريال أو أكثر ضمن مهرجان الحملات',
-      discountType: 'FIXED' as const,
-      discountValue: 50,
-      minimumOrderAmount: 200,
-      currency: 'YER',
-      isClaimable: true,
-      startAt: new Date(now.getTime() - 86400000),
-      endAt: new Date(now.getTime() + 30 * 86400000),
-      status: 'ACTIVE' as const,
-    },
-    {
-      code: 'MEGA20',
-      normalizedCode: 'MEGA20',
-      name: 'خصم 20% لكافة المتاجر المشاركة',
-      description: 'خصم 20% بحد أقصى 10,000 ريال يمني على كافة منتجات حملة 11.11',
-      discountType: 'PERCENTAGE' as const,
-      discountValue: 20,
-      maximumDiscount: 10000,
-      minimumOrderAmount: 500,
-      currency: 'YER',
-      isClaimable: true,
-      startAt: new Date(now.getTime() - 86400000),
-      endAt: new Date(now.getTime() + 30 * 86400000),
-      status: 'ACTIVE' as const,
-    },
-    {
-      code: 'FREESHIP',
-      normalizedCode: 'FREESHIP',
-      name: 'قسيمة شحن مجاني للمهرجان',
-      description: 'شحن مجاني على كافة الطلبات المؤهلة طوال فترة الحملة التسويقية',
-      voucherType: 'FREE_SHIPPING' as const,
-      discountType: 'FIXED' as const,
-      discountValue: 0,
-      freeShipping: true,
-      minimumOrderAmount: 300,
-      currency: 'YER',
-      isClaimable: true,
-      startAt: new Date(now.getTime() - 86400000),
-      endAt: new Date(now.getTime() + 30 * 86400000),
-      status: 'ACTIVE' as const,
-    },
-    {
-      code: 'SUPER10',
-      normalizedCode: 'SUPER10',
-      name: 'خصم إضافي 10% للمتسوقين',
-      description: 'وفّر 10% إضافية عند الدفع الإلكتروني أو الشراء الفوري',
-      discountType: 'PERCENTAGE' as const,
-      discountValue: 10,
-      minimumOrderAmount: 100,
-      currency: 'YER',
-      isClaimable: true,
-      startAt: new Date(now.getTime() - 86400000),
-      endAt: new Date(now.getTime() + 30 * 86400000),
-      status: 'ACTIVE' as const,
-    },
-  ];
+  // 15. Platform & Store Vouchers (Clean state: only show user/seller/admin created vouchers)
+  console.log('🎟️ Platform & Store vouchers: Clean slate preserved. Only dynamically created vouchers will be displayed.');
 
-  for (const v of vouchersList) {
-    await prisma.voucher.upsert({
-      where: { normalizedCode: v.normalizedCode },
-      update: {
-        status: 'ACTIVE',
-        isClaimable: true,
-        startAt: v.startAt,
-        endAt: v.endAt,
-      },
-      create: v,
-    });
-  }
 
   // 16. Seed & Activate Mega Campaign Promotional Banners across all Placements
   await seedMegaBanners();

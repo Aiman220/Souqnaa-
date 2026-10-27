@@ -272,7 +272,7 @@ export class SocialAuthenticationService {
           lastName: profile.lastName,
           avatar: profile.avatarUrl,
           role: assignedRole,
-          isVerified: profile.emailVerified,
+          isVerified: profile.email ? profile.emailVerified : true,
           isActive: true,
         },
       });
@@ -486,16 +486,23 @@ export class SocialAuthenticationService {
   }
 
   private sanitizeUser(user: any) {
+    const isPlaceholderEmail =
+      typeof user.email === 'string' &&
+      (user.email.endsWith('@social.souqna.ye') ||
+       user.email.endsWith('@facebook.com') ||
+       user.email.startsWith('facebook_'));
+
     return {
       id: user.id,
-      email: user.email,
+      email: isPlaceholderEmail ? '' : user.email,
       phone: user.phone || '',
       firstName: user.firstName,
       lastName: user.lastName,
       role: user.role.toLowerCase(),
-      isVerified: user.isVerified,
+      isVerified: isPlaceholderEmail ? true : user.isVerified,
       isActive: user.isActive,
       avatar: user.avatar,
+      hasLinkedEmail: !isPlaceholderEmail && Boolean(user.email),
       createdAt: user.createdAt.toISOString ? user.createdAt.toISOString() : String(user.createdAt),
     };
   }

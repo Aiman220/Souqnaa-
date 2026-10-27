@@ -15,6 +15,30 @@ import { config } from '../../config';
 import { MembershipEligibilityService } from '../membership/membership-eligibility.service';
 
 export class AuthController {
+  private static sanitizeUser(user: any, extra: Record<string, any> = {}) {
+    const isPlaceholderEmail =
+      typeof user.email === 'string' &&
+      (user.email.endsWith('@social.souqna.ye') ||
+       user.email.endsWith('@facebook.com') ||
+       user.email.startsWith('facebook_') ||
+       user.email.startsWith('google_'));
+
+    return {
+      id: user.id,
+      email: isPlaceholderEmail ? '' : user.email,
+      phone: user.phone || '',
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role.toLowerCase(),
+      isVerified: isPlaceholderEmail ? true : user.isVerified,
+      isActive: user.isActive,
+      avatar: user.avatar,
+      hasLinkedEmail: !isPlaceholderEmail && Boolean(user.email),
+      createdAt: user.createdAt?.toISOString ? user.createdAt.toISOString() : String(user.createdAt),
+      ...extra,
+    };
+  }
+
   static async register(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const { email, password, firstName, lastName, phone, role, storeName, crNumber } = req.body;
@@ -98,18 +122,7 @@ export class AuthController {
       // Save refresh token in Redis
       await redis.set(`refresh:${user.id}`, tokens.refreshToken, 7 * 24 * 3600);
 
-      const sanitizedUser = {
-        id: user.id,
-        email: user.email,
-        phone: user.phone || '',
-        firstName: user.firstName,
-        lastName: user.lastName,
-        role: user.role.toLowerCase(),
-        isVerified: user.isVerified,
-        isActive: user.isActive,
-        avatar: user.avatar,
-        createdAt: user.createdAt.toISOString(),
-      };
+      const sanitizedUser = AuthController.sanitizeUser(user);
 
       // Centralized Notification Platform: Dispatch Welcome Email
       const locale = (req.headers['accept-language']?.includes('en') ? 'en' : 'ar') as 'ar' | 'en';
@@ -222,19 +235,9 @@ export class AuthController {
       // Rotate / store refresh token in Redis
       await redis.set(`refresh:${user.id}`, tokens.refreshToken, 7 * 24 * 3600);
 
-      const sanitizedUser = {
-        id: user.id,
-        email: user.email,
-        phone: user.phone || '',
-        firstName: user.firstName,
-        lastName: user.lastName,
-        role: user.role.toLowerCase(),
+      const sanitizedUser = AuthController.sanitizeUser(user, {
         adminRoles: adminRoles.length > 0 ? adminRoles : undefined,
-        isVerified: user.isVerified,
-        isActive: user.isActive,
-        avatar: user.avatar,
-        createdAt: user.createdAt.toISOString(),
-      };
+      });
 
       ResponseUtil.success(res, {
         accessToken: tokens.accessToken,
@@ -282,18 +285,7 @@ export class AuthController {
 
       await redis.set(`refresh:${user.id}`, newTokens.refreshToken, 7 * 24 * 3600);
 
-      const sanitizedUser = {
-        id: user.id,
-        email: user.email,
-        phone: user.phone || '',
-        firstName: user.firstName,
-        lastName: user.lastName,
-        role: user.role.toLowerCase(),
-        isVerified: user.isVerified,
-        isActive: user.isActive,
-        avatar: user.avatar,
-        createdAt: user.createdAt.toISOString(),
-      };
+      const sanitizedUser = AuthController.sanitizeUser(user);
 
       ResponseUtil.success(res, {
         accessToken: newTokens.accessToken,
@@ -435,20 +427,10 @@ export class AuthController {
         isPhoneVerified = phoneVerifiedInRedis === '1';
       }
 
-      const sanitizedUser = {
-        id: user.id,
-        email: user.email,
-        phone: user.phone || '',
-        firstName: user.firstName,
-        lastName: user.lastName,
-        role: user.role.toLowerCase(),
-        isVerified: user.isVerified,
+      const sanitizedUser = AuthController.sanitizeUser(user, {
         isPhoneVerified,
-        isActive: user.isActive,
-        avatar: user.avatar,
         membership: membershipSummary,
-        createdAt: user.createdAt.toISOString(),
-      };
+      });
 
       ResponseUtil.success(res, sanitizedUser);
     } catch (error) {
@@ -543,19 +525,9 @@ export class AuthController {
         isPhoneVerified = phoneVerifiedInRedis === '1';
       }
 
-      const sanitizedUser = {
-        id: updatedUser.id,
-        email: updatedUser.email,
-        phone: updatedUser.phone || '',
-        firstName: updatedUser.firstName,
-        lastName: updatedUser.lastName,
-        role: updatedUser.role.toLowerCase(),
-        isVerified: updatedUser.isVerified,
+      const sanitizedUser = AuthController.sanitizeUser(updatedUser, {
         isPhoneVerified,
-        isActive: updatedUser.isActive,
-        avatar: updatedUser.avatar,
-        createdAt: updatedUser.createdAt.toISOString(),
-      };
+      });
 
       ResponseUtil.success(res, sanitizedUser, 'تم تحديث الملف الشخصي بنجاح');
     } catch (error) {
@@ -660,18 +632,7 @@ export class AuthController {
       // Save refresh token in Redis
       await redis.set(`refresh:${user.id}`, tokens.refreshToken, 7 * 24 * 3600);
 
-      const sanitizedUser = {
-        id: user.id,
-        email: user.email,
-        phone: user.phone || '',
-        firstName: user.firstName,
-        lastName: user.lastName,
-        role: user.role.toLowerCase(),
-        isVerified: user.isVerified,
-        isActive: user.isActive,
-        avatar: user.avatar,
-        createdAt: user.createdAt.toISOString(),
-      };
+      const sanitizedUser = AuthController.sanitizeUser(user);
 
       ResponseUtil.success(res, {
         accessToken: tokens.accessToken,
@@ -908,8 +869,15 @@ export class AuthController {
   }
 
   static async socialCallback(req: Request, res: Response, next: NextFunction): Promise<void> {
+    const providerParam = String(req.params.provider || '').toLowerCase();
+    let oauthState: {
+      sessionKey: string;
+      role: SocialAccountType;
+      platform: string;
+      provider: string;
+    } | null = null;
+
     try {
-      const providerParam = String(req.params.provider || '').toLowerCase();
       const { code, state, error, error_description } = req.query as {
         code?: string;
         state?: string;
@@ -922,10 +890,28 @@ export class AuthController {
         return;
       }
 
-      const oauthState = await AuthController.verifyOAuthState(state);
+      oauthState = await AuthController.verifyOAuthState(state);
       if (!oauthState) {
         res.status(400).send(renderOAuthResultHtml(false, 'انتهت صلاحية جلسة تسجيل الدخول، يرجى المحاولة مجدداً'));
         return;
+      }
+
+      // 1. If this session was ALREADY successfully verified (e.g. browser refreshed or duplicate request):
+      const existingVerified = await redis.get(`social_session_verified:${oauthState.sessionKey}`);
+      if (existingVerified) {
+        try {
+          const result = JSON.parse(existingVerified);
+          res.send(renderOAuthResultHtml(
+            true,
+            'تم تسجيل الدخول بنجاح!',
+            oauthState.sessionKey,
+            result.accessToken,
+            result.refreshToken,
+            oauthState.role,
+            providerParam
+          ));
+          return;
+        } catch (_) {}
       }
 
       try {
@@ -939,14 +925,58 @@ export class AuthController {
           JSON.stringify({ status: isCancelled ? 'cancelled' : 'error', error: error_description || error }),
           300
         );
-        res.send(renderOAuthResultHtml(false, isCancelled ? 'تم إلغاء عملية تسجيل الدخول' : (error_description || error), oauthState.sessionKey));
+        res.send(renderOAuthResultHtml(
+          false,
+          isCancelled ? 'تم إلغاء عملية تسجيل الدخول' : (error_description || error),
+          oauthState.sessionKey,
+          undefined,
+          undefined,
+          oauthState.role,
+          providerParam
+        ));
         return;
       }
 
       if (!code) {
-        res.status(400).send(renderOAuthResultHtml(false, 'لم يتم استلام رمز التفويض من المزود'));
+        res.status(400).send(renderOAuthResultHtml(
+          false,
+          'لم يتم استلام رمز التفويض من المزود',
+          oauthState.sessionKey,
+          undefined,
+          undefined,
+          oauthState.role,
+          providerParam
+        ));
         return;
       }
+
+      // 2. Concurrency check on the authorization code to prevent racing duplicate requests
+      const codeLockKey = `oauth_code_in_flight:${code}`;
+      try {
+        const inFlight = await redis.get(codeLockKey);
+        if (inFlight) {
+          // Another concurrent request is currently exchanging this code. Wait for it to complete.
+          for (let i = 0; i < 6; i++) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            const cached = await redis.get(`social_session_verified:${oauthState.sessionKey}`);
+            if (cached) {
+              const result = JSON.parse(cached);
+              res.send(renderOAuthResultHtml(
+                true,
+                'تم تسجيل الدخول بنجاح!',
+                oauthState.sessionKey,
+                result.accessToken,
+                result.refreshToken,
+                oauthState.role,
+                providerParam
+              ));
+              return;
+            }
+          }
+        } else {
+          await redis.set(codeLockKey, '1', 15);
+        }
+      } catch (_) {}
 
       // Compute callbackUrl matching authorize
       const protocol = req.headers['x-forwarded-proto'] || req.protocol;
@@ -984,6 +1014,22 @@ export class AuthController {
           const errData = (await tokenRes.json().catch(() => ({}))) as any;
           console.error('[Facebook OAuth Token Error]', errData);
           const fbMsg = errData?.error?.message || errData?.message || 'فشل تبادل رمز الدخول مع مزود Facebook.';
+          if (typeof fbMsg === 'string' && fbMsg.includes('authorization code has been used')) {
+            const cached = await redis.get(`social_session_verified:${oauthState.sessionKey}`);
+            if (cached) {
+              const result = JSON.parse(cached);
+              res.send(renderOAuthResultHtml(
+                true,
+                'تم تسجيل الدخول بنجاح!',
+                oauthState.sessionKey,
+                result.accessToken,
+                result.refreshToken,
+                oauthState.role,
+                'facebook'
+              ));
+              return;
+            }
+          }
           throw new AppError(`فشل مع مزود Facebook: ${fbMsg}`, 401);
         }
 
@@ -1005,18 +1051,47 @@ export class AuthController {
       await redis.set(
         `social_session:${oauthState.sessionKey}`,
         JSON.stringify({ status: 'success', data: result }),
-        300
+        1800
       );
       await redis.set(
         `social_session_verified:${oauthState.sessionKey}`,
         JSON.stringify(result),
-        300
+        1800
       );
 
-      res.send(renderOAuthResultHtml(true, 'تم تسجيل الدخول بنجاح!', oauthState.sessionKey, result.accessToken, result.refreshToken, oauthState.role));
+      res.send(renderOAuthResultHtml(
+        true,
+        'تم تسجيل الدخول بنجاح!',
+        oauthState.sessionKey,
+        result.accessToken,
+        result.refreshToken,
+        oauthState.role,
+        providerParam
+      ));
     } catch (error: any) {
       console.error('[Social OAuth Callback Error]', error);
-      res.status(500).send(renderOAuthResultHtml(false, error.message || 'حدث خطأ أثناء إتمام تسجيل الدخول'));
+      if (oauthState?.sessionKey) {
+        try {
+          const currentSession = await redis.get(`social_session:${oauthState.sessionKey}`);
+          const parsed = currentSession ? JSON.parse(currentSession) : null;
+          if (parsed?.status !== 'success') {
+            await redis.set(
+              `social_session:${oauthState.sessionKey}`,
+              JSON.stringify({ status: 'error', error: error.message || 'حدث خطأ أثناء إتمام تسجيل الدخول' }),
+              300
+            );
+          }
+        } catch (_) {}
+      }
+      res.status(500).send(renderOAuthResultHtml(
+        false,
+        error.message || 'حدث خطأ أثناء إتمام تسجيل الدخول',
+        oauthState?.sessionKey,
+        undefined,
+        undefined,
+        oauthState?.role,
+        providerParam
+      ));
     }
   }
 
@@ -1189,27 +1264,31 @@ function renderOAuthResultHtml(
   sessionKey?: string,
   accessToken?: string,
   refreshToken?: string,
-  role?: string
+  role?: string,
+  provider?: string
 ): string {
   const isSeller = role === 'SELLER';
   const scheme = isSeller ? 'souqnaa-seller' : 'souqnaa-customer';
-  let deepLink = `${scheme}://auth/callback`;
-  if (sessionKey) {
-    deepLink = `${scheme}://auth/callback?sessionKey=${encodeURIComponent(sessionKey)}&status=${success ? 'success' : 'error'}`;
-    if (accessToken) {
-      deepLink += `&token=${encodeURIComponent(accessToken)}`;
-    }
-    if (refreshToken) {
-      deepLink += `&refresh=${encodeURIComponent(refreshToken)}`;
-    }
-  }
+  const packageName = isSeller ? 'com.souqnaa.seller' : 'com.souqnaa.app';
+
+  const params = new URLSearchParams();
+  params.set('status', success ? 'success' : 'error');
+  if (provider) params.set('provider', provider.toLowerCase());
+  if (sessionKey) params.set('sessionKey', sessionKey);
+  if (accessToken) params.set('token', accessToken);
+  if (refreshToken) params.set('refresh', refreshToken);
+  if (message) params.set('message', message);
+
+  const queryString = params.toString();
+  const deepLink = `${scheme}://auth/callback?${queryString}`;
+  const intentLink = `intent://auth/callback?${queryString}#Intent;scheme=${scheme};package=${packageName};end;`;
 
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  ${success ? `<meta http-equiv="refresh" content="0; url=${deepLink}">` : ''}
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <title>سوقناا — ${success ? 'تم تسجيل الدخول' : 'تنبيه'}</title>
   <style>
     * { box-sizing: border-box; }
@@ -1226,17 +1305,17 @@ function renderOAuthResultHtml(
     }
     .card {
       background: white;
-      border-radius: 20px;
+      border-radius: 24px;
       padding: 36px 28px;
       text-align: center;
       max-width: 420px;
       width: 100%;
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01);
+      box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.02);
       border: 1px solid #E2E8F0;
     }
     .icon {
-      width: 64px;
-      height: 64px;
+      width: 72px;
+      height: 72px;
       background: ${success ? '#ECFDF5' : '#FEF2F2'};
       color: ${success ? '#10B981' : '#EF4444'};
       border-radius: 50%;
@@ -1244,46 +1323,116 @@ function renderOAuthResultHtml(
       align-items: center;
       justify-content: center;
       margin: 0 auto 20px;
-      font-size: 32px;
+      font-size: 34px;
       font-weight: bold;
     }
-    h1 { font-size: 20px; margin: 0 0 10px; color: #0F172A; font-weight: 700; }
-    p { font-size: 14px; color: #64748B; margin: 0 0 24px; line-height: 1.6; }
+    h1 { font-size: 21px; margin: 0 0 12px; color: #0F172A; font-weight: 700; }
+    p { font-size: 14px; color: #64748B; margin: 0 0 20px; line-height: 1.6; }
+    .status-badge {
+      display: inline-block;
+      font-size: 13px;
+      padding: 6px 14px;
+      border-radius: 20px;
+      background: ${success ? '#F0FDF4' : '#FEF2F2'};
+      color: ${success ? '#15803D' : '#B91C1C'};
+      margin-bottom: 24px;
+      font-weight: 600;
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); box-shadow: 0 4px 14px rgba(15, 118, 110, 0.25); }
+      50% { transform: scale(1.02); box-shadow: 0 6px 20px rgba(15, 118, 110, 0.4); }
+      100% { transform: scale(1); box-shadow: 0 4px 14px rgba(15, 118, 110, 0.25); }
+    }
     .btn {
       display: block;
-      background: ${success ? '#0F766E' : '#475569'};
+      background: ${success ? '#0F766E' : '#334155'};
       color: white;
       text-decoration: none;
-      padding: 14px 20px;
-      border-radius: 12px;
-      font-weight: 600;
-      font-size: 15px;
-      transition: background 0.2s;
+      padding: 16px 24px;
+      border-radius: 14px;
+      font-weight: 700;
+      font-size: 16px;
+      transition: all 0.2s;
+      cursor: pointer;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      animation: pulse 2.2s infinite ease-in-out;
     }
-    .btn:hover { background: ${success ? '#0D655E' : '#334155'}; }
+    .btn:hover { background: ${success ? '#0D655E' : '#1E293B'}; }
+    .btn:active { transform: scale(0.98); }
   </style>
 </head>
 <body>
   <div class="card">
     <div class="icon">${success ? '✓' : '!'}</div>
     <h1>${success ? 'تم تسجيل الدخول بنجاح!' : 'لم تكتمل عملية تسجيل الدخول'}</h1>
-    <p>${message}<br>${success ? 'جاري العودة إلى تطبيق سوقناا تلقائياً...' : 'يرجى العودة إلى التطبيق للمحاولة مجدداً.'}</p>
-    <a class="btn" href="${deepLink}" id="launchAppBtn">العودة إلى تطبيق سوقناا</a>
+    <p>${message}<br>${success ? 'جاري توجيهك إلى تطبيق سوقناا تلقائياً...' : 'يرجى العودة إلى التطبيق للمحاولة مجدداً.'}</p>
+    <div class="status-badge" id="statusNotice">${success ? 'جاري فتح التطبيق تلقائياً...' : 'اضغط على الزر أدناه للعودة للتطبيق'}</div>
+    <a class="btn" href="${intentLink}" id="launchAppBtn" target="_self" rel="noopener">العودة إلى تطبيق سوقناا</a>
   </div>
   <script>
-    try {
-      if (window.opener) {
-        window.opener.postMessage({ type: 'SOUQNA_OAUTH_RESULT', success: ${success}, sessionKey: '${sessionKey || ''}' }, window.location.origin);
-        setTimeout(function() { window.close(); }, 300);
+    (function() {
+      var isAndroid = /Android/i.test(navigator.userAgent);
+      var isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+      var targetUrl = isAndroid ? "${intentLink}" : "${deepLink}";
+      var fallbackUrl = "${deepLink}";
+
+      var btn = document.getElementById('launchAppBtn');
+      if (btn) {
+        btn.href = targetUrl;
+        // Do NOT preventDefault! Allow the native browser user gesture navigation to fire.
+        btn.addEventListener('click', function() {
+          try {
+            if (window.opener && window.opener !== window) {
+              window.opener.postMessage({
+                type: 'SOUQNA_OAUTH_RESULT',
+                success: ${success},
+                sessionKey: '${sessionKey || ''}',
+                token: '${accessToken || ''}'
+              }, '*');
+            }
+          } catch (_) {}
+        });
       }
-    } catch (_) {}
-    setTimeout(function() {
+
+      // 1. Post message immediately to opener if in a desktop/popup window
       try {
-        window.location.replace("${deepLink}");
-      } catch (_) {
-        window.location.href = "${deepLink}";
+        if (window.opener && window.opener !== window) {
+          window.opener.postMessage({
+            type: 'SOUQNA_OAUTH_RESULT',
+            success: ${success},
+            sessionKey: '${sessionKey || ''}',
+            token: '${accessToken || ''}'
+          }, '*');
+          setTimeout(function() {
+            try { window.close(); } catch (_) {}
+          }, 400);
+        }
+      } catch (_) {}
+
+      // 2. Automated redirect attempt
+      function doRedirect() {
+        try {
+          if (isAndroid) {
+            window.location.href = targetUrl;
+          } else {
+            window.location.href = fallbackUrl;
+          }
+        } catch (_) {}
       }
-    }, 100);
+
+      ${success ? `
+        // Attempt redirect immediately on page load
+        doRedirect();
+        setTimeout(doRedirect, 300);
+        setTimeout(function() {
+          try { window.location.href = fallbackUrl; } catch (_) {}
+        }, 900);
+      ` : `
+        // On error or cancelled, wait 1.2s to display feedback then attempt return
+        setTimeout(doRedirect, 1200);
+      `}
+    })();
   </script>
 </body>
 </html>`;

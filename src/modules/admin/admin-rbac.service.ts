@@ -52,6 +52,10 @@ export const SYSTEM_PERMISSIONS: PermissionDefinition[] = [
   { action: 'finance:withdrawals', description: 'الموافقة على طلبات السحب وتنفيذ الحوالات' },
   { action: 'finance:commissions', description: 'إدارة منظومة العمولات الرباعية والضرائب' },
   { action: 'tax:manage', description: 'إدارة محرك الضرائب، نسب القيمة المضافة والإعفاءات (Tax Engine)' },
+  { action: 'seller_financial_risk:view', description: 'عرض مؤشرات المخاطر المالية واحتياطيات التجار والانكشاف المالي' },
+  { action: 'seller_financial_risk:manage', description: 'تعديل سياسات المخاطر، نسب الاحتياطي، وتقييد/إلغاء تقييد البائعين' },
+  { action: 'seller_reserve:adjust', description: 'تعديل أو الإفراج الاستثنائي عن مبالغ الاحتياطي المالي للبائعين' },
+  { action: 'seller_debt:reconcile', description: 'إجراء مطابقة المديونيات وتسوية الفروقات المالية (Reconciliation)' },
 
   // Customer Support & Disputes
   { action: 'disputes:resolve', description: 'فض النزاعات واعتماد الاسترجاع المالي للعملاء' },
@@ -100,6 +104,10 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRole, string[]> = {
     'reports:view',
     'orders:view',
     'sellers:view',
+    'seller_financial_risk:view',
+    'seller_financial_risk:manage',
+    'seller_reserve:adjust',
+    'seller_debt:reconcile',
     'audit:view',
   ],
 

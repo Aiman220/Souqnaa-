@@ -58,7 +58,7 @@ export class NotificationTemplateService {
     ORDER_SHIPPED: {
       titleAr: 'تم شحن طلبك 🚀',
       titleEn: 'Your order has shipped 🚀',
-      bodyAr: 'طلبك رقم #{{orderNumber}} في طريقه إليك عبر {{carrierName}}.',
+      bodyAr: 'طلبك رقم #{{orderNumber}} في طريقه إليك {{carrierName}}.',
       bodyEn: 'Order #{{orderNumber}} has shipped with {{carrierName}}.',
       deepLinkPattern: 'souqnaa://orders/{{orderId}}',
     },
