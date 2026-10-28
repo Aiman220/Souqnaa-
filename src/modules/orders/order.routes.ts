@@ -2537,6 +2537,65 @@ router.post('/:id/read', async (req: Request, res: Response, next: NextFunction)
 // ==============================================================================
 // 2. LIST CUSTOMER ORDERS (GET /api/v1/orders)
 // ==============================================================================
+function resolveDeliveryMethodDetails(so: any, parentOrder?: any): {
+  deliveryMethodName: string;
+  deliveryMethodCode: string;
+  isExpress: boolean;
+  isScheduled: boolean;
+} {
+  const delivMethod = so?.deliveryMethod || parentOrder?.deliveryMethod;
+  const rawScheduleType = String(
+    so?.deliveryScheduleType ||
+    parentOrder?.deliveryScheduleType ||
+    so?.deliveryQuoteSnapshot?.deliveryScheduleType ||
+    parentOrder?.deliveryQuoteSnapshot?.deliveryScheduleType ||
+    ''
+  ).toUpperCase();
+  const isExpress =
+    so?.isExpress === true ||
+    so?.isExpressDelivery === true ||
+    so?.deliveryQuoteSnapshot?.isExpress === true ||
+    rawScheduleType === 'EXPRESS' ||
+    delivMethod?.code?.toLowerCase() === 'express';
+
+  const isScheduled =
+    rawScheduleType === 'SCHEDULED' ||
+    delivMethod?.code?.toLowerCase() === 'scheduled' ||
+    so?.deliveryQuoteSnapshot?.timeSlotNameAr != null ||
+    so?.deliveryTimeSlot != null ||
+    parentOrder?.deliveryTimeSlot != null;
+
+  let deliveryMethodName = '';
+  let deliveryMethodCode = delivMethod?.code || (isExpress ? 'express' : (isScheduled ? 'scheduled' : 'standard'));
+
+  if (delivMethod?.nameAr || delivMethod?.nameEn) {
+    deliveryMethodName = delivMethod.nameAr || delivMethod.nameEn || '';
+  } else if (isExpress) {
+    deliveryMethodName = 'توصيل سريع (خلال ساعات)';
+    deliveryMethodCode = 'express';
+  } else if (isScheduled) {
+    const slot =
+      so?.deliveryQuoteSnapshot?.timeSlotNameAr ||
+      so?.deliveryTimeSlot?.nameAr ||
+      parentOrder?.deliveryTimeSlot?.nameAr ||
+      (parentOrder?.slotBooking as any)?.timeSlot?.nameAr ||
+      '';
+    deliveryMethodName = slot ? `توصيل مجدول (${slot})` : 'توصيل مجدول';
+    deliveryMethodCode = 'scheduled';
+  } else if (delivMethod?.code === 'same_day') {
+    deliveryMethodName = 'توصيل نفس اليوم';
+    deliveryMethodCode = 'same_day';
+  } else if (delivMethod?.code === 'pickup') {
+    deliveryMethodName = 'استلام من المتجر';
+    deliveryMethodCode = 'pickup';
+  } else {
+    deliveryMethodName = 'توصيل قياسي';
+    deliveryMethodCode = 'standard';
+  }
+
+  return { deliveryMethodName, deliveryMethodCode, isExpress, isScheduled };
+}
+
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const page = req.query.page ? Math.max(1, parseInt(req.query.page as string, 10) || 1) : undefined;
@@ -2578,6 +2637,10 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
                   variant: { select: { id: true, image: true } },
                 },
               },
+              deliveryMethod: true,
+              deliveryQuoteSnapshot: true,
+              deliveryOrder: true,
+              statusHistory: { orderBy: { createdAt: 'asc' } },
               returnRequests: { orderBy: { createdAt: 'desc' } },
               refundRequests: {
                 include: { evidence: true, items: true, reason: true },
@@ -2586,6 +2649,9 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
             },
           },
           addressSnapshot: true,
+          deliveryMethod: true,
+          deliveryTimeSlot: true,
+          slotBooking: { include: { timeSlot: true } },
           payment: true,
           statusHistory: { orderBy: { createdAt: 'desc' } },
           cancellationRequests: { orderBy: { createdAt: 'desc' } },
@@ -2647,15 +2713,28 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
         if (so.id) matchIds.push(so.id);
         if (so.sellerOrderNumber) matchIds.push(so.sellerOrderNumber);
       }
-      const sellerOrdersEnriched = (order.sellerOrders || []).map((so) => ({
-        ...so,
-        items: (so.items || []).map((item: any) => ({
-          ...item,
-          productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
-        })),
-      }));
+      const sellerOrdersEnriched = (order.sellerOrders || []).map((so) => {
+        const details = resolveDeliveryMethodDetails(so, order);
+        return {
+          ...so,
+          deliveryScheduleType: (so as any).deliveryScheduleType || order.deliveryScheduleType || (details.isExpress ? 'EXPRESS' : (details.isScheduled ? 'SCHEDULED' : 'ASAP')),
+          deliveryDate: (so as any).deliveryDate || order.deliveryDate,
+          deliveryTimeSlotId: (so as any).deliveryTimeSlotId || order.deliveryTimeSlotId,
+          deliveryTimeSlot: (so as any).deliveryTimeSlot || (order as any).deliveryTimeSlot,
+          deliveryMethod: so.deliveryMethod || (order as any).deliveryMethod,
+          deliveryMethodName: details.deliveryMethodName,
+          deliveryMethodCode: details.deliveryMethodCode,
+          items: (so.items || []).map((item: any) => ({
+            ...item,
+            productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
+          })),
+        };
+      });
+      const parentDetails = resolveDeliveryMethodDetails(null, order);
       return {
         ...order,
+        deliveryMethodName: parentDetails.deliveryMethodName,
+        deliveryMethodCode: parentDetails.deliveryMethodCode,
         sellerOrders: sellerOrdersEnriched,
         disputes: disputes.filter((d) => matchIds.includes(d.orderId)),
         isUnread: matchIds.some((id) => unreadSet.has(id)),
@@ -2761,22 +2840,31 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
       }),
     ]);
 
-    const sellerOrdersWithDisputes = order.sellerOrders.map(so => ({
-      ...so,
-      deliveryScheduleType: (so as any).deliveryScheduleType || order.deliveryScheduleType,
-      deliveryDate: (so as any).deliveryDate || order.deliveryDate,
-      deliveryTimeSlotId: (so as any).deliveryTimeSlotId || order.deliveryTimeSlotId,
-      deliveryTimeSlot: (so as any).deliveryTimeSlot || (order as any).deliveryTimeSlot,
-      deliveryMethod: so.deliveryMethod || (order as any).deliveryMethod,
-      items: (so.items || []).map((item: any) => ({
-        ...item,
-        productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
-      })),
-      disputes: disputes.filter(d => d.sellerId === so.sellerId || !d.sellerId),
-    }));
+    const sellerOrdersWithDisputes = order.sellerOrders.map(so => {
+      const details = resolveDeliveryMethodDetails(so, order);
+      return {
+        ...so,
+        deliveryScheduleType: (so as any).deliveryScheduleType || order.deliveryScheduleType || (details.isExpress ? 'EXPRESS' : (details.isScheduled ? 'SCHEDULED' : 'ASAP')),
+        deliveryDate: (so as any).deliveryDate || order.deliveryDate,
+        deliveryTimeSlotId: (so as any).deliveryTimeSlotId || order.deliveryTimeSlotId,
+        deliveryTimeSlot: (so as any).deliveryTimeSlot || (order as any).deliveryTimeSlot,
+        deliveryMethod: so.deliveryMethod || (order as any).deliveryMethod,
+        deliveryMethodName: details.deliveryMethodName,
+        deliveryMethodCode: details.deliveryMethodCode,
+        items: (so.items || []).map((item: any) => ({
+          ...item,
+          productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
+        })),
+        disputes: disputes.filter(d => d.sellerId === so.sellerId || !d.sellerId),
+      };
+    });
+
+    const parentDetails = resolveDeliveryMethodDetails(null, order);
 
     ResponseUtil.success(res, {
       ...order,
+      deliveryMethodName: parentDetails.deliveryMethodName,
+      deliveryMethodCode: parentDetails.deliveryMethodCode,
       sellerOrders: sellerOrdersWithDisputes,
       disputes,
       isUnread: Boolean(unreadNotif),
