@@ -180,6 +180,45 @@ export class SocketService {
   public async handleUserOnline(userId: string): Promise<void> {
     if (!userId || userId.startsWith('guest_')) return;
     try {
+      const now = new Date();
+
+      // If user is a support agent / admin, update support presence in DB & Redis and broadcast
+      try {
+        const agent = await prisma.supportAgent.findUnique({
+          where: { adminUserId: userId },
+          include: { assignedConversations: { select: { id: true, conversationId: true } } },
+        });
+        if (agent) {
+          const newStatus = agent.status === SupportAgentStatus.OFFLINE ? SupportAgentStatus.ONLINE : agent.status;
+          await prisma.supportAgent.update({
+            where: { id: agent.id },
+            data: { online: true, status: newStatus, lastSeenAt: now },
+          });
+          await redis.set(`agent:${agent.id}:presence`, 'ONLINE', 60 * 60).catch(() => {});
+
+          const agentStatusData = {
+            agentId: agent.id,
+            adminUserId: userId,
+            displayName: agent.displayName,
+            status: newStatus,
+            online: true,
+          };
+
+          this.io.emit('support:agent:online', agentStatusData);
+          this.io.emit('support:agent:status_changed', agentStatusData);
+
+          // Emit to all conversations assigned to this agent
+          for (const ac of agent.assignedConversations) {
+            this.io.to(`conversation:${ac.conversationId}`).emit('support:agent:status_changed', agentStatusData);
+            if (ac.id !== ac.conversationId) {
+              this.io.to(`conversation:${ac.id}`).emit('support:agent:status_changed', agentStatusData);
+            }
+          }
+        }
+      } catch (agentErr) {
+        console.error(`[Socket.IO] handleUserOnline supportAgent error for ${userId}:`, agentErr);
+      }
+
       const memberships = await prisma.conversationMember.findMany({
         where: { userId },
         select: { conversationId: true },
@@ -222,6 +261,43 @@ export class SocketService {
       const now = new Date();
       this.userLastSeen.set(userId, now);
       await redis.set(`user:last_seen:${userId}`, now.toISOString(), 60 * 60 * 24 * 30).catch(() => {});
+
+      // If user is a support agent, update agent offline status in DB & Redis and broadcast
+      try {
+        const agent = await prisma.supportAgent.findUnique({
+          where: { adminUserId: userId },
+          include: { assignedConversations: { select: { id: true, conversationId: true } } },
+        });
+        if (agent) {
+          await prisma.supportAgent.update({
+            where: { id: agent.id },
+            data: { online: false, status: SupportAgentStatus.OFFLINE, lastSeenAt: now },
+          });
+          await redis.set(`agent:${agent.id}:presence`, 'OFFLINE', 60 * 60).catch(() => {});
+
+          const agentStatusData = {
+            agentId: agent.id,
+            adminUserId: userId,
+            displayName: agent.displayName,
+            status: 'OFFLINE',
+            online: false,
+            lastSeen: now.toISOString(),
+          };
+
+          this.io.emit('support:agent:offline', agentStatusData);
+          this.io.emit('support:agent:status_changed', agentStatusData);
+
+          // Emit to all conversations assigned to this agent
+          for (const ac of agent.assignedConversations) {
+            this.io.to(`conversation:${ac.conversationId}`).emit('support:agent:status_changed', agentStatusData);
+            if (ac.id !== ac.conversationId) {
+              this.io.to(`conversation:${ac.id}`).emit('support:agent:status_changed', agentStatusData);
+            }
+          }
+        }
+      } catch (agentErr) {
+        console.error(`[Socket.IO] handleUserOffline supportAgent error for ${userId}:`, agentErr);
+      }
 
       const memberships = await prisma.conversationMember.findMany({
         where: { userId },
@@ -502,7 +578,7 @@ export class SocketService {
             where: {
               OR: [{ id: conversationId }, { conversationId }],
             },
-            include: { ticket: true },
+            include: { ticket: true, assignedAgent: true },
           });
 
           if (supConv) {
@@ -782,6 +858,35 @@ export class SocketService {
                 this.emitToUser(member.userId, 'user:presence', myPresence);
               }
             }
+          }
+
+          // Emit assigned support agent presence to the joining socket
+          if (supConv?.assignedAgent) {
+            const agentUserId = supConv.assignedAgent.adminUserId;
+            const isAgentOnline = this.isUserOnline(agentUserId);
+            const agentStatus = isAgentOnline
+              ? (supConv.assignedAgent.status === SupportAgentStatus.OFFLINE ? SupportAgentStatus.ONLINE : supConv.assignedAgent.status)
+              : SupportAgentStatus.OFFLINE;
+
+            const agentPresencePayload = {
+              agentId: supConv.assignedAgent.id,
+              adminUserId: agentUserId,
+              status: agentStatus,
+              online: isAgentOnline,
+              conversationId: baseConvId,
+            };
+
+            socket.emit('support:agent:status_changed', agentPresencePayload);
+            socket.emit('user:presence', {
+              userId: agentUserId,
+              isOnline: isAgentOnline,
+              conversationId: baseConvId,
+            });
+            socket.emit(isAgentOnline ? 'user:online' : 'user:offline', {
+              userId: agentUserId,
+              isOnline: isAgentOnline,
+              conversationId: baseConvId,
+            });
           }
 
           // Notify other members in this conversation room that user joined/is online
@@ -1451,29 +1556,6 @@ export class SocketService {
             }, this.DISCONNECT_GRACE_PERIOD_MS);
             this.pendingDisconnectTimers.set(userId, timer);
           }
-
-          // If user was a support agent, update agent offline status in background
-          prisma.supportAgent.findUnique({ where: { adminUserId: userId } }).then((agent) => {
-            if (agent) {
-              const now = new Date();
-              prisma.supportAgent.update({
-                where: { id: agent.id },
-                data: { online: false, status: SupportAgentStatus.OFFLINE, lastSeenAt: now },
-              }).then(() => {
-                redis.set(`agent:${agent.id}:presence`, 'OFFLINE', 60);
-                this.io.emit('support:agent:offline', {
-                  agentId: agent.id,
-                  displayName: agent.displayName,
-                  lastSeen: now.toISOString(),
-                });
-                this.io.emit('support:agent:status_changed', {
-                  agentId: agent.id,
-                  status: 'OFFLINE',
-                  online: false,
-                });
-              }).catch(() => {});
-            }
-          }).catch(() => {});
         }
       });
     });

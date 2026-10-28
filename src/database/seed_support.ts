@@ -483,25 +483,31 @@ export async function seedSupportData() {
   // 6. Seed Comprehensive FAQs across multiple categories
   const faqDataByCat = [
     {
-      categoryNameAr: 'طلب استرجاع / استبدال',
+      categoryNameAr: 'أخرى / استفسار عام',
       faqs: [
         {
-          questionAr: 'كم يستغرق إرجاع المبلغ بعد الموافقة على الاسترجاع؟',
-          questionEn: 'How long does refund take after approval?',
-          answerAr: 'يتم إيداع المبلغ في محفظتك الإلكترونية على الفور، أو خلال 3-5 أيام عمل عند الإرجاع للبطاقة البنكية.',
-          answerEn: 'Refund is processed immediately to your wallet, or within 3-5 business days to card.',
+          questionAr: 'ما هي منصة سوقنا (SOUQNAA)؟',
+          questionEn: 'What is Souqnaa platform?',
+          answerAr: 'سوقناا هي منصة تجارة إلكترونية متعددة التجار متكاملة، تجمع نخبة من المتاجر والبائعين المعتمدين مع المتسوقين في بيئة رقمية آمنة ومريحة، وتوفر خيارات شحن سريعة ووسائل دفع متعددة وموثوقة.',
+          answerEn: 'Souqnaa is a unified multi-vendor e-commerce platform connecting verified merchants and consumers with express shipping and secure payments.',
         },
         {
-          questionAr: 'ما هي شروط قبول إرجاع المنتج؟',
-          questionEn: 'What are the return conditions?',
-          answerAr: 'يجب أن يكون المنتج بحالته الأصلية، غير مستخدم، وبكامل ملحقاته وتغليفه الأصلي خلال 14 يوماً من الاستلام.',
-          answerEn: 'Product must be in its original unused condition with all accessories within 14 days.',
+          questionAr: 'كيف يمكنني التواصل مع فريق دعم العملاء؟',
+          questionEn: 'How can I contact customer support?',
+          answerAr: 'فريق دعم سوقنا متواجد لخدمتكم على مدار الساعة من خلال مركز المساعدة والمحادثة المباشرة وتذاكر الدعم داخل التطبيق، أو عبر صفحة "تواصل معنا" أو قنوات الدعم الرسمية.',
+          answerEn: 'Our support team is available 24/7 via the in-app chat & ticket center, website Contact Us page, or official email.',
         },
       ],
     },
     {
       categoryNameAr: 'مشكلة في طلب',
       faqs: [
+        {
+          questionAr: 'كيف يمكن للمتسوقين استعراض وشراء المنتجات؟',
+          questionEn: 'How can shoppers browse and purchase products?',
+          answerAr: 'يمكن للمتسوقين استعراض كافة المنتجات والأسعار والعروض عبر موقع الويب أو عبر تطبيق سوقنا للهواتف الذكية؛ حيث يوفر التطبيق تجربة شراء متكاملة ومحمية تتيح إضافة المنتجات وإتمام الدفع بأمان وتتبع الشحنة حتى باب بيتك.',
+          answerEn: 'Shoppers can browse items on the web or mobile app, with complete secure ordering and live tracking in the app.',
+        },
         {
           questionAr: 'كيف يمكنني تعديل عنوان التوصيل بعد إتمام الطلب؟',
           questionEn: 'How can I change the delivery address after ordering?',
@@ -517,13 +523,58 @@ export async function seedSupportData() {
       ],
     },
     {
+      categoryNameAr: 'مشكلة فنية في التطبيق',
+      faqs: [
+        {
+          questionAr: 'كيف أحمّل تطبيق المتسوق؟',
+          questionEn: 'How do I download the shopper app?',
+          answerAr: 'تطبيق سوقنا للمتسوق متاح للتحميل المجاني على متجر Google Play عبر الرابط المباشر (معرف الحزمة: com.souqnaa.app)، كما يمكنك النقر على زر تحميل تطبيق العميل في الموقع.',
+          answerEn: 'The Souqnaa Shopper App is free on Google Play Store (Package: com.souqnaa.app).',
+        },
+      ],
+    },
+    {
+      categoryNameAr: 'حساب المتجر والتوثيق',
+      faqs: [
+        {
+          questionAr: 'كيف يمكن للتجار وأصحاب المتاجر الانضمام إلى سوقنا؟',
+          questionEn: 'How can merchants and store owners join Souqnaa?',
+          answerAr: 'يمكن للتجار الانضمام بسهولة عبر تحميل "تطبيق سوقنا للتاجر" (معرف الحزمة: com.souqnaa.seller) من متجر Google Play، أو من خلال النقر على "ابدأ البيع معنا" وتعبئة بيانات المتجر للبدء بعرض المنتجات وإدارتها فوراً.',
+          answerEn: 'Merchants can join by downloading the official Souqnaa Seller App (com.souqnaa.seller) on Google Play or registering online.',
+        },
+      ],
+    },
+    {
       categoryNameAr: 'التوصيل والشحن',
       faqs: [
+        {
+          questionAr: 'كيف يعمل نظام التوصيل والشحن في سوقنا؟',
+          questionEn: 'How does delivery and shipping work on Souqnaa?',
+          answerAr: 'ترتبط منصة سوقنا بشبكة لوجستية وتوصيل ذكية؛ بمجرد قيام التاجر بتجهيز طلبك، يتم إسناد الشحنة إلى مندوب توصيل معتمد لضمان استلامها بأسرع وقت ممكن مع إمكانية التتبع المباشر لخط سير الشحنة.',
+          answerEn: 'Souqnaa connects with smart courier networks; as soon as a seller prepares your order, a verified courier is dispatched ensuring fast delivery with live tracking.',
+        },
         {
           questionAr: 'ما هي المدة المتوقعة لتوصيل الطلب؟',
           questionEn: 'What is the estimated delivery time?',
           answerAr: 'التوصيل داخل نفس المدينة يستغرق من 24 إلى 48 ساعة، وللمدن الأخرى من 2 إلى 4 أيام عمل.',
           answerEn: 'Same-city delivery takes 24-48 hours, while other cities take 2-4 business days.',
+        },
+      ],
+    },
+    {
+      categoryNameAr: 'طلب استرجاع / استبدال',
+      faqs: [
+        {
+          questionAr: 'كم يستغرق إرجاع المبلغ بعد الموافقة على الاسترجاع؟',
+          questionEn: 'How long does refund take after approval?',
+          answerAr: 'يتم إيداع المبلغ في محفظتك الإلكترونية على الفور، أو خلال 3-5 أيام عمل عند الإرجاع للبطاقة البنكية.',
+          answerEn: 'Refund is processed immediately to your wallet, or within 3-5 business days to card.',
+        },
+        {
+          questionAr: 'ما هي شروط قبول إرجاع المنتج؟',
+          questionEn: 'What are the return conditions?',
+          answerAr: 'يجب أن يكون المنتج بحالته الأصلية، غير مستخدم، وبكامل ملحقاته وتغليفه الأصلي خلال 14 يوماً من الاستلام.',
+          answerEn: 'Product must be in its original unused condition with all accessories within 14 days.',
         },
       ],
     },

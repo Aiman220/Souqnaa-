@@ -13,14 +13,17 @@ import {
 import { WishlistAlertsJob } from '../../services/jobs/wishlist-alerts.job';
 import { catalogVisualIndexService } from '../search/visual/catalog-visual-index.service';
 import { recommendationService } from '../recommendations/services/recommendation.service';
+import { StorefrontInvalidatorService } from '../../services/storefront-invalidator.service';
 
 const router = Router();
 
 // GET /api/v1/products — Search & Filtering
 router.get('/', optionalAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const page = parseInt(String(req.query.page || '1'), 10);
-    const limit = parseInt(String(req.query.limit || '20'), 10);
+    const rawPage = parseInt(String(req.query.page || '1'), 10);
+    const page = !isNaN(rawPage) && rawPage >= 1 ? rawPage : 1;
+    const rawLimit = parseInt(String(req.query.limit || '20'), 10);
+    const limit = !isNaN(rawLimit) && rawLimit >= 1 ? Math.min(rawLimit, 50) : 20;
     const skip = (page - 1) * limit;
 
     const {
@@ -34,7 +37,12 @@ router.get('/', optionalAuth, async (req: Request, res: Response, next: NextFunc
       inStock,
       sortBy = 'createdAt',
       sortOrder = 'desc',
+      cursor,
     } = req.query;
+
+    const ALLOWED_SORT_FIELDS = ['createdAt', 'price', 'rating', 'soldCount', 'nameAr', 'nameEn'];
+    const safeSortBy = ALLOWED_SORT_FIELDS.includes(String(sortBy)) ? String(sortBy) : 'createdAt';
+    const safeSortOrder: 'asc' | 'desc' = String(sortOrder).toLowerCase() === 'asc' ? 'asc' : 'desc';
 
     const where: any = {
       isActive: true,
@@ -90,26 +98,41 @@ router.get('/', optionalAuth, async (req: Request, res: Response, next: NextFunc
       where.inventory = { quantity: { gt: 0 } };
     }
 
+    // Stable ordering with unique tie-breaker on ID ensures deterministic pagination
+    const orderByClause = [
+      { [safeSortBy]: safeSortOrder },
+      { id: 'asc' as const },
+    ];
+
+    const findArgs: any = {
+      where,
+      take: limit,
+      orderBy: orderByClause,
+      include: {
+        store: { select: { id: true, name: true, logo: true, isVerified: true } },
+        category: { select: { id: true, nameAr: true, nameEn: true, slug: true } },
+        images: { orderBy: { sortOrder: 'asc' } },
+        variants: true,
+        inventory: { select: { quantity: true } },
+      },
+    };
+
+    if (cursor) {
+      findArgs.cursor = { id: String(cursor) };
+      findArgs.skip = 1;
+    } else {
+      findArgs.skip = skip;
+    }
+
     const [total, products] = await Promise.all([
       prisma.product.count({ where }),
-      prisma.product.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { [String(sortBy)]: String(sortOrder) },
-        include: {
-          store: { select: { id: true, name: true, logo: true, isVerified: true } },
-          category: { select: { id: true, nameAr: true, nameEn: true, slug: true } },
-          images: { orderBy: { sortOrder: 'asc' } },
-          variants: true,
-          inventory: { select: { quantity: true } },
-        },
-      }),
+      prisma.product.findMany(findArgs),
     ]);
 
+    const nextCursor = products.length === limit ? products[products.length - 1].id : null;
     const locale = req.headers['accept-language']?.includes('en') ? 'en' : 'ar';
     const formatted = await formatProductsWithCampaigns(products, locale);
-    ResponseUtil.paginated(res, formatted, total, page, limit);
+    ResponseUtil.paginated(res, formatted, total, page, limit, undefined, nextCursor);
   } catch (error) {
     next(error);
   }
@@ -462,6 +485,8 @@ router.put('/:id', authenticate, requireSeller, async (req: Request, res: Respon
     recommendationService.invalidateProductCache(id).catch(err => {
       console.warn('[Recommendation] Product cache invalidation error:', err);
     });
+
+    StorefrontInvalidatorService.invalidateProduct(id, updated.slug);
 
     ResponseUtil.success(res, updated, 'Product updated successfully');
   } catch (error) {

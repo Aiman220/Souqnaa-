@@ -13,14 +13,16 @@ export const prisma =
     ],
   });
 
-// Structured timing logs for slow database queries (> 250ms) without leaking parameter values
+// Structured timing logs for slow database queries without leaking parameter values
+const slowQueryThreshold = parseInt(process.env.SLOW_QUERY_THRESHOLD_MS || '250', 10);
+
 (prisma as any).$on('query', (e: { query: string; duration: number; timestamp: Date; target: string }) => {
-  if (e.duration >= 250) {
+  if (e.duration >= slowQueryThreshold) {
+    const sanitizedQuery = (e.query || '').replace(/\s+/g, ' ').trim().slice(0, 160);
     console.warn(
-      `[DB Slow Query] duration=${e.duration}ms target=${e.target || 'postgres'} timestamp=${e.timestamp.toISOString()}`
+      `[DB Slow Query] duration=${e.duration}ms query="${sanitizedQuery}" target=${e.target || 'postgres'} timestamp=${e.timestamp.toISOString()}`
     );
   }
 });
 
 if (config.env !== 'production') globalForPrisma.prisma = prisma;
-

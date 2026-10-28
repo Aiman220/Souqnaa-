@@ -1567,13 +1567,25 @@ export class SupportService {
       priority: conv.priority,
       status: conv.status,
       assignedAgent: conv.assignedAgent
-        ? {
-            id: conv.assignedAgent.id,
-            displayName: conv.assignedAgent.displayName,
-            avatar: conv.assignedAgent.avatar || conv.assignedAgent.user?.avatar,
-            online: conv.assignedAgent.online,
-            status: conv.assignedAgent.status,
-          }
+        ? (() => {
+            let isOnline = conv.assignedAgent.online;
+            try {
+              if (SocketService.get().isUserOnline(conv.assignedAgent.adminUserId)) {
+                isOnline = true;
+              }
+            } catch (_) {}
+            const status = isOnline
+              ? (conv.assignedAgent.status === SupportAgentStatus.OFFLINE ? SupportAgentStatus.ONLINE : conv.assignedAgent.status)
+              : conv.assignedAgent.status;
+            return {
+              id: conv.assignedAgent.id,
+              adminUserId: conv.assignedAgent.adminUserId,
+              displayName: conv.assignedAgent.displayName,
+              avatar: conv.assignedAgent.avatar || conv.assignedAgent.user?.avatar,
+              online: isOnline,
+              status,
+            };
+          })()
         : null,
       department: conv.department,
       category: conv.category,

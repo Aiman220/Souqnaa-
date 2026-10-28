@@ -1,3 +1,15 @@
+﻿
+const googleOAuth = {
+  clientId: '',
+  clientSecret: '',
+  androidClientId: '',
+  androidCustomerClientId: '',
+  androidSellerClientId: '',
+  iosClientId: '',
+  iosCustomerClientId: '',
+  iosSellerClientId: '',
+  serverClientId: '',
+};
 import dotenv from 'dotenv';
 import path from 'path';
 
@@ -121,17 +133,28 @@ export const config = {
   },
 
   oauth: {
-    google: {
-      clientId: process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID_WEB || '',
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
-      androidClientId: process.env.GOOGLE_ANDROID_CLIENT_ID || process.env.GOOGLE_CLIENT_ID_ANDROID || '',
-      androidCustomerClientId: process.env.GOOGLE_CLIENT_ID_ANDROID_CUSTOMER || '',
-      androidSellerClientId: process.env.GOOGLE_CLIENT_ID_ANDROID_SELLER || '',
-      iosClientId: process.env.GOOGLE_IOS_CLIENT_ID || process.env.GOOGLE_CLIENT_ID_IOS || '',
-      iosCustomerClientId: process.env.GOOGLE_CLIENT_ID_IOS_CUSTOMER || '',
-      iosSellerClientId: process.env.GOOGLE_CLIENT_ID_IOS_SELLER || '',
-      serverClientId: process.env.GOOGLE_SERVER_CLIENT_ID || '',
-    },
+    google: ((): typeof googleOAuth => {
+      const webClientId = process.env.GOOGLE_CLIENT_ID_WEB || process.env.GOOGLE_CLIENT_ID || '';
+      // Safety guard: reject placeholder values that would silently accept fake tokens
+      const isPlaceholder = webClientId.includes('iuuiofake') || webClientId.startsWith('REPLACE_') || webClientId.startsWith('your-') || webClientId.includes('example');
+      if (isPlaceholder) {
+        console.error('[Config] [CRITICAL] GOOGLE_CLIENT_ID_WEB contains a placeholder value. Google Sign-In will not work until a real Web OAuth client ID from Google Cloud Console is set in environment variables.');
+      } else if (!webClientId && process.env.NODE_ENV === 'production') {
+        console.error('[Config] [CRITICAL] GOOGLE_CLIENT_ID_WEB is not set. Native Google Sign-In token verification will not validate the audience in production.');
+      }
+      const resolvedClientId = isPlaceholder ? '' : webClientId;
+      return {
+        clientId: resolvedClientId,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+        androidClientId: process.env.GOOGLE_ANDROID_CLIENT_ID || process.env.GOOGLE_CLIENT_ID_ANDROID || '',
+        androidCustomerClientId: process.env.GOOGLE_CLIENT_ID_ANDROID_CUSTOMER || '',
+        androidSellerClientId: process.env.GOOGLE_CLIENT_ID_ANDROID_SELLER || '',
+        iosClientId: process.env.GOOGLE_IOS_CLIENT_ID || process.env.GOOGLE_CLIENT_ID_IOS || '',
+        iosCustomerClientId: process.env.GOOGLE_CLIENT_ID_IOS_CUSTOMER || '',
+        iosSellerClientId: process.env.GOOGLE_CLIENT_ID_IOS_SELLER || '',
+        serverClientId: process.env.GOOGLE_SERVER_CLIENT_ID || '',
+      };
+    })(),
     facebook: {
       appId: process.env.FACEBOOK_APP_ID || '',
       appSecret: process.env.FACEBOOK_APP_SECRET || '',

@@ -1,4 +1,4 @@
-import { ISocialAuthProvider } from './social-provider.interface';
+﻿import { ISocialAuthProvider } from './social-provider.interface';
 import { VerifiedSocialProfile, SocialProvider } from '../social-auth.types';
 import { AppError } from '../../../../middleware/error.middleware';
 import { config } from '../../../../config';
@@ -74,9 +74,13 @@ export class GoogleAuthenticationProvider implements ISocialAuthProvider {
         config.oauth.google.iosCustomerClientId,
         config.oauth.google.iosSellerClientId,
         config.oauth.google.serverClientId,
-        '891062320373-idj78v8ph4l7t5e9f9ut8pquokcb01b5.apps.googleusercontent.com',
-        '1009682429430-iuuiofakebhc31qmu0fungqf2662dn8v.apps.googleusercontent.com',
-      ].filter(Boolean);
+      ].filter((id): id is string =>
+        typeof id === 'string' &&
+        id.trim().length > 0 &&
+        !id.includes('iuuiofake') &&
+        !id.startsWith('your-') &&
+        !id.includes('example')
+      );
 
       if (allowedAudiences.length > 0 && (payload.aud || payload.azp)) {
         const isAudValid = allowedAudiences.some((aud) => {

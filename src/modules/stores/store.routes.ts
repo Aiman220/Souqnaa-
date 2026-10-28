@@ -7,6 +7,7 @@ import { optionalAuth } from '../../middleware/auth.middleware';
 import { storefrontLimiter } from '../../middleware/rate-limiter.middleware';
 import { VoucherService } from '../vouchers/voucher.service';
 import { SellerPerformanceService } from '../seller-performance/seller-performance.service';
+import { StorefrontInvalidatorService } from '../../services/storefront-invalidator.service';
 
 const router = Router();
 
@@ -61,16 +62,26 @@ async function resolveStore(idOrSlug: string) {
 // GET /api/v1/stores
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const stores = await prisma.store.findMany({
-      where: { isActive: true },
-      include: {
-        _count: { select: { products: { where: { isActive: true } } } },
-        enhancement: { select: { followerCount: true, logoMedium: true, logoSmall: true } },
-      },
-      orderBy: { rating: 'desc' },
-      take: 20,
-    });
-    ResponseUtil.success(res, stores);
+    const rawPage = parseInt(String(req.query.page || '1'), 10);
+    const page = !isNaN(rawPage) && rawPage >= 1 ? rawPage : 1;
+    const rawLimit = parseInt(String(req.query.limit || '20'), 10);
+    const limit = !isNaN(rawLimit) && rawLimit >= 1 ? Math.min(rawLimit, 50) : 20;
+    const skip = (page - 1) * limit;
+
+    const [total, stores] = await Promise.all([
+      prisma.store.count({ where: { isActive: true } }),
+      prisma.store.findMany({
+        where: { isActive: true },
+        include: {
+          _count: { select: { products: { where: { isActive: true } } } },
+          enhancement: { select: { followerCount: true, logoMedium: true, logoSmall: true } },
+        },
+        orderBy: [{ rating: 'desc' }, { id: 'asc' }],
+        skip,
+        take: limit,
+      }),
+    ]);
+    ResponseUtil.paginated(res, stores, total, page, limit);
   } catch (error) {
     next(error);
   }
@@ -300,14 +311,14 @@ router.get('/:slug/products', storefrontLimiter, async (req: Request, res: Respo
 
     const orderBy: any = (() => {
       switch (sort) {
-        case 'popular':        return [{ rating: 'desc' }];
-        case 'newest':         return { createdAt: 'desc' };
-        case 'bestSelling':    return [{ rating: 'desc' }];
-        case 'highestRated':   return { rating: 'desc' };
-        case 'priceLow':       return { price: 'asc' };
-        case 'priceHigh':      return { price: 'desc' };
-        case 'largestDiscount':return { discountPrice: 'asc' };
-        default:               return [{ rating: 'desc' }, { createdAt: 'desc' }];
+        case 'popular':        return [{ rating: 'desc' }, { id: 'asc' }];
+        case 'newest':         return [{ createdAt: 'desc' }, { id: 'asc' }];
+        case 'bestSelling':    return [{ rating: 'desc' }, { id: 'asc' }];
+        case 'highestRated':   return [{ rating: 'desc' }, { id: 'asc' }];
+        case 'priceLow':       return [{ price: 'asc' }, { id: 'asc' }];
+        case 'priceHigh':      return [{ price: 'desc' }, { id: 'asc' }];
+        case 'largestDiscount':return [{ discountPrice: 'asc' }, { id: 'asc' }];
+        default:               return [{ rating: 'desc' }, { createdAt: 'desc' }, { id: 'asc' }];
       }
     })();
 
@@ -608,6 +619,7 @@ router.patch('/:id/availability', async (req: Request, res: Response, next: Next
       redis.del(`storefront:${store.slug}`),
       redis.del(`storefront:${store.id}`),
     ]);
+    StorefrontInvalidatorService.invalidateStore(store.id, store.slug);
 
     ResponseUtil.success(res, updated, 'تم تحديث حالة وساعات عمل المتجر بنجاح');
   } catch (error) {
