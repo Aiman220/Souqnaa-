@@ -1036,9 +1036,21 @@ export class OrderStateMachine {
         },
       });
 
-      // 2. Cascade status to all child SellerOrders
+      // 2. Cascade status to child SellerOrders
       for (const so of order.sellerOrders) {
         const soWasDelivered = so.status === 'DELIVERED';
+        const isSoTerminal = String(so.status).startsWith('CANCELLED_') || so.status === 'REJECTED_BY_SELLER' || so.status === 'REFUNDED' || so.status === 'RETURNED';
+
+        if (targetStatusStr === 'DELIVERED') {
+          // Defense in depth: Never cascade DELIVERED to child sub-orders that are not SHIPPED (or already DELIVERED).
+          // This prevents prematurely marking pending/processing sub-orders as delivered in multi-seller orders!
+          if (so.status !== 'SHIPPED' && !soWasDelivered) {
+            continue;
+          }
+        } else if (isCancellationOrRejection && isSoTerminal) {
+          continue;
+        }
+
         await tx.sellerOrder.update({
           where: { id: so.id },
           data: {
@@ -1285,6 +1297,11 @@ export class OrderStateMachine {
           }),
         },
       });
+
+      if (targetStatusStr === 'DELIVERED') {
+        const syncedParentStatus = await this.syncParentOrderStatus(order.id, tx);
+        (updatedOrder as any).status = syncedParentStatus;
+      }
 
       return {
         updatedOrder,

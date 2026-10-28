@@ -972,6 +972,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           deliveryAddressId: address.id,
           deliveryMethodId: parentDeliveryMethodId || null,
           status: OrderStatus.PENDING,
+          currency: 'YER',
           subtotal,
           deliveryFee,
           discountAmount: platformDiscount + sellerDiscount + coinDiscount,
@@ -2720,6 +2721,9 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
           },
         },
         addressSnapshot: true,
+        deliveryMethod: true,
+        deliveryTimeSlot: true,
+        slotBooking: { include: { timeSlot: true } },
         payment: true,
         statusHistory: { orderBy: { createdAt: 'asc' } },
         cancellationRequests: { orderBy: { createdAt: 'desc' } },
@@ -2759,6 +2763,11 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
 
     const sellerOrdersWithDisputes = order.sellerOrders.map(so => ({
       ...so,
+      deliveryScheduleType: (so as any).deliveryScheduleType || order.deliveryScheduleType,
+      deliveryDate: (so as any).deliveryDate || order.deliveryDate,
+      deliveryTimeSlotId: (so as any).deliveryTimeSlotId || order.deliveryTimeSlotId,
+      deliveryTimeSlot: (so as any).deliveryTimeSlot || (order as any).deliveryTimeSlot,
+      deliveryMethod: so.deliveryMethod || (order as any).deliveryMethod,
       items: (so.items || []).map((item: any) => ({
         ...item,
         productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
@@ -3081,27 +3090,149 @@ router.post('/:id/cancellation-request', async (req: Request, res: Response, nex
 router.post(['/:id/confirm-delivery', '/:id/confirm-received', '/:id/received'], async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
+    const bodySellerOrderId = req.body?.sellerOrderId ? String(req.body.sellerOrderId).trim() : null;
 
+    // 1. Check if the request targets a specific SellerOrder (by body.sellerOrderId or by :id)
+    let targetSellerOrder = null;
+    if (bodySellerOrderId) {
+      targetSellerOrder = await prisma.sellerOrder.findFirst({
+        where: {
+          OR: [{ id: bodySellerOrderId }, { sellerOrderNumber: bodySellerOrderId }],
+          order: { userId: req.user!.userId },
+        },
+        include: {
+          order: true,
+          items: true,
+        },
+      });
+      if (!targetSellerOrder) {
+        throw new AppError('شحنة المتجر غير موجودة', 404);
+      }
+    } else {
+      // Check if :id is a SellerOrder
+      targetSellerOrder = await prisma.sellerOrder.findFirst({
+        where: {
+          OR: [{ id }, { sellerOrderNumber: id }],
+          order: { userId: req.user!.userId },
+        },
+        include: {
+          order: true,
+          items: true,
+        },
+      });
+    }
+
+    if (targetSellerOrder) {
+      // Customer confirms receipt of this specific sub-order / shipment
+      if (targetSellerOrder.status === SellerOrderStatus.DELIVERED) {
+        // Idempotent: already delivered
+        const fullOrder = await prisma.order.findUnique({
+          where: { id: targetSellerOrder.orderId },
+          include: {
+            sellerOrders: {
+              include: {
+                items: true,
+                seller: { select: { id: true, userId: true, stores: { select: { id: true, name: true }, take: 1 } } },
+                deliveryOrder: true,
+                statusHistory: { orderBy: { createdAt: 'desc' } },
+              },
+            },
+            statusHistory: { orderBy: { createdAt: 'desc' } },
+            payment: true,
+            deliveryAddress: true,
+          },
+        });
+        return ResponseUtil.success(res, fullOrder, 'تم تأكيد استلام الشحنة مسبقاً');
+      }
+
+      if (targetSellerOrder.status !== SellerOrderStatus.SHIPPED && targetSellerOrder.status !== SellerOrderStatus.READY_TO_SHIP) {
+        throw new AppError('لا يمكن تأكيد استلام هذه الشحنة إلا بعد شحنها من قبل المتجر', 400);
+      }
+
+      await OrderStateMachine.transitionSellerOrder({
+        sellerOrderId: targetSellerOrder.id,
+        targetStatus: SellerOrderStatus.DELIVERED,
+        changedBy: req.user!.userId,
+        changedByRole: 'CUSTOMER',
+        note: 'تم تأكيد استلام الشحنة من قبل العميل بنجاح',
+      });
+
+      const fullOrder = await prisma.order.findUnique({
+        where: { id: targetSellerOrder.orderId },
+        include: {
+          sellerOrders: {
+            include: {
+              items: true,
+              seller: { select: { id: true, userId: true, stores: { select: { id: true, name: true }, take: 1 } } },
+              deliveryOrder: true,
+              statusHistory: { orderBy: { createdAt: 'desc' } },
+            },
+          },
+          statusHistory: { orderBy: { createdAt: 'desc' } },
+          payment: true,
+          deliveryAddress: true,
+        },
+      });
+
+      return ResponseUtil.success(res, fullOrder, 'تم تأكيد استلام الشحنة بنجاح، شكراً لتسوقك معنا!');
+    }
+
+    // 2. Otherwise, :id is a parent Order
     const order = await prisma.order.findFirst({
       where: {
         OR: [{ id }, { orderNumber: id }],
         userId: req.user!.userId,
       },
+      include: {
+        sellerOrders: {
+          include: { items: true },
+        },
+      },
     });
 
     if (!order) throw new AppError('الطلب غير موجود', 404);
 
-    if (order.status !== OrderStatus.SHIPPED) {
-      throw new AppError('لا يمكن تأكيد الاستلام إلا للطلبات المشحونة', 400);
+    const shippedSubOrders = order.sellerOrders.filter(
+      (so) => so.status === SellerOrderStatus.SHIPPED || so.status === SellerOrderStatus.READY_TO_SHIP
+    );
+    const deliveredSubOrders = order.sellerOrders.filter(
+      (so) => so.status === SellerOrderStatus.DELIVERED
+    );
+
+    if (shippedSubOrders.length === 0) {
+      if (deliveredSubOrders.length > 0 && deliveredSubOrders.length === order.sellerOrders.length) {
+        const fullOrder = await prisma.order.findUnique({
+          where: { id: order.id },
+          include: {
+            sellerOrders: {
+              include: {
+                items: true,
+                seller: { select: { id: true, userId: true, stores: { select: { id: true, name: true }, take: 1 } } },
+                deliveryOrder: true,
+                statusHistory: { orderBy: { createdAt: 'desc' } },
+              },
+            },
+            statusHistory: { orderBy: { createdAt: 'desc' } },
+            payment: true,
+            deliveryAddress: true,
+          },
+        });
+        return ResponseUtil.success(res, fullOrder, 'تم تأكيد استلام كافة شحنات هذا الطلب مسبقاً');
+      }
+      throw new AppError('لا توجد شحنات مشحونة حالياً لتأكيد استلامها', 400);
     }
 
-    const updated = await OrderStateMachine.transitionOrder({
-      orderId: order.id,
-      targetStatus: OrderStatus.DELIVERED,
-      changedBy: req.user!.userId,
-      changedByRole: 'CUSTOMER',
-      note: 'تم تأكيد استلام الشحنة من قبل العميل بنجاح',
-    });
+    // Transition ONLY the shipped sub-orders to DELIVERED.
+    // PENDING, CONFIRMED, or PROCESSING sub-orders will REMAIN in their respective state!
+    for (const so of shippedSubOrders) {
+      await OrderStateMachine.transitionSellerOrder({
+        sellerOrderId: so.id,
+        targetStatus: SellerOrderStatus.DELIVERED,
+        changedBy: req.user!.userId,
+        changedByRole: 'CUSTOMER',
+        note: 'تم تأكيد استلام الشحنة من قبل العميل بنجاح',
+      });
+    }
 
     const fullUpdatedOrder = await prisma.order.findUnique({
       where: { id: order.id },
@@ -3109,7 +3240,9 @@ router.post(['/:id/confirm-delivery', '/:id/confirm-received', '/:id/received'],
         sellerOrders: {
           include: {
             items: true,
-            seller: { select: { id: true, userId: true } },
+            seller: { select: { id: true, userId: true, stores: { select: { id: true, name: true }, take: 1 } } },
+            deliveryOrder: true,
+            statusHistory: { orderBy: { createdAt: 'desc' } },
           },
         },
         statusHistory: { orderBy: { createdAt: 'desc' } },
@@ -3118,7 +3251,7 @@ router.post(['/:id/confirm-delivery', '/:id/confirm-received', '/:id/received'],
       },
     });
 
-    ResponseUtil.success(res, fullUpdatedOrder || updated, 'تم تأكيد استلام الطلب بنجاح، شكراً لتسوقك معنا!');
+    ResponseUtil.success(res, fullUpdatedOrder, 'تم تأكيد استلام الشحنات المشحونة بنجاح، شكراً لتسوقك معنا!');
   } catch (error) {
     next(error);
   }

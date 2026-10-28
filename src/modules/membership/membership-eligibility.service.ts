@@ -280,6 +280,11 @@ export class MembershipEligibilityService {
     const cached = await MembershipCacheService.getCustomerSummary(userId);
     if (cached) return cached;
 
+    // Trigger authoritative evaluation to guarantee fresh tiers assignment and metrics
+    await this.evaluateCustomerTier(userId).catch((err) => {
+      console.warn(`[Membership] Evaluation on summary fetch for ${userId}:`, err?.message || err);
+    });
+
     const membership = await this.getOrCreateMembership(userId);
     const activeTiers = await this.getActiveTiersDescending();
     const activeOverride = membership.overrides?.[0];

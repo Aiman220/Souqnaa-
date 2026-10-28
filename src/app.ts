@@ -150,10 +150,12 @@ export const createApp = (): Application => {
     'https://staging-seller.souqnaa.com',
     // Localhost & Emulators
     'http://localhost:3000',
+    'http://localhost:3001',
     'http://localhost:4000',
     'http://localhost:8080',
     'http://10.0.2.2:4000',
     'http://127.0.0.1:4000',
+    'http://127.0.0.1:3001',
     'http://127.0.0.1:3000',
     ...(config.corsOrigin !== '*' ? config.corsOrigin.split(',').map((o) => o.trim()) : []),
   ];
@@ -596,6 +598,9 @@ export const createApp = (): Application => {
   app.use(`${p}/customers/me/membership`, customerMembershipRoutes);
   app.use(`${p}/customer/membership`, customerMembershipRoutes);
   app.use(`${p}/membership`, customerMembershipRoutes);
+  app.use('/customers/me/membership', customerMembershipRoutes);
+  app.use('/customer/membership', customerMembershipRoutes);
+  app.use('/membership', customerMembershipRoutes);
   app.use(`${p}/admin/membership`, adminMembershipRoutes);
   app.use('/admin/membership', adminMembershipRoutes);
 

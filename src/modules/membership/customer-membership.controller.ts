@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { MembershipEligibilityService } from './membership-eligibility.service';
+import { MembershipCacheService } from './membership-cache.service';
 import { ResponseUtil } from '../../utils/response.util';
 import { AppError } from '../../middleware/error.middleware';
 
@@ -13,6 +14,10 @@ export class CustomerMembershipController {
       const userId = req.user?.userId;
       if (!userId) {
         throw new AppError('Authentication required', 401);
+      }
+
+      if (req.query.refresh === 'true') {
+        await MembershipCacheService.invalidateCustomer(userId);
       }
 
       const summary = await MembershipEligibilityService.getCustomerSummary(userId);

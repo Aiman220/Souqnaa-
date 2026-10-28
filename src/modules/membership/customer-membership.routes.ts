@@ -11,4 +11,6 @@ customerMembershipRoutes.get('/tiers', CustomerMembershipController.getTiersCata
 customerMembershipRoutes.get('/me', authenticate, CustomerMembershipController.getMyMembership);
 customerMembershipRoutes.get('/me/progress', authenticate, CustomerMembershipController.getMyProgress);
 customerMembershipRoutes.get('/me/benefits', authenticate, CustomerMembershipController.getMyBenefits);
+customerMembershipRoutes.get('/progress', authenticate, CustomerMembershipController.getMyProgress);
+customerMembershipRoutes.get('/benefits', authenticate, CustomerMembershipController.getMyBenefits);
 customerMembershipRoutes.get('/', authenticate, CustomerMembershipController.getMyMembership);

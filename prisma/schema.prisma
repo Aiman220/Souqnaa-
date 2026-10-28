@@ -1344,7 +1344,7 @@ model Order {
   deliveryMethodId     String?
   deliveryMethod       DeliveryMethod?        @relation(fields: [deliveryMethodId], references: [id])
   status               OrderStatus            @default(PENDING)
-  currency             String                 @default("SAR")
+  currency             String                 @default("YER")
   subtotal             Float
   deliveryFee          Float                  @default(0.0)
   discountAmount       Float                  @default(0.0)

@@ -655,7 +655,8 @@ export class AuthController {
         const sessionKey = credential.replace('session_', '');
         const cached = await redis.get(`social_session_verified:${sessionKey}`);
         if (cached) {
-          await redis.del(`social_session_verified:${sessionKey}`);
+          // Retain session for 60s to ensure idempotent token exchange across concurrent deep links and in-app polling
+          await redis.expire(`social_session_verified:${sessionKey}`, 60);
           const result = JSON.parse(cached);
           const message = result.isNewAccount
             ? 'تم إنشاء الحساب بنجاح عبر تسجيل الدخول الاجتماعي'
@@ -663,6 +664,18 @@ export class AuthController {
           ResponseUtil.success(res, result, message);
           return;
         }
+
+        // Secondary check on primary social_session cache
+        const rawSession = await redis.get(`social_session:${sessionKey}`);
+        if (rawSession) {
+          const parsed = JSON.parse(rawSession);
+          if (parsed?.status === 'success' && parsed.data) {
+            ResponseUtil.success(res, parsed.data, 'تم تسجيل الدخول بنجاح');
+            return;
+          }
+        }
+
+        throw new AppError('جلسة تسجيل الدخول الاجتماعي منتهية الصلاحية أو غير صالحة', 401, 'SOCIAL_SESSION_EXPIRED');
       }
 
       const result = await socialAuthService.authenticateSocialLogin({
