@@ -1,4 +1,4 @@
-﻿import { ISocialAuthProvider } from './social-provider.interface';
+import { ISocialAuthProvider } from './social-provider.interface';
 import { VerifiedSocialProfile, SocialProvider } from '../social-auth.types';
 import { AppError } from '../../../../middleware/error.middleware';
 import { config } from '../../../../config';
@@ -30,6 +30,9 @@ export class GoogleAuthenticationProvider implements ISocialAuthProvider {
         });
 
         if (!userinfoRes.ok) {
+          console.warn(
+            `[GoogleAuthDiagnostic] stage=TOKEN_VERIFICATION status=FAILED tokeninfoHttpStatus=${response.status} userinfoHttpStatus=${userinfoRes.status} errorCategory=INVALID_OR_EXPIRED_TOKEN`
+          );
           throw new AppError(
             'فشل التحقق من صحة بيانات الدخول عبر Google. قد تكون الجلسة منتهية الصلاحية.',
             401,
@@ -38,6 +41,7 @@ export class GoogleAuthenticationProvider implements ISocialAuthProvider {
         }
 
         const userInfo = (await userinfoRes.json()) as any;
+        console.info('[GoogleAuthDiagnostic] stage=USERINFO_VERIFIED status=SUCCESS authType=access_token');
         return this.normalizeProfile(userInfo);
       }
 
@@ -46,12 +50,14 @@ export class GoogleAuthenticationProvider implements ISocialAuthProvider {
       // 2. Validate token claims
       // A. Validate Subject
       if (!payload.sub || typeof payload.sub !== 'string') {
+        console.warn('[GoogleAuthDiagnostic] stage=CLAIMS_VALIDATION status=FAILED errorCategory=MISSING_OR_INVALID_SUB');
         throw new AppError('Google token is missing a valid subject identifier.', 401, 'SOCIAL_INVALID_CREDENTIAL');
       }
 
       // B. Validate Issuer
       const validIssuers = ['accounts.google.com', 'https://accounts.google.com'];
       if (payload.iss && !validIssuers.includes(payload.iss)) {
+        console.warn('[GoogleAuthDiagnostic] stage=CLAIMS_VALIDATION status=FAILED errorCategory=INVALID_ISSUER');
         throw new AppError('Google token issuer is not recognized or invalid.', 401, 'SOCIAL_INVALID_CREDENTIAL');
       }
 
@@ -60,6 +66,9 @@ export class GoogleAuthenticationProvider implements ISocialAuthProvider {
         const expTime = parseInt(payload.exp, 10);
         const now = Math.floor(Date.now() / 1000);
         if (expTime < now) {
+          console.warn(
+            `[GoogleAuthDiagnostic] stage=CLAIMS_VALIDATION status=FAILED errorCategory=EXPIRED_TOKEN expiredSecondsAgo=${now - expTime}`
+          );
           throw new AppError('انتهت صلاحية رمز دخول Google، يرجى إعادة المحاولة.', 401, 'SOCIAL_EXPIRED_CREDENTIAL');
         }
       }
@@ -94,13 +103,18 @@ export class GoogleAuthenticationProvider implements ISocialAuthProvider {
           return false;
         });
         if (!isAudValid && config.env === 'production') {
+          console.warn(
+            `[GoogleAuthDiagnostic] stage=AUDIENCE_VALIDATION status=FAILED errorCategory=AUDIENCE_MISMATCH allowedAudiencesCount=${allowedAudiences.length}`
+          );
           throw new AppError('Google token audience does not match configured application clients.', 401, 'SOCIAL_INVALID_CREDENTIAL');
         }
       }
 
+      console.info('[GoogleAuthDiagnostic] stage=ID_TOKEN_VERIFIED status=SUCCESS authType=id_token');
       return this.normalizeProfile(payload);
     } catch (error: any) {
       if (error instanceof AppError) throw error;
+      console.error(`[GoogleAuthDiagnostic] stage=UNEXPECTED_ERROR status=FAILED errorType=${error?.name || typeof error}`);
       throw new AppError(
         'تعذر التحقق من مزود الهوية Google، يرجى المحاولة لاحقاً.',
         502,
