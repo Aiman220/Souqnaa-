@@ -1237,7 +1237,8 @@ export class SocketService {
       // Send message via WebSocket
       socket.on('message:send', async (payload: any, ack?: (res: any) => void) => {
         try {
-          const { conversationId, text, attachmentUrl, type = 'text', metadata, clientMessageId } = payload;
+          const { conversationId, attachmentUrl, type = 'text', metadata, clientMessageId } = payload;
+          const text = payload.text || payload.content;
           if (!conversationId) {
             if (ack) ack({ error: 'conversationId is required' });
             return;
