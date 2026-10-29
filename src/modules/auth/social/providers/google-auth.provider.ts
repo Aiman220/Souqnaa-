@@ -1,9 +1,16 @@
+import { OAuth2Client } from 'google-auth-library';
 import { ISocialAuthProvider } from './social-provider.interface';
 import { VerifiedSocialProfile, SocialProvider } from '../social-auth.types';
 import { AppError } from '../../../../middleware/error.middleware';
 import { config } from '../../../../config';
 
 export class GoogleAuthenticationProvider implements ISocialAuthProvider {
+  private oauthClient: OAuth2Client;
+
+  constructor() {
+    this.oauthClient = new OAuth2Client();
+  }
+
   async verifyToken(credential: string, platform?: string): Promise<VerifiedSocialProfile> {
     if (!credential || typeof credential !== 'string' || credential.trim().length === 0) {
       throw new AppError('Google authentication credential is required.', 400, 'SOCIAL_INVALID_CREDENTIAL');
@@ -11,17 +18,54 @@ export class GoogleAuthenticationProvider implements ISocialAuthProvider {
 
     const trimmedToken = credential.trim();
 
-    try {
-      // 1. Query Google's token verification endpoint
-      const response = await fetch(
-        `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(trimmedToken)}`,
-        {
-          headers: { Accept: 'application/json' },
-        }
-      );
+    // Collect and sanitize all explicitly configured non-placeholder OAuth client IDs
+    const allowedAudiences = [
+      config.oauth.google.clientId,
+      config.oauth.google.serverClientId,
+      config.oauth.google.androidClientId,
+      config.oauth.google.androidCustomerClientId,
+      config.oauth.google.androidSellerClientId,
+      config.oauth.google.iosClientId,
+      config.oauth.google.iosCustomerClientId,
+      config.oauth.google.iosSellerClientId,
+    ].filter((id): id is string =>
+      typeof id === 'string' &&
+      id.trim().length > 0 &&
+      !id.includes('iuuiofake') &&
+      !id.startsWith('your-') &&
+      !id.startsWith('REPLACE_') &&
+      !id.includes('example')
+    );
 
-      if (!response.ok) {
-        // Fallback: in case the client passed an OAuth2 access_token rather than id_token
+    try {
+      let payload: any = null;
+
+      // 1. Verify cryptographic signature & claims using Google-supported verification library
+      try {
+        const ticket = await this.oauthClient.verifyIdToken({
+          idToken: trimmedToken,
+          audience: allowedAudiences.length > 0 ? allowedAudiences : undefined,
+        });
+        payload = ticket.getPayload();
+      } catch (verifyError: any) {
+        if (verifyError instanceof AppError) throw verifyError;
+        const errMsg = String(verifyError?.message || '').toLowerCase();
+
+        // Check if error is audience mismatch
+        if (errMsg.includes('audience') || errMsg.includes('wrong recipient')) {
+          console.warn(
+            `[GoogleAuthDiagnostic] stage=AUDIENCE_VALIDATION status=FAILED errorCategory=AUDIENCE_MISMATCH allowedAudiencesCount=${allowedAudiences.length}`
+          );
+          throw new AppError('Google token audience does not match configured application clients.', 401, 'SOCIAL_INVALID_CREDENTIAL');
+        }
+
+        // Check if error is token expiration
+        if (errMsg.includes('expired') || errMsg.includes('token used too late')) {
+          console.warn('[GoogleAuthDiagnostic] stage=CLAIMS_VALIDATION status=FAILED errorCategory=EXPIRED_TOKEN');
+          throw new AppError('انتهت صلاحية رمز دخول Google، يرجى إعادة المحاولة.', 401, 'SOCIAL_EXPIRED_CREDENTIAL');
+        }
+
+        // Fallback: Check if client passed an OAuth2 access_token rather than id_token
         const userinfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
           headers: {
             Authorization: `Bearer ${trimmedToken}`,
@@ -31,7 +75,7 @@ export class GoogleAuthenticationProvider implements ISocialAuthProvider {
 
         if (!userinfoRes.ok) {
           console.warn(
-            `[GoogleAuthDiagnostic] stage=TOKEN_VERIFICATION status=FAILED tokeninfoHttpStatus=${response.status} userinfoHttpStatus=${userinfoRes.status} errorCategory=INVALID_OR_EXPIRED_TOKEN`
+            `[GoogleAuthDiagnostic] stage=TOKEN_VERIFICATION status=FAILED verifyError=${verifyError?.message} userinfoHttpStatus=${userinfoRes.status} errorCategory=INVALID_OR_EXPIRED_TOKEN`
           );
           throw new AppError(
             'فشل التحقق من صحة بيانات الدخول عبر Google. قد تكون الجلسة منتهية الصلاحية.',
@@ -45,25 +89,26 @@ export class GoogleAuthenticationProvider implements ISocialAuthProvider {
         return this.normalizeProfile(userInfo);
       }
 
-      const payload = (await response.json()) as any;
+      if (!payload) {
+        throw new AppError('فشل استخراج بيانات الدخول من رمز Google.', 401, 'SOCIAL_INVALID_CREDENTIAL');
+      }
 
-      // 2. Validate token claims
-      // A. Validate Subject
+      // 2. Validate Subject
       if (!payload.sub || typeof payload.sub !== 'string') {
         console.warn('[GoogleAuthDiagnostic] stage=CLAIMS_VALIDATION status=FAILED errorCategory=MISSING_OR_INVALID_SUB');
         throw new AppError('Google token is missing a valid subject identifier.', 401, 'SOCIAL_INVALID_CREDENTIAL');
       }
 
-      // B. Validate Issuer
+      // 3. Validate Issuer
       const validIssuers = ['accounts.google.com', 'https://accounts.google.com'];
       if (payload.iss && !validIssuers.includes(payload.iss)) {
         console.warn('[GoogleAuthDiagnostic] stage=CLAIMS_VALIDATION status=FAILED errorCategory=INVALID_ISSUER');
         throw new AppError('Google token issuer is not recognized or invalid.', 401, 'SOCIAL_INVALID_CREDENTIAL');
       }
 
-      // C. Validate Expiration
+      // 4. Validate Expiration
       if (payload.exp) {
-        const expTime = parseInt(payload.exp, 10);
+        const expTime = parseInt(String(payload.exp), 10);
         const now = Math.floor(Date.now() / 1000);
         if (expTime < now) {
           console.warn(
@@ -73,25 +118,8 @@ export class GoogleAuthenticationProvider implements ISocialAuthProvider {
         }
       }
 
-      // D. Validate Audience if configured
-      const allowedAudiences = [
-        config.oauth.google.clientId,
-        config.oauth.google.androidClientId,
-        config.oauth.google.androidCustomerClientId,
-        config.oauth.google.androidSellerClientId,
-        config.oauth.google.iosClientId,
-        config.oauth.google.iosCustomerClientId,
-        config.oauth.google.iosSellerClientId,
-        config.oauth.google.serverClientId,
-      ].filter((id): id is string =>
-        typeof id === 'string' &&
-        id.trim().length > 0 &&
-        !id.includes('iuuiofake') &&
-        !id.startsWith('your-') &&
-        !id.includes('example')
-      );
-
-      if (allowedAudiences.length > 0 && (payload.aud || payload.azp)) {
+      // 5. Strict Audience Validation
+      if (allowedAudiences.length > 0) {
         const isAudValid = allowedAudiences.some((aud) => {
           if (!aud) return false;
           if (aud === payload.aud || aud === payload.azp) return true;
@@ -102,7 +130,7 @@ export class GoogleAuthenticationProvider implements ISocialAuthProvider {
           }
           return false;
         });
-        if (!isAudValid && config.env === 'production') {
+        if (!isAudValid) {
           console.warn(
             `[GoogleAuthDiagnostic] stage=AUDIENCE_VALIDATION status=FAILED errorCategory=AUDIENCE_MISMATCH allowedAudiencesCount=${allowedAudiences.length}`
           );
