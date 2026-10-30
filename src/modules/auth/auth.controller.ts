@@ -1149,6 +1149,129 @@ export class AuthController {
     }
   }
 
+  static async changePassword(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const userId = req.user!.userId;
+      const { currentPassword, newPassword } = req.body || {};
+
+      if (!currentPassword || !newPassword) {
+        throw new AppError('يرجى إدخال كلمة المرور الحالية وكلمة المرور الجديدة', 400);
+      }
+
+      if (typeof newPassword !== 'string' || newPassword.length < 6) {
+        throw new AppError('يجب ألا تقل كلمة المرور الجديدة عن 6 أحرف', 400);
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+      });
+
+      if (!user) {
+        throw new AppError('المستخدم غير موجود', 404);
+      }
+
+      if (user.passwordHash) {
+        const isMatch = await bcrypt.compare(currentPassword, user.passwordHash);
+        if (!isMatch) {
+          throw new AppError('كلمة المرور الحالية غير صحيحة', 400);
+        }
+      }
+
+      const newHash = await bcrypt.hash(newPassword, 10);
+      await prisma.user.update({
+        where: { id: userId },
+        data: { passwordHash: newHash },
+      });
+
+      await prisma.auditLog.create({
+        data: {
+          userId,
+          action: 'PASSWORD_CHANGED',
+          resource: 'users',
+          details: JSON.stringify({
+            ip: req.ip,
+            userAgent: req.headers['user-agent'] || '',
+            timestamp: new Date().toISOString(),
+          }),
+        },
+      });
+
+      ResponseUtil.success(res, null, 'تم تغيير كلمة المرور بنجاح');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async exportUserData(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const userId = req.user!.userId;
+
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        include: {
+          addresses: true,
+          _count: {
+            select: {
+              orders: true,
+              productReviews: true,
+            },
+          },
+        },
+      });
+
+      if (!user) {
+        throw new AppError('المستخدم غير موجود', 404);
+      }
+
+      const settingRecord = await prisma.systemSetting.findUnique({
+        where: { key: `user_settings_${userId}` },
+      });
+
+      let preferences = {};
+      if (settingRecord?.value) {
+        try {
+          preferences = JSON.parse(settingRecord.value);
+        } catch (_) {}
+      }
+
+      const exportData = {
+        profile: {
+          id: user.id,
+          fullName: `${user.firstName} ${user.lastName}`.trim(),
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          isActive: user.isActive,
+          createdAt: user.createdAt,
+        },
+        addressesCount: user.addresses.length,
+        addresses: user.addresses.map(a => ({
+          type: a.type,
+          recipientName: a.recipientName,
+          street: a.street,
+          isDefault: a.isDefault,
+        })),
+        totalOrders: user._count.orders,
+        totalReviews: user._count.productReviews,
+        preferences,
+        exportedAt: new Date().toISOString(),
+      };
+
+      await prisma.auditLog.create({
+        data: {
+          userId,
+          action: 'USER_DATA_EXPORT_REQUESTED',
+          resource: 'users',
+          details: JSON.stringify({ ip: req.ip, timestamp: new Date().toISOString() }),
+        },
+      });
+
+      ResponseUtil.success(res, exportData, 'تم استخراج وتجهيز بيانات حسابك بنجاح');
+    } catch (error) {
+      next(error);
+    }
+  }
+
   static async deleteAccount(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.user!.userId;
@@ -1199,6 +1322,10 @@ export class AuthController {
         orderOneClickReorder: true,
         orderDeliveryPreference: 'standard',
         orderArchiveCompleted: false,
+        notifyOrderUpdates: true,
+        notifyPromotions: true,
+        notifyChatMessages: true,
+        notifySound: true,
       };
 
       const record = await prisma.systemSetting.findUnique({
@@ -1243,6 +1370,10 @@ export class AuthController {
         orderOneClickReorder: true,
         orderDeliveryPreference: 'standard',
         orderArchiveCompleted: false,
+        notifyOrderUpdates: true,
+        notifyPromotions: true,
+        notifyChatMessages: true,
+        notifySound: true,
       };
 
       if (existingRecord?.value) {

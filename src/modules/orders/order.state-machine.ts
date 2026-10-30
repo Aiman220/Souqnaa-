@@ -820,6 +820,9 @@ export class OrderStateMachine {
           changedByRole,
           customerUserId: sellerOrder.order?.userId,
           sellerUserIds: sellerOrder.seller?.userId ? [sellerOrder.seller.userId] : [],
+          extra: {
+            customerConfirmed: targetStatusStr === 'DELIVERED' && changedByRole === 'CUSTOMER',
+          },
         });
 
         // Broadcast product sold count updates to all connected clients
@@ -891,6 +894,24 @@ export class OrderStateMachine {
             cancelReason: reason,
           })
         ).catch(() => {});
+      }
+
+      // If customer confirmed receipt of this seller order -> Dispatch Push + In-App Notification to the Seller
+      if (targetStatusStr === 'DELIVERED' && changedByRole === 'CUSTOMER') {
+        const sellerUserId = sellerOrder.seller?.userId;
+        if (sellerUserId) {
+          notificationDispatcher.dispatch(
+            NotificationEventFactory.sellerOrderReceivedEvent({
+              recipientId: sellerUserId,
+              orderId: sellerOrder.orderId,
+              orderNumber: sellerOrder.sellerOrderNumber || sellerOrder.order?.orderNumber || '',
+              sellerOrderId: sellerOrder.id,
+              totalAmount: Number(sellerOrder.sellerPayout || 0),
+            })
+          ).catch((err) => {
+            console.error('[Orders] Failed to dispatch seller order received notification:', err);
+          });
+        }
       }
     } catch (_) {}
 

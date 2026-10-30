@@ -5,6 +5,7 @@ import {
   ReviewStatus,
   ReviewMediaType,
   ReviewHelpfulVoteType,
+  OrderStatus,
   SellerOrderStatus,
   ReviewSellerResponseStatus,
   ReviewMediaModerationStatus,
@@ -167,7 +168,11 @@ export async function checkEligibility(userId: string, orderItemId: string): Pro
 
   // 3. Check seller order status — must be DELIVERED
   const sellerOrder = orderItem.sellerOrder;
-  if (sellerOrder.status !== SellerOrderStatus.DELIVERED) {
+  const isDelivered =
+    sellerOrder.status === SellerOrderStatus.DELIVERED ||
+    order.status === OrderStatus.DELIVERED;
+
+  if (!isDelivered) {
     return {
       eligible: false,
       alreadyReviewed: false,
@@ -179,6 +184,16 @@ export async function checkEligibility(userId: string, orderItemId: string): Pro
       verifiedPurchase: false,
       reason: 'PURCHASE_NOT_ELIGIBLE',
     };
+  }
+
+  // Sync suborder status if parent order was marked DELIVERED
+  if (sellerOrder.status !== SellerOrderStatus.DELIVERED && order.status === OrderStatus.DELIVERED) {
+    try {
+      await prisma.sellerOrder.update({
+        where: { id: sellerOrder.id },
+        data: { status: SellerOrderStatus.DELIVERED, deliveredAt: new Date() },
+      });
+    } catch (_) {}
   }
 
   // 4. Check for existing review

@@ -2365,6 +2365,50 @@ async function resolveSellerOrderId(sellerId: string, idParam: string): Promise<
   return match.id;
 }
 
+async function getFullSellerOrder(sellerOrderId: string) {
+  return prisma.sellerOrder.findUnique({
+    where: { id: sellerOrderId },
+    include: {
+      order: {
+        include: {
+          addressSnapshot: true,
+          deliveryMethod: true,
+          deliveryTimeSlot: true,
+          slotBooking: { include: { timeSlot: true } },
+          user: { select: { firstName: true, lastName: true, phone: true, email: true } },
+          payment: true,
+          returnRequests: { orderBy: { createdAt: 'desc' } },
+          refundRequests: {
+            include: { evidence: true, items: true, reason: true },
+            orderBy: { createdAt: 'desc' },
+          },
+        },
+      },
+      items: {
+        include: {
+          product: {
+            select: {
+              id: true,
+              nameAr: true,
+              nameEn: true,
+              images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
+            },
+          },
+          variant: { select: { id: true, image: true } },
+        },
+      },
+      deliveryMethod: true,
+      deliveryQuoteSnapshot: true,
+      cancellationRequests: { orderBy: { createdAt: 'desc' } },
+      statusHistory: { orderBy: { createdAt: 'asc' } },
+      refundRequests: {
+        include: { evidence: true, items: true, reason: true },
+        orderBy: { createdAt: 'desc' },
+      },
+    },
+  });
+}
+
 // POST /me/orders/:id/accept — PENDING -> CONFIRMED
 router.post('/me/orders/:id/accept', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -2379,7 +2423,8 @@ router.post('/me/orders/:id/accept', async (req: Request, res: Response, next: N
       note: 'تم قبول الطلب وبدء التحضير',
     });
 
-    ResponseUtil.success(res, result.sellerOrder, 'تم قبول الطلب وتأكيده بنجاح');
+    const fullOrder = await getFullSellerOrder(resolvedId);
+    ResponseUtil.success(res, fullOrder || result.sellerOrder, 'تم قبول الطلب وتأكيده بنجاح');
   } catch (error) {
     next(error);
   }
@@ -2405,7 +2450,8 @@ router.post('/me/orders/:id/reject', async (req: Request, res: Response, next: N
       note: note || `تم رفض الطلب لسبب: ${reason}`,
     });
 
-    ResponseUtil.success(res, result.sellerOrder, 'تم رفض الطلب وتحرير المخزون');
+    const fullOrder = await getFullSellerOrder(resolvedId);
+    ResponseUtil.success(res, fullOrder || result.sellerOrder, 'تم رفض الطلب وتحرير المخزون');
   } catch (error) {
     next(error);
   }
@@ -2425,7 +2471,8 @@ router.post('/me/orders/:id/processing', async (req: Request, res: Response, nex
       note: 'الطلب قيد التجهيز والتغليف الآن',
     });
 
-    ResponseUtil.success(res, result.sellerOrder, 'تم تحويل الطلب إلى قيد التجهيز');
+    const fullOrder = await getFullSellerOrder(resolvedId);
+    ResponseUtil.success(res, fullOrder || result.sellerOrder, 'تم تحويل الطلب إلى قيد التجهيز');
   } catch (error) {
     next(error);
   }
@@ -2445,7 +2492,8 @@ router.post(['/me/orders/:id/ready-to-ship', '/me/orders/:id/ready'], async (req
       note: 'الشحنة جاهزة للتسليم والشحن',
     });
 
-    ResponseUtil.success(res, result.sellerOrder, 'تم تحديد الطلب كجاهز للشحن بنجاح');
+    const fullOrder = await getFullSellerOrder(resolvedId);
+    ResponseUtil.success(res, fullOrder || result.sellerOrder, 'تم تحديد الطلب كجاهز للشحن بنجاح');
   } catch (error) {
     next(error);
   }
@@ -2465,7 +2513,8 @@ router.post(['/me/orders/:id/shipped', '/me/orders/:id/ship'], async (req: Reque
       note: 'تم تسليم الشحنة للشحن وبانتظار تأكيد استلام العميل',
     });
 
-    ResponseUtil.success(res, result.sellerOrder, 'تم شحن الطلب بنجاح وهو بانتظار استلام العميل');
+    const fullOrder = await getFullSellerOrder(resolvedId);
+    ResponseUtil.success(res, fullOrder || result.sellerOrder, 'تم شحن الطلب بنجاح وهو بانتظار استلام العميل');
   } catch (error) {
     next(error);
   }
@@ -2489,7 +2538,8 @@ router.post('/me/orders/:id/cancel', async (req: Request, res: Response, next: N
       note: note || `تم إلغاء الطلب من قبل المتجر: ${reason}`,
     });
 
-    ResponseUtil.success(res, result.sellerOrder, 'تم إلغاء الطلب بنجاح');
+    const fullOrder = await getFullSellerOrder(resolvedId);
+    ResponseUtil.success(res, fullOrder || result.sellerOrder, 'تم إلغاء الطلب بنجاح');
   } catch (error) {
     next(error);
   }

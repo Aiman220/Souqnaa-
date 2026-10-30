@@ -892,4 +892,39 @@ router.post('/admin/sla', requireAdmin, async (req: Request, res: Response, next
   }
 });
 
+/**
+ * POST /api/v1/support/app-feedback
+ * Customer / user rating and feedback submission.
+ */
+router.post('/app-feedback', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { rating, comment } = req.body || {};
+    const parsedRating = Number(rating);
+    if (!parsedRating || parsedRating < 1 || parsedRating > 5) {
+      throw new AppError('يجب أن يكون التقييم رقماً بين 1 و 5 نجوم', 400);
+    }
+
+    const userId = (req as any).user?.userId || null;
+
+    await prisma.auditLog.create({
+      data: {
+        userId,
+        action: 'APP_FEEDBACK_SUBMITTED',
+        resource: 'support_feedback',
+        details: JSON.stringify({
+          rating: parsedRating,
+          comment: (comment && typeof comment === 'string') ? comment.trim() : '',
+          platform: req.headers['x-platform'] || 'customer_app',
+          appVersion: req.headers['x-app-version'] || '',
+          timestamp: new Date().toISOString(),
+        }),
+      },
+    });
+
+    return ResponseUtil.success(res, { success: true }, 'تم استلام تقييمك بنجاح، شكراً لك!');
+  } catch (error) {
+    next(error);
+  }
+});
+
 export const supportRoutes = router;

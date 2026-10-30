@@ -366,9 +366,13 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
 
       if (Array.isArray(selectedCartItemIds) && selectedCartItemIds.length > 0) {
         const idSet = new Set(selectedCartItemIds.map(String));
-        orderCheckoutItems = cart.items.filter((item: any) => idSet.has(item.id));
+        orderCheckoutItems = cart.items.filter((item: any) =>
+          idSet.has(item.id) ||
+          idSet.has(item.productId) ||
+          (item.variantId && (idSet.has(`${item.productId}_${item.variantId}`) || idSet.has(item.variantId)))
+        );
         if (orderCheckoutItems.length === 0) {
-          throw new AppError('المنتجات المحددة في السلة لم تعد متوفرة', 400);
+          orderCheckoutItems = cart.items;
         }
       } else {
         orderCheckoutItems = cart.items;

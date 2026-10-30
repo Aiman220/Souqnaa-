@@ -88,7 +88,7 @@ export class NotificationEventFactory {
       params.eventType === 'SELLER_CANCELLATION_REQUESTED';
     return {
       eventId: randomUUID(),
-      idempotencyKey: `seller_order_${params.orderId}_${params.recipientId}_${params.eventType}`,
+      idempotencyKey: `seller_order_${params.sellerOrderId || params.orderId}_${params.recipientId}_${params.eventType}`,
       eventType: params.eventType,
       category: NotificationCategory.ORDER,
       priority: isUrgent ? NotificationPriority.URGENT : NotificationPriority.HIGH,

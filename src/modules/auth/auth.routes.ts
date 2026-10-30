@@ -50,6 +50,8 @@ router.put('/me', authenticate, validate(updateProfileSchema), AuthController.up
 router.patch('/me', authenticate, validate(updateProfileSchema), AuthController.updateMe);
 router.delete('/me', authenticate, AuthController.deleteAccount);
 router.post('/delete-account', authenticate, AuthController.deleteAccount);
+router.post('/change-password', authenticate, AuthController.changePassword);
+router.post('/data-export', authenticate, AuthController.exportUserData);
 
 // Customer Preferences & Settings
 router.get('/settings', authenticate, AuthController.getSettings);
