@@ -1,9 +1,12 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../../database/prisma';
-import { redis } from '../../database/redis';
+import { redis, redisService } from '../../database/redis';
 import { authenticate } from '../../middleware/auth.middleware';
 import { requireSeller } from '../../middleware/rbac.middleware';
 import { ResponseUtil } from '../../utils/response.util';
+import { supportedAreasService } from '../locations/supported-areas.service';
+import { deliveryServiceabilityService } from '../../services/delivery/delivery-serviceability.service';
+import { RemoteConfigService } from '../remote-config/remote-config.service';
 import { AppError } from '../../middleware/error.middleware';
 import {
   OrderStatus,
@@ -831,6 +834,25 @@ router.patch('/me/store', async (req: Request, res: Response, next: NextFunction
 });
 
 async function getOrCreateCity(cityName?: string) {
+  const isCityDiscoveryEnabled = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery');
+  const name = cityName?.trim() || 'صنعاء';
+
+  if (isCityDiscoveryEnabled) {
+    const match = supportedAreasService.matchSupportedArea(name);
+    if (!match.isSupported) {
+      throw new AppError(
+        match.rejectionReasonAr || 'موقع المتجر يجب أن يكون ضمن المناطق العشر المدعومة حصراً في اليمن',
+        400,
+        'UNSUPPORTED_SELLER_LOCATION'
+      );
+    }
+    await supportedAreasService.ensureDatabaseSync();
+    if (match.canonicalCityId) {
+      const cityRec = await prisma.city.findUnique({ where: { id: match.canonicalCityId } });
+      if (cityRec) return cityRec;
+    }
+  }
+
   let country = await prisma.country.findFirst({
     where: { OR: [{ code: 'YE' }, { code: 'SA' }] },
   });
@@ -838,7 +860,7 @@ async function getOrCreateCity(cityName?: string) {
     country = await prisma.country.create({
       data: {
         code: 'YE',
-        nameAr: 'اليمن',
+        nameAr: 'الجمهورية اليمنية',
         nameEn: 'Yemen',
         currency: 'YER',
         phoneCode: '+967',
@@ -847,7 +869,6 @@ async function getOrCreateCity(cityName?: string) {
     });
   }
 
-  const name = cityName?.trim() || 'صنعاء';
   const existing = await prisma.city.findFirst({
     where: {
       OR: [
@@ -1094,6 +1115,7 @@ router.put('/me/store/location', async (req: Request, res: Response, next: NextF
       });
     }
 
+    await deliveryServiceabilityService.invalidateServiceabilityCache();
     ResponseUtil.success(res, {
       ...updatedStore,
       address,
@@ -3511,6 +3533,11 @@ router.get('/me/withdrawals', async (req: Request, res: Response, next: NextFunc
 router.post('/me/withdrawals', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const seller = await getSeller(req.user!.userId);
+    const lock = await redisService.acquireLock(`seller:withdrawal:${seller.id}`, 10);
+    if (!lock.acquired) {
+      throw new AppError('طلب سحب أرباح آخر قيد المعالجة حالياً لهذا الحساب. يرجى الانتظار لحظات.', 409, 'CONCURRENT_WITHDRAWAL_CONFLICT');
+    }
+    try {
     const { amount, savedWalletId, walletProvider, walletNumber, holderName, bankName, iban, accountName } = req.body;
     const withdrawAmount = parseFloat(amount);
 
@@ -3579,13 +3606,24 @@ router.post('/me/withdrawals', async (req: Request, res: Response, next: NextFun
     const currency = (seller.balance?.currency && seller.balance?.currency !== 'SAR') ? seller.balance?.currency : 'YER';
 
     const withdrawal = await prisma.$transaction(async (tx) => {
-      await tx.sellerBalance.update({
-        where: { id: seller.balance!.id },
-        data: {
-          availableBalance: { decrement: withdrawAmount },
-          pendingBalance: { increment: withdrawAmount },
-        },
-      });
+      // Atomic conditional update ensuring non-negative balance invariant
+      const updatedBalanceRows: any = await tx.$queryRaw`
+        UPDATE "SellerBalance"
+        SET "availableBalance" = "availableBalance" - ${withdrawAmount},
+            "pendingBalance" = "pendingBalance" + ${withdrawAmount},
+            "updatedAt" = NOW()
+        WHERE "id" = ${seller.balance!.id} AND "availableBalance" >= ${withdrawAmount}
+        RETURNING "id", "availableBalance", "pendingBalance";
+      `;
+
+      if (!updatedBalanceRows || updatedBalanceRows.length === 0) {
+        throw new AppError(
+          'الرصيد المتاح غير كافٍ لإتمام عملية السحب بعد معالجة العمليات المتزامنة',
+          400,
+          'INSUFFICIENT_SELLER_BALANCE'
+        );
+      }
+
 
       const created = await tx.withdrawal.create({
         data: {
@@ -3623,6 +3661,9 @@ router.post('/me/withdrawals', async (req: Request, res: Response, next: NextFun
     SocketService.get()?.emitGlobal('withdrawal:created', withdrawal);
 
     ResponseUtil.created(res, withdrawal, 'تم تقديم طلب السحب بنجاح وسيتم معالجته من قبل الإدارة');
+    } finally {
+      await redisService.releaseLock(`seller:withdrawal:${seller.id}`, lock.token);
+    }
   } catch (error) {
     next(error);
   }

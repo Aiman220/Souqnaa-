@@ -3,6 +3,8 @@ import { prisma } from '../../database/prisma';
 import { authenticate } from '../../middleware/auth.middleware';
 import { ResponseUtil } from '../../utils/response.util';
 import { AppError } from '../../middleware/error.middleware';
+import { supportedAreasService } from '../locations/supported-areas.service';
+import { RemoteConfigService } from '../remote-config/remote-config.service';
 
 const router = Router();
 router.use(authenticate);
@@ -72,6 +74,39 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
     if (!targetCityId) {
       const firstCity = await prisma.city.findFirst({ where: { isActive: true } });
       if (firstCity) targetCityId = firstCity.id;
+    }
+
+    const isCityDiscoveryEnabled = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
+      userId: req.user!.userId,
+    });
+
+    if (isCityDiscoveryEnabled) {
+      let resolvedCityName = city;
+      if (!resolvedCityName && targetCityId) {
+        const cRec = await prisma.city.findUnique({ where: { id: targetCityId } });
+        if (cRec) resolvedCityName = cRec.nameAr;
+      }
+
+      const match = supportedAreasService.isAddressSupported({
+        cityId: targetCityId,
+        city: resolvedCityName,
+        district: districtId || req.body.district,
+        street: street || addressLine1,
+        latitude: latitude ? parseFloat(String(latitude)) : undefined,
+        longitude: longitude ? parseFloat(String(longitude)) : undefined,
+      });
+
+      if (!match.isSupported) {
+        throw new AppError(
+          match.rejectionReasonAr || 'عذراً، هذه المنطقة غير مشمولة بنطاق التوصيل حالياً.',
+          400,
+          'UNSUPPORTED_DELIVERY_AREA'
+        );
+      }
+
+      if (match.canonicalCityId) {
+        targetCityId = match.canonicalCityId;
+      }
     }
 
     if (isDefault) {
@@ -145,6 +180,39 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
       if (tStr.includes('WORK')) parsedType = 'WORK';
       else if (tStr.includes('OTHER')) parsedType = 'OTHER';
       else parsedType = 'HOME';
+    }
+
+    const isCityDiscoveryEnabled = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
+      userId: req.user!.userId,
+    });
+
+    if (isCityDiscoveryEnabled && (data.cityId || data.city || data.latitude || data.longitude)) {
+      let targetCityName = data.city;
+      if (!targetCityName && data.cityId) {
+        const cRec = await prisma.city.findUnique({ where: { id: data.cityId } });
+        if (cRec) targetCityName = cRec.nameAr;
+      }
+
+      const match = supportedAreasService.isAddressSupported({
+        cityId: data.cityId,
+        city: targetCityName,
+        district: data.districtId || data.district,
+        street: data.street,
+        latitude: data.latitude ? parseFloat(String(data.latitude)) : undefined,
+        longitude: data.longitude ? parseFloat(String(data.longitude)) : undefined,
+      });
+
+      if (!match.isSupported) {
+        throw new AppError(
+          match.rejectionReasonAr || 'عذراً، هذه المنطقة غير مشمولة بنطاق التوصيل حالياً.',
+          400,
+          'UNSUPPORTED_DELIVERY_AREA'
+        );
+      }
+
+      if (match.canonicalCityId) {
+        data.cityId = match.canonicalCityId;
+      }
     }
 
     const updateData: any = {

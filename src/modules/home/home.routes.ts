@@ -4,6 +4,8 @@ import { redis } from '../../database/redis';
 import { ResponseUtil } from '../../utils/response.util';
 import { formatProductForClient, formatProductsForClient } from '../../utils/product-formatter.util';
 import { storageService } from '../../services/storage/storage.service';
+import { deliveryServiceabilityService } from '../../services/delivery/delivery-serviceability.service';
+import { RemoteConfigService } from '../remote-config/remote-config.service';
 
 const router = Router();
 const HOME_CACHE_KEY = 'cache:home:feed';
@@ -18,11 +20,29 @@ export async function invalidateHomeFeedCache(): Promise<void> {
 // GET /api/v1/home — Combined payload for the customer home screen
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const isCityDiscoveryActive = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
+      userId: (req as any).user?.userId,
+    });
+    const destination = isCityDiscoveryActive ? await deliveryServiceabilityService.resolveCustomerDestination(req) : null;
+    const activeCacheKey = (isCityDiscoveryActive && destination)
+      ? `${HOME_CACHE_KEY}:${destination.canonicalCityId || destination.cityId}`
+      : `${HOME_CACHE_KEY}:default`;
+
     const bypassCache = req.query.nocache === 'true';
     if (!bypassCache) {
-      const cached = await redis.getJson<any>(HOME_CACHE_KEY);
+      const cached = await redis.getJson<any>(activeCacheKey);
       if (cached) {
         return ResponseUtil.success(res, cached);
+      }
+    }
+
+    let storeFilter: any = {};
+    if (isCityDiscoveryActive && destination) {
+      if (!destination.isSupported) {
+        storeFilter = { id: '__none__' };
+      } else {
+        const serviceableIds = await deliveryServiceabilityService.getServiceableStoreIds(destination);
+        storeFilter = { id: { in: Array.from(serviceableIds) } };
       }
     }
 
@@ -64,7 +84,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
           },
         }),
         prisma.product.findMany({
-          where: { isActive: true },
+          where: { isActive: true, ...(storeFilter.id ? { storeId: storeFilter.id } : {}) },
           orderBy: [{ isFeatured: 'desc' }, { createdAt: 'desc' }],
           take: 16,
           include: {
@@ -74,7 +94,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
           },
         }),
         prisma.product.findMany({
-          where: { isActive: true },
+          where: { isActive: true, ...(storeFilter.id ? { storeId: storeFilter.id } : {}) },
           orderBy: [{ soldCount: 'desc' }, { createdAt: 'desc' }],
           take: 12,
           include: {
@@ -84,7 +104,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
           },
         }),
         prisma.store.findMany({
-          where: { isActive: true },
+          where: { isActive: true, ...(storeFilter.id ? storeFilter : {}) },
           orderBy: { rating: 'desc' },
           take: 6,
           select: {

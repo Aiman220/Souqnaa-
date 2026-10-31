@@ -13,21 +13,23 @@ export class MembershipRulesEngine {
     rule: QualificationRuleItem,
     metrics: CustomerMetricsSnapshot
   ): boolean {
+    if (!rule || !rule.metric || !rule.operator) return false;
     const metricValue = this.extractMetricValue(rule.metric, metrics);
+    const targetValue = Number(rule.value || 0);
 
     switch (rule.operator) {
       case 'GTE':
-        return metricValue >= rule.value;
+        return metricValue >= targetValue;
       case 'GT':
-        return metricValue > rule.value;
+        return metricValue > targetValue;
       case 'LTE':
-        return metricValue <= rule.value;
+        return metricValue <= targetValue;
       case 'LT':
-        return metricValue < rule.value;
+        return metricValue < targetValue;
       case 'EQ':
-        return metricValue === rule.value;
+        return metricValue === targetValue;
       case 'BETWEEN':
-        const min = rule.minValue ?? rule.value;
+        const min = rule.minValue ?? targetValue;
         const max = rule.maxValue ?? Infinity;
         return metricValue >= min && metricValue <= max;
       default:
@@ -37,21 +39,61 @@ export class MembershipRulesEngine {
 
   /**
    * Evaluates the full qualification rules config (ALL / ANY).
+   * @param rulesConfig The qualification rules JSON configuration.
+   * @param metrics Customer metrics snapshot.
+   * @param tierLevel The numeric tier level being evaluated (1 = Basic, 2 = Silver, 3 = Gold, 4 = VIP+ Platinum).
    */
   public static isEligible(
-    rulesConfig: QualificationRulesConfig,
-    metrics: CustomerMetricsSnapshot
+    rulesConfig: QualificationRulesConfig | any,
+    metrics: CustomerMetricsSnapshot,
+    tierLevel?: number
   ): boolean {
-    if (!rulesConfig || !Array.isArray(rulesConfig.rules) || rulesConfig.rules.length === 0) {
-      return true; // No rules implies baseline eligibility (e.g. Regular tier)
+    const isBaselineTier = typeof tierLevel === 'number' ? tierLevel <= 1 : false;
+
+    let config = rulesConfig;
+    if (typeof config === 'string') {
+      try {
+        config = JSON.parse(config);
+      } catch (_) {
+        config = null;
+      }
     }
 
-    if (rulesConfig.logic === 'ANY') {
-      return rulesConfig.rules.some((rule) => this.evaluateRule(rule, metrics));
+    // Normalizing rules array
+    if (!config || typeof config !== 'object') {
+      return isBaselineTier;
+    }
+
+    // Handle legacy schema { minimumSpend, minimumOrders }
+    if (!Array.isArray(config.rules)) {
+      if (typeof config.minimumSpend === 'number' || typeof config.minimumOrders === 'number') {
+        const minSpend = Number(config.minimumSpend || 0);
+        const minOrders = Number(config.minimumOrders || 0);
+
+        // If minSpend and minOrders are both 0 or negative, only baseline tier is eligible
+        if (minSpend <= 0 && minOrders <= 0) {
+          return isBaselineTier;
+        }
+
+        const spendOk = minSpend <= 0 || (metrics.periodSpend >= minSpend || metrics.lifetimeSpend >= minSpend);
+        const ordersOk = minOrders <= 0 || ((metrics.periodCompletedOrders ?? metrics.completedOrders ?? 0) >= minOrders);
+        return spendOk && ordersOk;
+      }
+
+      // No rules defined
+      return isBaselineTier;
+    }
+
+    if (config.rules.length === 0) {
+      return isBaselineTier;
+    }
+
+    if (config.logic === 'ANY') {
+      return config.rules.some((rule: QualificationRuleItem) => this.evaluateRule(rule, metrics));
     }
 
     // Default: 'ALL'
-    return rulesConfig.rules.every((rule) => this.evaluateRule(rule, metrics));
+    return config.rules.every((rule: QualificationRuleItem) => this.evaluateRule(rule, metrics));
   }
 
   /**
@@ -82,7 +124,7 @@ export class MembershipRulesEngine {
    * If target tier has multiple rules (ANY or ALL), evaluates both spend and orders progress.
    */
   public static calculateProgress(
-    targetRulesConfig: QualificationRulesConfig,
+    targetRulesConfig: QualificationRulesConfig | any,
     metrics: CustomerMetricsSnapshot
   ): {
     metric: 'SPEND' | 'ORDERS';
@@ -93,13 +135,39 @@ export class MembershipRulesEngine {
     spendProgress: TierProgressMetricResult | null;
     orderProgress: TierProgressMetricResult | null;
   } {
-    if (!targetRulesConfig || !Array.isArray(targetRulesConfig.rules) || targetRulesConfig.rules.length === 0) {
+    // If unqualified or new customer with 0 purchases and orders, guarantee 0% progress
+    const totalOrders = metrics.periodCompletedOrders ?? metrics.completedOrders ?? 0;
+    const totalSpend = metrics.periodSpend ?? 0;
+
+    let config = targetRulesConfig;
+    if (typeof config === 'string') {
+      try {
+        config = JSON.parse(config);
+      } catch (_) {
+        config = null;
+      }
+    }
+
+    // Handle legacy schema
+    if (config && !Array.isArray(config.rules)) {
+      if (typeof config.minimumSpend === 'number' || typeof config.minimumOrders === 'number') {
+        config = {
+          logic: 'ANY',
+          rules: [
+            ...(typeof config.minimumOrders === 'number' ? [{ metric: 'COMPLETED_ORDERS', operator: 'GTE', value: config.minimumOrders }] : []),
+            ...(typeof config.minimumSpend === 'number' ? [{ metric: 'PERIOD_SPEND', operator: 'GTE', value: config.minimumSpend }] : []),
+          ],
+        };
+      }
+    }
+
+    if (!config || !Array.isArray(config.rules) || config.rules.length === 0) {
       return {
         metric: 'SPEND',
-        current: 100,
-        target: 100,
+        current: totalSpend,
+        target: 0,
         remaining: 0,
-        percentage: 100,
+        percentage: 0,
         spendProgress: null,
         orderProgress: null,
       };
@@ -108,24 +176,24 @@ export class MembershipRulesEngine {
     let spendProgress: TierProgressMetricResult | null = null;
     let orderProgress: TierProgressMetricResult | null = null;
 
-    for (const rule of targetRulesConfig.rules) {
+    for (const rule of config.rules) {
       if (rule.metric === 'PERIOD_SPEND' || rule.metric === 'LIFETIME_SPEND') {
-        const cur = rule.metric === 'PERIOD_SPEND' ? metrics.periodSpend : metrics.lifetimeSpend;
-        const target = rule.value;
+        const cur = rule.metric === 'PERIOD_SPEND' ? (metrics.periodSpend ?? 0) : (metrics.lifetimeSpend ?? 0);
+        const target = Math.max(0, Number(rule.value || 0));
         const remaining = Math.max(0, target - cur);
-        const percentage = Math.min(100, target > 0 ? Math.round((cur / target) * 100) : 100);
+        const percentage = target > 0 ? Math.max(0, Math.min(100, Math.floor((cur / target) * 100))) : 0;
         spendProgress = {
           metric: 'SPEND',
-          current: cur,
+          current: Math.round(cur * 100) / 100,
           target,
-          remaining,
+          remaining: Math.round(remaining * 100) / 100,
           percentage,
         };
       } else if (rule.metric === 'COMPLETED_ORDERS') {
-        const cur = metrics.periodCompletedOrders ?? metrics.completedOrders;
-        const target = rule.value;
+        const cur = metrics.periodCompletedOrders ?? metrics.completedOrders ?? 0;
+        const target = Math.max(0, Number(rule.value || 0));
         const remaining = Math.max(0, target - cur);
-        const percentage = Math.min(100, target > 0 ? Math.round((cur / target) * 100) : 100);
+        const percentage = target > 0 ? Math.max(0, Math.min(100, Math.floor((cur / target) * 100))) : 0;
         orderProgress = {
           metric: 'ORDERS',
           current: cur,
@@ -137,8 +205,8 @@ export class MembershipRulesEngine {
     }
 
     // Determine primary progress metric
-    // If logic is ANY, choose the metric that is closest to completion (highest percentage)
-    if (targetRulesConfig.logic === 'ANY') {
+    // If logic is ANY, choose the metric closest to completion (highest percentage)
+    if (config.logic === 'ANY') {
       if (spendProgress && orderProgress) {
         const primary = spendProgress.percentage >= orderProgress.percentage ? spendProgress : orderProgress;
         return {

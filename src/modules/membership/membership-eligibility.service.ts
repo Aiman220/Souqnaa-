@@ -4,7 +4,6 @@ import {
   MembershipAuditChangeType,
   CustomerMembershipSummary,
   MembershipEvaluationResult,
-  MembershipTierSummary,
 } from './membership.types';
 import { MembershipRulesEngine } from './membership-rules.engine';
 import { MembershipMetricsService } from './membership-metrics.service';
@@ -14,12 +13,15 @@ import { notificationDispatcher } from '../notifications/services/notification-d
 import { NotificationCategory, NotificationPriority, AppType } from '../notifications/notification.types';
 
 export class MembershipEligibilityService {
+  private static inFlightEvaluations = new Map<string, Promise<MembershipEvaluationResult>>();
+  private static recentProcessedEvents = new Map<string, number>(); // eventKey -> timestamp
+
   /**
    * Fetches all active tiers sorted by deterministic level descending (highest tier first).
    */
   public static async getActiveTiersDescending(): Promise<any[]> {
     const cached = await MembershipCacheService.getActiveTiers();
-    if (cached) return cached;
+    if (cached && Array.isArray(cached) && cached.length > 0) return cached;
 
     const tiers = await prisma.membershipTier.findMany({
       where: { isActive: true },
@@ -31,16 +33,17 @@ export class MembershipEligibilityService {
   }
 
   /**
-   * Fetches the baseline starting tier (level 0, e.g. REGULAR).
+   * Fetches the baseline starting tier (level 1, e.g. BASIC).
    */
   public static async getBaselineTier(): Promise<any> {
     const tiers = await this.getActiveTiersDescending();
-    const baseline = tiers.slice().reverse().find((t) => t.level === 0) || tiers[tiers.length - 1];
+    // Deterministically find level 1 (or lowest level tier)
+    const baseline = tiers.slice().reverse().find((t) => t.level === 1) || tiers[tiers.length - 1];
     return baseline;
   }
 
   /**
-   * Retrieves or creates a customer's membership record.
+   * Retrieves or creates a customer's membership record with default Level 1 Basic tier.
    */
   public static async getOrCreateMembership(userId: string): Promise<any> {
     let membership = await prisma.customerMembership.findUnique({
@@ -102,9 +105,29 @@ export class MembershipEligibilityService {
 
   /**
    * Core Server-Authoritative Evaluation Engine.
-   * Evaluates rules against customer metrics and applies target tier.
+   * Concurrency-safe, idempotent, transaction-wrapped.
    */
   public static async evaluateCustomerTier(
+    userId: string,
+    options: { forceAuthoritativeRecalculation?: boolean; correlationId?: string; actorId?: string } = {}
+  ): Promise<MembershipEvaluationResult> {
+    // 1. Mutex / Concurrency deduplication per user
+    const existingPromise = this.inFlightEvaluations.get(userId);
+    if (existingPromise) {
+      return existingPromise;
+    }
+
+    const evaluationPromise = this.executeAuthoritativeEvaluation(userId, options);
+    this.inFlightEvaluations.set(userId, evaluationPromise);
+
+    try {
+      return await evaluationPromise;
+    } finally {
+      this.inFlightEvaluations.delete(userId);
+    }
+  }
+
+  private static async executeAuthoritativeEvaluation(
     userId: string,
     options: { forceAuthoritativeRecalculation?: boolean; correlationId?: string; actorId?: string } = {}
   ): Promise<MembershipEvaluationResult> {
@@ -163,18 +186,20 @@ export class MembershipEligibilityService {
     // 2. Authoritative Metrics Gathering
     const metrics = await MembershipMetricsService.computeAuthoritativeMetrics(userId);
 
-    // 3. Evaluate Tiers from Highest level down to Lowest level
-    let targetTier = activeTiers[activeTiers.length - 1]; // fallback baseline
+    // 3. Evaluate Tiers from Highest level down to Lowest level (activeTiers sorted DESC)
+    const baselineTier = activeTiers[activeTiers.length - 1]; // Fallback baseline (Level 1)
+    let targetTier = baselineTier;
+
     for (const tier of activeTiers) {
       let rulesConfig: any = { logic: 'ALL', rules: [] };
       try {
         rulesConfig = JSON.parse(tier.qualificationRules);
       } catch (_) {}
 
-      const isEligible = MembershipRulesEngine.isEligible(rulesConfig, metrics);
+      const isEligible = MembershipRulesEngine.isEligible(rulesConfig, metrics, tier.level);
       if (isEligible) {
         targetTier = tier;
-        break; // First match is the highest level tier because activeTiers is sorted DESC
+        break; // First match is highest tier because activeTiers is sorted DESC
       }
     }
 
@@ -233,29 +258,48 @@ export class MembershipEligibilityService {
     // Invalidate Cache
     await MembershipCacheService.invalidateCustomer(userId);
 
-    // 5. Send Celebration Notification on Upgrade
+    // 5. Send Celebration Notification on Genuine Upgrade (Exactly-Once Idempotent)
     if (isUpgraded) {
+      const qualificationYear = now.getFullYear();
+      // Deterministic idempotency key tied to user, target tier, and qualification year
+      const idempotencyKey = `membership_upgrade_${userId}_${targetTier.code}_${qualificationYear}`;
+
       try {
-        notificationDispatcher.dispatch({
-          eventId: randomUUID(),
-          idempotencyKey: `membership_upgrade_${userId}_${targetTier.code}_${Date.now()}`,
-          eventType: 'MEMBERSHIP_UPGRADED',
-          category: NotificationCategory.REWARDS,
-          priority: NotificationPriority.HIGH,
-          recipientId: userId,
-          recipientType: AppType.CUSTOMER,
-          data: {
-            titleAr: `تهانينا! تمت ترقيتك إلى فئة ${targetTier.nameAr}`,
-            titleEn: `Congratulations! You are now a ${targetTier.nameEn} member`,
-            bodyAr: `استمتع بمزايا حصرية جديدة بما في ذلك مضاعف عملات وتخفيضات خاصة بفئتك.`,
-            bodyEn: `Enjoy new exclusive benefits including bonus coins and special perks.`,
-            tierCode: targetTier.code,
-            tierLevel: targetTier.level,
-            actionUrl: '/profile/membership',
+        // Check database for existing notification to avoid duplicate dispatch attempts
+        const existingNotification = await prisma.notification.findFirst({
+          where: {
+            userId,
+            idempotencyKey,
           },
-          createdAt: new Date(),
-        }).catch(() => {});
-      } catch (_) {}
+          select: { id: true },
+        });
+
+        if (!existingNotification) {
+          await notificationDispatcher.dispatch({
+            eventId: randomUUID(),
+            idempotencyKey,
+            eventType: 'MEMBERSHIP_UPGRADED',
+            category: NotificationCategory.REWARDS,
+            priority: NotificationPriority.HIGH,
+            recipientId: userId,
+            recipientType: AppType.CUSTOMER,
+            data: {
+              titleAr: `تهانينا! تمت ترقيتك إلى فئة ${targetTier.nameAr}`,
+              titleEn: `Congratulations! You are now a ${targetTier.nameEn} member`,
+              bodyAr: `استمتع بمزايا حصرية جديدة بما في ذلك مضاعف عملات وتخفيضات خاصة بفئتك.`,
+              bodyEn: `Enjoy new exclusive benefits including bonus coins and special perks.`,
+              tierCode: targetTier.code,
+              tierLevel: targetTier.level,
+              actionUrl: '/profile/membership',
+            },
+            createdAt: now,
+          }).catch((err) => {
+            console.warn('[Membership] Notification dispatch error:', err?.message || err);
+          });
+        }
+      } catch (err: any) {
+        console.warn('[Membership] Notification idempotency check error:', err?.message || err);
+      }
     }
 
     return {
@@ -275,25 +319,45 @@ export class MembershipEligibilityService {
 
   /**
    * Builds the comprehensive customer-facing membership summary for Profile and Dashboard.
+   * Guaranteed safe: Does not mutate state or trigger notifications during read operations.
    */
-  public static async getCustomerSummary(userId: string): Promise<CustomerMembershipSummary> {
+  public static async getCustomerSummary(
+    userId: string,
+    options: { forceEvaluation?: boolean } = {}
+  ): Promise<CustomerMembershipSummary> {
     const cached = await MembershipCacheService.getCustomerSummary(userId);
-    if (cached) return cached;
-
-    // Trigger authoritative evaluation to guarantee fresh tiers assignment and metrics
-    await this.evaluateCustomerTier(userId).catch((err) => {
-      console.warn(`[Membership] Evaluation on summary fetch for ${userId}:`, err?.message || err);
-    });
+    if (cached && !options.forceEvaluation) return cached;
 
     const membership = await this.getOrCreateMembership(userId);
     const activeTiers = await this.getActiveTiersDescending();
-    const activeOverride = membership.overrides?.[0];
-    const hasActiveOverride = activeOverride && (!activeOverride.endAt || new Date() < activeOverride.endAt);
-    const currentTier = (hasActiveOverride && activeOverride.overrideTier) ? activeOverride.overrideTier : membership.tier;
 
-    // Find next tier if one exists
-    // activeTiers is sorted DESC (4, 3, 2, 1, 0)
-    // Next tier is the one with level === currentTier.level + 1
+    // If never evaluated or explicitly requested, run authoritative evaluation
+    if (options.forceEvaluation || !membership.lastEvaluatedAt) {
+      await this.evaluateCustomerTier(userId).catch((err) => {
+        console.warn(`[Membership] Evaluation on summary fetch for ${userId}:`, err?.message || err);
+      });
+    }
+
+    // Refresh membership model from DB
+    const freshMembership = await prisma.customerMembership.findUnique({
+      where: { userId },
+      include: {
+        tier: true,
+        overrides: {
+          where: { isActive: true },
+          include: { overrideTier: true },
+          take: 1,
+        },
+      },
+    }) || membership;
+
+    const activeOverride = freshMembership.overrides?.[0];
+    const hasActiveOverride = Boolean(activeOverride && (!activeOverride.endAt || new Date() < activeOverride.endAt));
+    const currentTier = (hasActiveOverride && activeOverride?.overrideTier)
+      ? activeOverride.overrideTier
+      : freshMembership.tier;
+
+    // Find next tier: tier with level === currentTier.level + 1
     const nextTier = activeTiers.find((t) => t.level === currentTier.level + 1) || null;
 
     let benefitConfig: any = { perks: [], perksAr: [] };
@@ -319,12 +383,18 @@ export class MembershipEligibilityService {
       tierNameAr: currentTier.nameAr,
       tierNameEn: currentTier.nameEn,
       level: currentTier.level,
-      status: membership.status,
-      startedAt: membership.startedAt.toISOString(),
-      expiresAt: membership.expiresAt ? membership.expiresAt.toISOString() : null,
-      renewedAt: membership.renewedAt ? membership.renewedAt.toISOString() : null,
-      gracePeriodEnd: membership.gracePeriodEnd ? membership.gracePeriodEnd.toISOString() : null,
-      isGracePeriod: membership.gracePeriodEnd ? new Date() < membership.gracePeriodEnd : false,
+      // Convenience aliases
+      membershipLevel: currentTier.level,
+      membershipName: currentTier.nameEn,
+      annualPurchases: metricsSnapshot.periodSpend,
+      completedOrders: metricsSnapshot.completedOrders,
+      membershipProgress: progressResult ? progressResult.percentage : 0,
+      status: freshMembership.status,
+      startedAt: freshMembership.startedAt.toISOString(),
+      expiresAt: freshMembership.expiresAt ? freshMembership.expiresAt.toISOString() : null,
+      renewedAt: freshMembership.renewedAt ? freshMembership.renewedAt.toISOString() : null,
+      gracePeriodEnd: freshMembership.gracePeriodEnd ? freshMembership.gracePeriodEnd.toISOString() : null,
+      isGracePeriod: freshMembership.gracePeriodEnd ? new Date() < freshMembership.gracePeriodEnd : false,
       badge: {
         visible: true,
         imageUrl: currentTier.badgeAssetUrl || null,
@@ -338,19 +408,19 @@ export class MembershipEligibilityService {
         pointsBalance: metricsSnapshot.pointsBalance,
       },
       benefits: benefitConfig,
-      progress: nextTier
+      progress: nextTier && progressResult
         ? {
             nextTierCode: nextTier.code,
             nextTierNameAr: nextTier.nameAr,
             nextTierNameEn: nextTier.nameEn,
             nextTierLevel: nextTier.level,
-            metric: progressResult!.metric,
-            current: progressResult!.current,
-            target: progressResult!.target,
-            remaining: progressResult!.remaining,
-            percentage: progressResult!.percentage,
-            spendProgress: progressResult!.spendProgress,
-            orderProgress: progressResult!.orderProgress,
+            metric: progressResult.metric,
+            current: progressResult.current,
+            target: progressResult.target,
+            remaining: progressResult.remaining,
+            percentage: progressResult.percentage,
+            spendProgress: progressResult.spendProgress,
+            orderProgress: progressResult.orderProgress,
           }
         : null,
       override: activeOverride
@@ -367,14 +437,23 @@ export class MembershipEligibilityService {
   }
 
   /**
-   * Event hook: Triggered upon successful Order Delivery.
+   * Event hook: Triggered upon successful Order Delivery (Idempotent).
    */
   public static async onOrderDelivered(params: {
     userId: string;
     orderId: string;
-    subtotal: any;
+    subtotal?: any;
   }): Promise<void> {
     const { userId, orderId } = params;
+    const eventKey = `delivered_${orderId}`;
+
+    const now = Date.now();
+    const lastProcessed = this.recentProcessedEvents.get(eventKey);
+    if (lastProcessed && now - lastProcessed < 60000) {
+      return; // Deduplicate duplicate delivered events within 60 seconds
+    }
+    this.recentProcessedEvents.set(eventKey, now);
+
     try {
       await this.evaluateCustomerTier(userId, {
         forceAuthoritativeRecalculation: true,
@@ -394,6 +473,15 @@ export class MembershipEligibilityService {
     subtotal?: any;
   }): Promise<void> {
     const { userId, orderId } = params;
+    const eventKey = `cancelled_${orderId}`;
+
+    const now = Date.now();
+    const lastProcessed = this.recentProcessedEvents.get(eventKey);
+    if (lastProcessed && now - lastProcessed < 60000) {
+      return;
+    }
+    this.recentProcessedEvents.set(eventKey, now);
+
     try {
       await this.evaluateCustomerTier(userId, {
         forceAuthoritativeRecalculation: true,
@@ -413,6 +501,15 @@ export class MembershipEligibilityService {
     approvedAmount: number;
   }): Promise<void> {
     const { userId, refundId } = params;
+    const eventKey = `refund_${refundId}`;
+
+    const now = Date.now();
+    const lastProcessed = this.recentProcessedEvents.get(eventKey);
+    if (lastProcessed && now - lastProcessed < 60000) {
+      return;
+    }
+    this.recentProcessedEvents.set(eventKey, now);
+
     try {
       await this.evaluateCustomerTier(userId, {
         forceAuthoritativeRecalculation: true,
@@ -435,7 +532,6 @@ export class MembershipEligibilityService {
   }): Promise<any> {
     const { userId, overrideTierId, reason, endAt, adminId } = params;
 
-    // Validate tier
     const tier = await prisma.membershipTier.findUnique({
       where: { id: overrideTierId },
     });
@@ -483,6 +579,9 @@ export class MembershipEligibilityService {
       where: { userId, isActive: true },
       data: { isActive: false },
     });
+
+    // Invalidate cache immediately
+    await MembershipCacheService.invalidateCustomer(userId);
 
     // Evaluate back to automatic rules
     await this.evaluateCustomerTier(userId, {

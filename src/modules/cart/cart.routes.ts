@@ -8,6 +8,8 @@ import { SellerFinancialRiskService } from '../commission/seller-financial-risk.
 import { CartAbandonmentJob } from '../../services/jobs/cart-abandonment.job';
 import { cartAbandonmentService } from './abandonment/cart-abandonment.service';
 import { FlashSaleService } from '../flash-sales/flash-sale.service';
+import { deliveryServiceabilityService } from '../../services/delivery/delivery-serviceability.service';
+import { RemoteConfigService } from '../remote-config/remote-config.service';
 
 const router = Router();
 router.use(authenticate);
@@ -156,8 +158,29 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       customerId: req.user!.userId,
     });
 
+    let destination: any = null;
+    let allStoresDeliverable = true;
+    const isCityDiscoveryActive = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
+      userId: req.user!.userId,
+    });
+
+    if (isCityDiscoveryActive) {
+      destination = await deliveryServiceabilityService.resolveCustomerDestination(req);
+      if (destination) {
+        for (const s of stores) {
+          const evalRes = await deliveryServiceabilityService.evaluateStoreServiceability(s.store, destination);
+          (s as any).isDeliverable = evalRes.isDeliverable;
+          (s as any).deliveryReason = evalRes.reason;
+          (s as any).deliveryReasonAr = evalRes.reasonAr;
+          if (!evalRes.isDeliverable) allStoresDeliverable = false;
+        }
+      }
+    }
+
     ResponseUtil.success(res, {
       cartId: cart.id,
+      isDeliverable: allStoresDeliverable,
+      destinationCity: destination?.cityName,
       stores,
       itemCount: cart.items.reduce((acc, i) => acc + i.quantity, 0),
       subtotal,

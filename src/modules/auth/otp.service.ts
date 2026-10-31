@@ -88,9 +88,10 @@ export class OtpService {
       throw new AppError('لقد تم تجاوز الحد الأقصى لمحاولات التحقق. يرجى طلب رمز جديد.', 429, 'OTP_MAX_ATTEMPTS_EXCEEDED');
     }
 
-    // Check dev bypass code ONLY in non-production environments
-    const isProd = process.env.NODE_ENV === 'production';
-    const devCode = !isProd ? (process.env.OTP_DEV_BYPASS_CODE || '123456') : null;
+    // Check dev bypass code ONLY in local development when explicitly permitted
+    const isLocalDev = process.env.NODE_ENV === 'development';
+    const allowDevBypass = process.env.ALLOW_OTP_DEV_BYPASS === 'true';
+    const devCode = (isLocalDev && allowDevBypass) ? (process.env.OTP_DEV_BYPASS_CODE || '123456') : null;
     const isDevMatch = Boolean(devCode && code === devCode);
 
     if (!stored && !isDevMatch) {

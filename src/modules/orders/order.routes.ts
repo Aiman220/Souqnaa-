@@ -21,6 +21,8 @@ import {
 import { OrderStateMachine } from './order.state-machine';
 import { SocketService } from '../../services/websocket/socket.service';
 import { deliveryQuoteService } from '../../services/delivery/delivery-quote.service';
+import { supportedAreasService } from '../locations/supported-areas.service';
+import { RemoteConfigService } from '../remote-config/remote-config.service';
 import { deliverySlotService } from '../../services/delivery/delivery-slot.service';
 import { flashSaleService } from '../flash-sales/flash-sale.service';
 import { VoucherCalculationService } from '../vouchers/services/voucher-calculation.service';
@@ -274,6 +276,21 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
         },
         include: { city: true, district: true },
       });
+    }
+
+    const isCityDiscoveryEnabled = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
+      userId: req.user!.userId,
+    });
+
+    if (isCityDiscoveryEnabled && address) {
+      const match = supportedAreasService.isAddressSupported(address);
+      if (!match.isSupported) {
+        throw new AppError(
+          match.rejectionReasonAr || 'عنوان التوصيل المحدد يقع خارج نطاق التوصيل المدعوم حالياً في اليمن',
+          400,
+          'UNSUPPORTED_DELIVERY_AREA'
+        );
+      }
     }
 
     const defaultCommissionSetting = await prisma.systemSetting.findUnique({
@@ -620,12 +637,11 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
     }
 
     if (!quote.deliveryAvailable) {
-      throw new AppError(
-        quote.reason === 'OUTSIDE_DELIVERY_AREA'
-          ? 'عنوان التوصيل خارج نطاق التوصيل المسموح به'
-          : 'التوصيل غير متاح لهذا العنوان في الوقت الحالي',
-        400
-      );
+      const unserviceableQuote = quote.sellerQuotes?.find((q: any) => !q.deliveryAvailable);
+      const explanation = unserviceableQuote
+        ? `المتجر "${unserviceableQuote.storeName || 'المحدد'}" لا يمكنه التوصيل إلى عنوانك المحدد (${address?.city?.nameAr || 'الموقع المختار'})`
+        : (quote.storeWarning || 'عنوان التوصيل خارج نطاق التوصيل المسموح به لواحد أو أكثر من المتاجر المشاركة في الطلب');
+      throw new AppError(explanation, 400, 'OUTSIDE_DELIVERY_AREA');
     }
 
     // 1.1 Universal Shipping Promotions & First-Order Free Shipping Authoritative Evaluation & Reservation
@@ -3350,9 +3366,10 @@ router.post(['/:id/confirm-delivery', '/:id/confirm-received', '/:id/received'],
 });
 
 // ==============================================================================
-// 6.5. MOCK / REAL PAYMENT CONFIRMATION (POST /api/v1/orders/:id/mock-pay)
+// 6.5. MOCK PAYMENT CONFIRMATION (POST /api/v1/orders/:id/mock-pay)
+// Dev/testing only — strictly forbidden in production.
 // ==============================================================================
-router.post(['/:id/mock-pay', '/:id/pay'], async (req: Request, res: Response, next: NextFunction) => {
+router.post('/:id/mock-pay', async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (process.env.NODE_ENV === 'production') {
       throw new AppError('عمليات الدفع التجريبية معطلة في بيئة الإنتاج. يرجى استخدام بوابات الدفع الرسمية.', 403, 'MOCK_PAY_FORBIDDEN_IN_PRODUCTION');

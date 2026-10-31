@@ -2,13 +2,13 @@ import { prisma } from './prisma';
 
 export const DEFAULT_MEMBERSHIP_TIERS = [
   {
-    code: 'REGULAR',
-    nameAr: 'العميل العادي',
-    nameEn: 'Regular Customer',
+    code: 'BASIC',
+    nameAr: 'الأساسي',
+    nameEn: 'Basic',
     descriptionAr: 'الفئة الترحيبية الأساسية لجميع عملاء سوقناا الجدد',
     descriptionEn: 'Standard starting tier for all registered Souqna customers',
-    level: 0,
-    priority: 0,
+    level: 1,
+    priority: 10,
     isActive: true,
     icon: 'user',
     badgeAssetUrl: '/assets/badges/badge_regular.png',
@@ -46,60 +46,11 @@ export const DEFAULT_MEMBERSHIP_TIERS = [
     }),
   },
   {
-    code: 'MEMBER',
-    nameAr: 'عضو برونزي',
-    nameEn: 'Member',
-    descriptionAr: 'عضوية نشطة بعد إتمام أول 3 طلبات أو تسوق بقيمة 25,000 ريال',
-    descriptionEn: 'Active member tier unlocked after 3 completed orders or 25,000 YER spend',
-    level: 1,
-    priority: 10,
-    isActive: true,
-    icon: 'award',
-    badgeAssetUrl: '/assets/badges/badge_member.png',
-    qualificationRules: JSON.stringify({
-      logic: 'ANY',
-      rules: [
-        {
-          metric: 'COMPLETED_ORDERS',
-          operator: 'GTE',
-          value: 3,
-        },
-        {
-          metric: 'PERIOD_SPEND',
-          operator: 'GTE',
-          value: 25000,
-        },
-      ],
-    }),
-    benefitConfiguration: JSON.stringify({
-      perks: [
-        '5% bonus Souqna Coins on delivered orders',
-        'Member-only vouchers monthly',
-        'Faster dispute and ticket processing',
-      ],
-      perksAr: [
-        'مضاعف عملات سوقناا 1.05x عند تسليم الطلبات',
-        'كوبونات وعروض حصرية شهرياً',
-        'أولوية معالجة تذاكر الدعم والنزاعات',
-      ],
-      coinsMultiplier: 1.05,
-      freeShipping: false,
-      prioritySupport: false,
-      exclusiveCampaignAccess: false,
-    }),
-    validityConfiguration: JSON.stringify({
-      periodType: 'ROLLING_DAYS',
-      days: 365,
-      gracePeriodDays: 30,
-      downgradePolicy: 'DOWNGRADE',
-    }),
-  },
-  {
-    code: 'PREMIUM',
+    code: 'SILVER',
     nameAr: 'عضو فضي',
-    nameEn: 'Premium Member',
-    descriptionAr: 'عضوية متقدمة للمتسوقين المنتظمين بـ 7 طلبات أو 60,000 ريال سنوي',
-    descriptionEn: 'Advanced tier for regular shoppers with 7 orders or 60,000 YER spend',
+    nameEn: 'Silver',
+    descriptionAr: 'عضوية فضية للمتسوقين المنتظمين بـ 7 طلبات أو 60,000 ريال سنوي',
+    descriptionEn: 'Silver tier for regular shoppers with 7 orders or 60,000 YER spend',
     level: 2,
     priority: 20,
     isActive: true,
@@ -125,13 +76,13 @@ export const DEFAULT_MEMBERSHIP_TIERS = [
         '10% bonus Souqna Coins on all purchases',
         'Discounted shipping on orders over 15,000 YER',
         'Early access to Flash Sales by 1 hour',
-        'Exclusive monthly Premium voucher bundle',
+        'Exclusive monthly Silver voucher bundle',
       ],
       perksAr: [
         'مضاعف عملات سوقناا 1.1x على جميع المشتريات',
         'خصم رسوم الشحن عند الشراء بأكثر من 15,000 ريال',
         'دخول مبكر لعروض التخفيضات الكبرى بساعة',
-        'حزمة كوبونات شهرية حصرية للأعضاء المميزين',
+        'حزمة كوبونات شهرية حصرية للأعضاء الفضيين',
       ],
       coinsMultiplier: 1.1,
       freeShipping: false,
@@ -146,11 +97,11 @@ export const DEFAULT_MEMBERSHIP_TIERS = [
     }),
   },
   {
-    code: 'VIP',
+    code: 'GOLD',
     nameAr: 'عضو VIP ذهبي',
-    nameEn: 'VIP',
+    nameEn: 'Gold',
     descriptionAr: 'فئة كبار العملاء مع مزايا شحن مجاني ودعم مميز وأولوية قصوى',
-    descriptionEn: 'VIP tier with free shipping eligibility, priority concierge support, and high multipliers',
+    descriptionEn: 'VIP Gold tier with free shipping eligibility, priority concierge support, and high multipliers',
     level: 3,
     priority: 30,
     isActive: true,
@@ -202,7 +153,7 @@ export const DEFAULT_MEMBERSHIP_TIERS = [
   {
     code: 'VIP_PLUS',
     nameAr: 'عضو VIP+ البلاتيني',
-    nameEn: 'VIP+',
+    nameEn: 'VIP+ Platinum',
     descriptionAr: 'النخبة البلاتينية: شحن مجاني مطلق، مضاعف 1.35x، ودعوات تسوق حصرية',
     descriptionEn: 'Platinum Elite tier: unconditional free shipping, 1.35x coins, and luxury concierge',
     level: 4,
@@ -257,6 +208,63 @@ export const DEFAULT_MEMBERSHIP_TIERS = [
 
 export async function seedMembershipTiers() {
   console.log('[Seed] Seeding Membership Tiers...');
+
+  // Map legacy codes if present in DB
+  const legacyRegular = await prisma.membershipTier.findUnique({ where: { code: 'REGULAR' } });
+  if (legacyRegular) {
+    await prisma.membershipTier.update({
+      where: { code: 'REGULAR' },
+      data: {
+        code: 'BASIC',
+        nameAr: 'الأساسي',
+        nameEn: 'Basic',
+        level: 1,
+        priority: 10,
+        qualificationRules: JSON.stringify({
+          logic: 'ALL',
+          rules: [{ metric: 'COMPLETED_ORDERS', operator: 'GTE', value: 0 }],
+        }),
+      },
+    });
+  }
+
+  const legacyPremium = await prisma.membershipTier.findUnique({ where: { code: 'PREMIUM' } });
+  if (legacyPremium) {
+    await prisma.membershipTier.update({
+      where: { code: 'PREMIUM' },
+      data: {
+        code: 'SILVER',
+        nameAr: 'عضو فضي',
+        nameEn: 'Silver',
+        level: 2,
+        priority: 20,
+      },
+    });
+  }
+
+  const legacyVip = await prisma.membershipTier.findUnique({ where: { code: 'VIP' } });
+  if (legacyVip) {
+    await prisma.membershipTier.update({
+      where: { code: 'VIP' },
+      data: {
+        code: 'GOLD',
+        nameAr: 'عضو VIP ذهبي',
+        nameEn: 'Gold',
+        level: 3,
+        priority: 30,
+      },
+    });
+  }
+
+  // Deactivate legacy Bronze MEMBER if present
+  const legacyMember = await prisma.membershipTier.findUnique({ where: { code: 'MEMBER' } });
+  if (legacyMember) {
+    await prisma.membershipTier.update({
+      where: { code: 'MEMBER' },
+      data: { isActive: false },
+    });
+  }
+
   for (const tierData of DEFAULT_MEMBERSHIP_TIERS) {
     await prisma.membershipTier.upsert({
       where: { code: tierData.code },
@@ -277,7 +285,7 @@ export async function seedMembershipTiers() {
       create: tierData,
     });
   }
-  console.log('[Seed] Successfully seeded 5 Membership Tiers (REGULAR, MEMBER, PREMIUM, VIP, VIP_PLUS)');
+  console.log('[Seed] Successfully seeded 4 Membership Tiers (BASIC, SILVER, GOLD, VIP_PLUS)');
 }
 
 if (require.main === module) {

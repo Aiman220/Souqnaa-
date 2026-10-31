@@ -14,6 +14,8 @@ import { WishlistAlertsJob } from '../../services/jobs/wishlist-alerts.job';
 import { catalogVisualIndexService } from '../search/visual/catalog-visual-index.service';
 import { recommendationService } from '../recommendations/services/recommendation.service';
 import { StorefrontInvalidatorService } from '../../services/storefront-invalidator.service';
+import { deliveryServiceabilityService } from '../../services/delivery/delivery-serviceability.service';
+import { RemoteConfigService } from '../remote-config/remote-config.service';
 
 const router = Router();
 
@@ -74,7 +76,32 @@ router.get('/', optionalAuth, async (req: Request, res: Response, next: NextFunc
     }
 
     if (brandId) where.brandId = String(brandId);
-    if (storeId) where.storeId = String(storeId);
+
+    const isCityDiscoveryEnabled = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
+      userId: req.user?.userId,
+    });
+
+    if (isCityDiscoveryEnabled) {
+      const destination = await deliveryServiceabilityService.resolveCustomerDestination(req);
+      if (destination) {
+        if (!destination.isSupported) {
+          return ResponseUtil.paginated(res, [], 0, page, limit);
+        }
+        const serviceableStoreIds = await deliveryServiceabilityService.getServiceableStoreIds(destination);
+        if (storeId) {
+          if (!serviceableStoreIds.has(String(storeId))) {
+            return ResponseUtil.paginated(res, [], 0, page, limit);
+          }
+          where.storeId = String(storeId);
+        } else {
+          where.storeId = { in: Array.from(serviceableStoreIds) };
+        }
+      } else if (storeId) {
+        where.storeId = String(storeId);
+      }
+    } else if (storeId) {
+      where.storeId = String(storeId);
+    }
     if (isFeatured !== undefined) where.isFeatured = isFeatured === 'true';
 
     if (minPrice != null || maxPrice != null) {
@@ -257,6 +284,28 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
     if (!product) throw new AppError('Product not found', 404);
     const locale = req.headers['accept-language']?.includes('en') ? 'en' : 'ar';
     const formatted = await formatProductWithCampaign(product, locale);
+
+    const isCityDiscoveryActive = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
+      userId: (req as any).user?.userId,
+    });
+
+    if (isCityDiscoveryActive && formatted && product.store) {
+      const destination = await deliveryServiceabilityService.resolveCustomerDestination(req);
+      if (destination) {
+        const evalResult = await deliveryServiceabilityService.evaluateStoreServiceability(product.store, destination);
+        formatted.isDeliverable = evalResult.isDeliverable;
+        formatted.deliveryAvailability = {
+          isDeliverable: evalResult.isDeliverable,
+          distanceKm: evalResult.distanceKm,
+          destinationCity: destination.cityName,
+          reason: evalResult.reason,
+          reasonAr: evalResult.reasonAr,
+        };
+      } else {
+        formatted.isDeliverable = true;
+        formatted.deliveryAvailability = null;
+      }
+    }
     if (formatted && formatted.store) {
       const sellerId = product.store?.sellerId || (product as any).sellerId || formatted.store?.sellerId;
       if (sellerId) {

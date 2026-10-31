@@ -4,6 +4,7 @@ import rateLimit from 'express-rate-limit';
 import { ResponseUtil } from '../../utils/response.util';
 import { optionalAuth, authenticate, authorize } from '../../middleware/auth.middleware';
 import { searchService } from './search.service';
+import { deliveryServiceabilityService } from '../../services/delivery/delivery-serviceability.service';
 import { visualSearchService } from './visual/visual-search.service';
 import { catalogVisualIndexService } from './visual/catalog-visual-index.service';
 import { validateImageBuffer } from './visual/image-hasher.util';
@@ -77,7 +78,9 @@ router.get('/', searchLimiter, optionalAuth, async (req: Request, res: Response,
     }
 
     const locale = req.headers['accept-language']?.includes('en') ? 'en' : 'ar';
+    const destination = await deliveryServiceabilityService.resolveCustomerDestination(req);
     const result = await searchService.search({
+      destination,
       q: q ? String(q) : undefined,
       categoryId: categoryId ? String(categoryId).trim() : undefined,
       brandId: brandId ? String(brandId).trim() : undefined,

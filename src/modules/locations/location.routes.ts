@@ -3,6 +3,8 @@ import { prisma } from '../../database/prisma';
 import { ResponseUtil } from '../../utils/response.util';
 import { AppError } from '../../middleware/error.middleware';
 import { geoService } from '../../services/geo/geo.service';
+import { supportedAreasService } from './supported-areas.service';
+import { RemoteConfigService } from '../remote-config/remote-config.service';
 import { config } from '../../config';
 
 const router = Router();
@@ -23,9 +25,28 @@ router.get('/countries', async (req: Request, res: Response, next: NextFunction)
   }
 });
 
+router.get('/supported-areas', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await supportedAreasService.ensureDatabaseSync();
+    const areas = supportedAreasService.getSupportedAreasList();
+    ResponseUtil.success(res, areas);
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/cities', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { countryId } = req.query;
+    const { countryId, supportedOnly } = req.query;
+    const isCityDiscoveryEnabled = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery');
+    const shouldFilterSupported = isCityDiscoveryEnabled || supportedOnly === 'true';
+
+    if (shouldFilterSupported) {
+      await supportedAreasService.ensureDatabaseSync();
+      const supportedList = supportedAreasService.getSupportedAreasList();
+      return ResponseUtil.success(res, supportedList);
+    }
+
     const cities = await prisma.city.findMany({
       where: {
         isActive: true,
@@ -120,17 +141,18 @@ router.get('/geocode', async (req: Request, res: Response, next: NextFunction) =
       return ResponseUtil.success(res, results);
     }
 
-    // Built-in Yemeni major cities fallback
+    // Strictly supported 10 delivery locations fallback in Yemen
     const defaultCities = [
       { nameAr: 'صنعاء', nameEn: 'Sanaa', lat: 15.3694, lng: 44.1910 },
-      { nameAr: 'عدن', nameEn: 'Aden', lat: 12.7855, lng: 45.0187 },
-      { nameAr: 'تعز', nameEn: 'Taiz', lat: 13.5776, lng: 44.0175 },
-      { nameAr: 'الحديدة', nameEn: 'Hodeidah', lat: 14.7978, lng: 42.9545 },
-      { nameAr: 'إب', nameEn: 'Ibb', lat: 13.9667, lng: 44.1833 },
-      { nameAr: 'المكلا', nameEn: 'Mukalla', lat: 14.5425, lng: 49.1242 },
-      { nameAr: 'ذمار', nameEn: 'Dhamar', lat: 14.5427, lng: 44.4051 },
-      { nameAr: 'سيئون', nameEn: 'Sayun', lat: 15.9389, lng: 48.7881 },
-      { nameAr: 'مأرب', nameEn: 'Marib', lat: 15.4608, lng: 45.3242 },
+      { nameAr: 'صعدة', nameEn: 'Saada', lat: 16.9402, lng: 43.7639 },
+      { nameAr: 'عمران', nameEn: 'Amran', lat: 15.6594, lng: 43.9439 },
+      { nameAr: 'حجة', nameEn: 'Hajjah', lat: 15.6942, lng: 43.6033 },
+      { nameAr: 'المحويت', nameEn: 'Al Mahwit', lat: 15.4700, lng: 43.5447 },
+      { nameAr: 'ريمة', nameEn: 'Raymah', lat: 14.6300, lng: 43.7100 },
+      { nameAr: 'ذمار', nameEn: 'Dhamar', lat: 14.5428, lng: 44.4056 },
+      { nameAr: 'البيضاء', nameEn: 'Al Bayda', lat: 13.9856, lng: 45.5728 },
+      { nameAr: 'الحديدة', nameEn: 'Al Hudaydah', lat: 14.7979, lng: 42.9545 },
+      { nameAr: 'تعز – الحوبان', nameEn: 'Taiz - Al Hawban', lat: 13.6100, lng: 44.0600 },
     ];
 
     const matched = defaultCities.filter(

@@ -736,6 +736,20 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagSeedDefinition[] = [
     dependencies: ['standard_delivery'],
   },
   {
+    key: 'city_based_product_discovery',
+    enabled: false,
+    displayNameAr: 'استكشاف المنتجات ونطاق التوصيل حسب المدينة',
+    displayNameEn: 'City-Based Product Discovery & Delivery Serviceability',
+    descriptionAr: 'حصر استكشاف المنتجات وعمليات التوصيل في المناطق العشر المدعومة حصراً في اليمن مع التحقق الصارم من أهلية توصيل البائع',
+    descriptionEn: 'Enforces product discovery and delivery serviceability strictly within the 10 supported Yemeni areas based on seller coverage',
+    maintenanceMessageAr: 'خدمة التوصيل الميداني حسب المدينة قيد التحديث المؤقت',
+    maintenanceMessageEn: 'City-based delivery discovery is temporarily undergoing maintenance',
+    isSensitive: true,
+    rolloutPercentage: 100,
+    platforms: ['android', 'ios', 'web'],
+    dependencies: ['standard_delivery'],
+  },
+  {
     key: 'refunds',
     enabled: true, // Standard marketplace consumer rights
     displayNameAr: 'نظام المرتجعات واسترداد المبالغ',

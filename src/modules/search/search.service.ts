@@ -2,6 +2,7 @@ import { prisma } from '../../database/prisma';
 import { redis } from '../../database/redis';
 import { formatProductsWithCampaigns } from '../../utils/product-formatter.util';
 import { remoteConfigService } from '../remote-config/remote-config.service';
+import { deliveryServiceabilityService, CustomerDestination } from '../../services/delivery/delivery-serviceability.service';
 import { AppError } from '../../middleware/error.middleware';
 import {
   normalizeArabic,
@@ -25,6 +26,7 @@ export interface SearchParams {
   cursor?: string;
   userId?: string;
   locale?: string;
+  destination?: CustomerDestination | null;
 }
 
 export interface SuggestionItem {
@@ -224,6 +226,24 @@ export class SearchService {
       isActive: true,
       isSuspended: false,
     };
+
+    const isCityDiscoveryActive = await remoteConfigService.isFeatureActive('city_based_product_discovery', {
+      userId: params.userId,
+    });
+
+    if (isCityDiscoveryActive && params.destination) {
+      if (!params.destination.isSupported) {
+        return {
+          products: [],
+          total: 0,
+          page,
+          limit,
+          nextCursor: null,
+        };
+      }
+      const serviceableStoreIds = await deliveryServiceabilityService.getServiceableStoreIds(params.destination);
+      where.storeId = { in: Array.from(serviceableStoreIds) };
+    }
 
     if (params.categoryId) {
       const cleanCategoryId = String(params.categoryId).trim();

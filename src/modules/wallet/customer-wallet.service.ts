@@ -1,4 +1,5 @@
 import { prisma } from '../../database/prisma';
+import { redisService } from '../../database/redis';
 import { AppError } from '../../middleware/error.middleware';
 import { WalletTxType, WalletTxStatus, NotificationType } from '@prisma/client';
 import { notificationEventBus } from '../notifications/services/event-bus';
@@ -679,11 +680,24 @@ export class CustomerWalletService {
         },
       });
 
-      // 3. Update cached balance
-      const updatedAccount = await tx.walletAccount.update({
-        where: { id: account.id },
-        data: { availableBalance: balanceAfter },
-      });
+      // 3. Atomically decrement cached balance and verify non-negative invariant
+      const updatedRows: any = await tx.$queryRaw`
+        UPDATE "WalletAccount"
+        SET "availableBalance" = "availableBalance" - ${amount},
+            "updatedAt" = NOW()
+        WHERE "id" = ${account.id} AND "availableBalance" >= ${amount}
+        RETURNING "id", "userId", "availableBalance", "pendingBalance", "currency";
+      `;
+
+      if (!updatedRows || updatedRows.length === 0) {
+        throw new AppError(
+          'رصيد محفظتك الحالي غير كافٍ لإتمام العملية بعد معالجة العمليات المتزامنة',
+          400,
+          'INSUFFICIENT_WALLET_BALANCE'
+        );
+      }
+
+      const updatedAccount = updatedRows[0];
 
       return {
         alreadyProcessed: false,
@@ -693,10 +707,19 @@ export class CustomerWalletService {
       };
     };
 
-    if (txClient) {
-      return await runner(txClient);
-    } else {
-      return await prisma.$transaction(runner);
+    const lock = await redisService.acquireLock(`wallet:debit:${customerId}`, 10);
+    if (!lock.acquired) {
+      throw new AppError('عملية دفع أخرى قيد المعالجة لمحفظتك حالياً. يرجى الانتظار لحظات.', 409, 'WALLET_CONCURRENT_TRANSACTION');
+    }
+
+    try {
+      if (txClient) {
+        return await runner(txClient);
+      } else {
+        return await prisma.$transaction(runner);
+      }
+    } finally {
+      await redisService.releaseLock(`wallet:debit:${customerId}`, lock.token);
     }
   }
 

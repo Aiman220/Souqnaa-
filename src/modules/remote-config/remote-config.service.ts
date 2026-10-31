@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { prisma } from '../../database/prisma';
 import { AppError } from '../../middleware/error.middleware';
 import { SocketService } from '../../services/websocket/socket.service';
+import { supportedAreasService } from '../locations/supported-areas.service';
 import {
   AppBrandingConfig,
   DEFAULT_APP_BRANDING,
@@ -94,10 +95,8 @@ export class RemoteConfigService {
    */
   public async ensureInitialized(): Promise<void> {
     try {
-      const count = await prisma.featureFlag.count();
-      if (count >= DEFAULT_FEATURE_FLAGS.length) {
-        return;
-      }
+      // Ensure supported delivery areas are synced
+      await supportedAreasService.ensureDatabaseSync();
 
       for (const def of DEFAULT_FEATURE_FLAGS) {
         const existing = await prisma.featureFlag.findUnique({

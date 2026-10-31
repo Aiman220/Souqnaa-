@@ -5,7 +5,7 @@ import { redis } from '../../database/redis';
 import { JwtUtil } from '../../utils/jwt.util';
 import { ResponseUtil } from '../../utils/response.util';
 import { AppError } from '../../middleware/error.middleware';
-import { UserRoleType, SellerStatus } from '@prisma/client';
+import { UserRoleType, SellerStatus, MembershipStatus, MembershipAuditChangeType } from '@prisma/client';
 import { otpService } from './otp.service';
 import { smtpEmailProvider } from '../notifications/providers/email.provider';
 import { socialAuthService } from './social/social-auth.service';
@@ -80,6 +80,42 @@ export class AuthController {
           await tx.customer.create({ data: { userId: newUser.id } });
           await tx.cart.create({ data: { userId: newUser.id } });
           await tx.wishlist.create({ data: { userId: newUser.id } });
+
+          // SOUQNAA Phase 2: Authoritative customer account initialization
+          // membershipLevel = 1, membershipName = Basic, annualPurchases = 0, completedOrders = 0, progress = 0
+          const baselineTier = await tx.membershipTier.findFirst({
+            where: { isActive: true },
+            orderBy: [{ level: 'asc' }, { priority: 'asc' }],
+          });
+
+          if (baselineTier) {
+            await tx.customerMembership.create({
+              data: {
+                userId: newUser.id,
+                tierId: baselineTier.id,
+                status: MembershipStatus.ACTIVE,
+                startedAt: new Date(),
+                lifetimeSpend: 0,
+                periodSpend: 0,
+                completedOrders: 0,
+                periodCompletedOrders: 0,
+                pointsBalance: 0,
+                lastEvaluatedAt: new Date(),
+                version: 1,
+              },
+            });
+
+            await tx.membershipAuditLog.create({
+              data: {
+                userId: newUser.id,
+                actorId: 'SYSTEM',
+                actorRole: 'SYSTEM',
+                changeType: MembershipAuditChangeType.INITIAL_ASSIGNMENT,
+                newTierId: baselineTier.id,
+                reason: 'Initial membership assignment upon onboarding',
+              },
+            });
+          }
         } else if (newUser.role === UserRoleType.SELLER) {
           const seller = await tx.seller.create({
             data: {
@@ -537,111 +573,29 @@ export class AuthController {
 
   static async googleAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      let { email, firstName, lastName, photoUrl, idToken } = req.body;
+      const { idToken, credential, platform } = req.body;
+      const rawToken = (typeof idToken === 'string' && idToken.trim().length > 0)
+        ? idToken.trim()
+        : (typeof credential === 'string' && credential.trim().length > 0 ? credential.trim() : null);
 
-      // If idToken is provided, verify against Google's tokeninfo endpoint
-      if (idToken && typeof idToken === 'string' && idToken.trim().length > 0) {
-        try {
-          const verifyRes = await fetch(
-            `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken.trim())}`,
-            { headers: { Accept: 'application/json' } }
-          );
-          if (verifyRes.ok) {
-            const tokenPayload = (await verifyRes.json()) as any;
-            if (tokenPayload.email) {
-              email = tokenPayload.email;
-              if (tokenPayload.given_name) firstName = tokenPayload.given_name;
-              if (tokenPayload.family_name) lastName = tokenPayload.family_name;
-              if (tokenPayload.picture) photoUrl = tokenPayload.picture;
-            }
-          }
-        } catch (verifyErr) {
-          console.warn('[Google Auth] Token verification warning, continuing with client payload:', verifyErr);
-        }
+      if (!rawToken) {
+        throw new AppError('Google ID token is required for authentication.', 400, 'SOCIAL_INVALID_CREDENTIAL');
       }
 
-      if (!email || typeof email !== 'string' || !email.includes('@')) {
-        throw new AppError('بريد إلكتروني غير صالح من حساب Google', 400);
-      }
-
-      const cleanEmail = email.trim().toLowerCase();
-      let user = await prisma.user.findUnique({
-        where: { email: cleanEmail },
+      // Delegate strictly to verified social auth pipeline with audience, expiry & signature checks
+      const result = await socialAuthService.authenticateSocialLogin({
+        provider: SocialProvider.GOOGLE,
+        credential: rawToken,
+        applicationType: SocialAccountType.CUSTOMER,
+        platform: platform || (req.headers['x-app-platform'] as string | undefined),
       });
 
-      if (!user) {
-        // Create new customer account from Google Sign-In
-        const randomPassword = Math.random().toString(36).slice(-10) + 'A1!@' + Date.now().toString(36);
-        const passwordHash = await bcrypt.hash(randomPassword, 10);
-        const fName = (firstName && typeof firstName === 'string' && firstName.trim()) ? firstName.trim() : 'مستخدم';
-        const lName = (lastName && typeof lastName === 'string' && lastName.trim()) ? lastName.trim() : 'Google';
+      const message = result.isNewAccount
+        ? 'تم إنشاء الحساب بنجاح عبر حساب Google'
+        : 'تم تسجيل الدخول بحساب Google بنجاح';
 
-        user = await prisma.$transaction(async (tx) => {
-          const newUser = await tx.user.create({
-            data: {
-              email: cleanEmail,
-              passwordHash,
-              firstName: fName,
-              lastName: lName,
-              role: UserRoleType.CUSTOMER,
-              isVerified: true,
-              avatar: (photoUrl && typeof photoUrl === 'string' && photoUrl.trim()) ? photoUrl.trim() : null,
-            },
-          });
-
-          await tx.customer.create({ data: { userId: newUser.id } });
-          await tx.cart.create({ data: { userId: newUser.id } });
-          await tx.wishlist.create({ data: { userId: newUser.id } });
-
-          return newUser;
-        });
-
-        // Centralized Notification Platform: Dispatch Welcome Email
-        const locale = (req.headers['accept-language']?.includes('en') ? 'en' : 'ar') as 'ar' | 'en';
-        smtpEmailProvider.sendTemplate(user.email, 'WELCOME', locale, {
-          name: `${user.firstName} ${user.lastName}`.trim(),
-          actionUrl: `${process.env.APP_BASE_URL || 'https://souqnaa.com'}/login`,
-        }).catch((err) => console.error('[Auth Google] Welcome email dispatch error:', err));
-      } else {
-        if (!user.isActive) {
-          throw new AppError('تم تعطيل هذا الحساب. يرجى التواصل مع الدعم الفني.', 403);
-        }
-
-        // Auto-verify if was unverified
-        const updateData: any = {};
-        if (!user.isVerified) {
-          updateData.isVerified = true;
-        }
-        if (photoUrl && !user.avatar) {
-          updateData.avatar = photoUrl.trim();
-        }
-        if (Object.keys(updateData).length > 0) {
-          user = await prisma.user.update({
-            where: { id: user.id },
-            data: updateData,
-          });
-        }
-      }
-
-      const tokens = JwtUtil.generateTokens({
-        userId: user.id,
-        email: user.email,
-        role: user.role,
-      });
-
-      // Save refresh token in Redis
-      await redis.set(`refresh:${user.id}`, tokens.refreshToken, 7 * 24 * 3600);
-
-      const sanitizedUser = AuthController.sanitizeUser(user);
-
-      ResponseUtil.success(res, {
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        expiresIn: tokens.expiresIn,
-        user: sanitizedUser,
-      }, 'تم تسجيل الدخول بحساب Google بنجاح');
+      ResponseUtil.success(res, result, message);
     } catch (error) {
-      console.error('[Google Auth Error]:', error);
       next(error);
     }
   }

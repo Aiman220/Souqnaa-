@@ -113,6 +113,12 @@ export interface CustomerMembershipSummary {
   tierNameAr: string;
   tierNameEn: string;
   level: number;
+  // Parity aliases
+  membershipLevel?: number;
+  membershipName?: string;
+  annualPurchases?: number;
+  completedOrders?: number;
+  membershipProgress?: number;
   status: MembershipStatus;
   startedAt: string;
   expiresAt: string | null;
@@ -165,3 +171,24 @@ export interface MembershipEvaluationResult {
   reason: string;
   membership: any;
 }
+
+export const MEMBERSHIP_LEVELS = {
+  BASIC: 1,
+  SILVER: 2,
+  GOLD: 3,
+  PLATINUM: 4,
+} as const;
+
+export const MEMBERSHIP_TIER_CODES = {
+  LEVEL_1: 'BASIC',
+  LEVEL_2: 'SILVER',
+  LEVEL_3: 'GOLD',
+  LEVEL_4: 'VIP_PLUS',
+} as const;
+
+export const MEMBERSHIP_CANONICAL_NAMES = {
+  1: { en: 'Basic', ar: 'الأساسي' },
+  2: { en: 'Silver', ar: 'عضو فضي' },
+  3: { en: 'Gold', ar: 'عضو VIP ذهبي' },
+  4: { en: 'VIP+ Platinum', ar: 'عضو VIP+ البلاتيني' },
+} as const;

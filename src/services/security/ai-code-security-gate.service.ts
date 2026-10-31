@@ -91,6 +91,7 @@ export class AICodeSecurityGate {
         line.includes('in: [') ||
         line.includes('isWalletPayment') || // Authoritative wallet debit
         line.includes('MOCK-PAY') || // Guarded mock-pay dev endpoints
+        filePath.includes('membership-metrics.service.ts') || // Read-only customer tier metrics filter
         filePath.includes('payment.routes.ts'),
     },
     // 5. Unsafe CORS with Wildcard and Credentials

@@ -20,7 +20,8 @@ export class CustomerMembershipController {
         await MembershipCacheService.invalidateCustomer(userId);
       }
 
-      const summary = await MembershipEligibilityService.getCustomerSummary(userId);
+      const isRefresh = req.query.refresh === 'true';
+      const summary = await MembershipEligibilityService.getCustomerSummary(userId, { forceEvaluation: isRefresh });
       ResponseUtil.success(res, summary, 'Customer membership retrieved successfully');
     } catch (err) {
       next(err);
@@ -38,7 +39,8 @@ export class CustomerMembershipController {
         throw new AppError('Authentication required', 401);
       }
 
-      const summary = await MembershipEligibilityService.getCustomerSummary(userId);
+      const isRefresh = req.query.refresh === 'true';
+      const summary = await MembershipEligibilityService.getCustomerSummary(userId, { forceEvaluation: isRefresh });
       ResponseUtil.success(res, summary.progress, 'Membership progress retrieved successfully');
     } catch (err) {
       next(err);
@@ -56,7 +58,8 @@ export class CustomerMembershipController {
         throw new AppError('Authentication required', 401);
       }
 
-      const summary = await MembershipEligibilityService.getCustomerSummary(userId);
+      const isRefresh = req.query.refresh === 'true';
+      const summary = await MembershipEligibilityService.getCustomerSummary(userId, { forceEvaluation: isRefresh });
       ResponseUtil.success(
         res,
         {

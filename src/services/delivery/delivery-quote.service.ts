@@ -5,6 +5,9 @@
 
 import { prisma } from '../../database/prisma';
 import { deliveryFeeService, type DeliveryFeeOptions, type DeliveryQuoteResult } from './delivery-fee.service';
+import { supportedAreasService } from '../../modules/locations/supported-areas.service';
+import { RemoteConfigService } from '../../modules/remote-config/remote-config.service';
+import { config } from '../../config';
 import { deliverySlotService } from './delivery-slot.service';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -215,6 +218,26 @@ export class DeliveryQuoteService {
 
     if (!address) {
       throw Object.assign(new Error('Customer address not found'), { statusCode: 404 });
+    }
+
+    const isCityDiscoveryEnabled = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery');
+
+    if (isCityDiscoveryEnabled) {
+      const match = supportedAreasService.isAddressSupported(address);
+      if (!match.isSupported) {
+        return {
+          deliveryAvailable: false,
+          reason: 'OUTSIDE_DELIVERY_AREA',
+          sellerQuotes: [],
+          totalDeliveryFee: 0,
+          currency: config.marketplace.currency,
+          policy: config.marketplace.multiVendorPolicy,
+          slotFee,
+          storesStatus: [],
+          expressAvailable: false,
+          storeWarning: match.rejectionReasonAr || 'عنوان التوصيل المحدد خارج نطاق التوصيل المعتمد حالياً',
+        };
+      }
     }
 
     const customerLat = address.latitude ?? address.city?.latitude ?? 15.3694;
