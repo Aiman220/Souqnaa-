@@ -787,7 +787,8 @@ router.patch('/me/store', async (req: Request, res: Response, next: NextFunction
     const updated = await prisma.store.update({
       where: { id: store.id },
       data: {
-        name: (name !== undefined && typeof name === 'string' && name.trim().length > 0) ? name.trim() : store.name,
+        // Store name cannot be altered directly by seller (preserves official registered store name)
+        name: (store.name && store.name.trim().length > 0) ? store.name : ((name !== undefined && typeof name === 'string' && name.trim().length > 0) ? name.trim() : store.name),
         description: description !== undefined ? description : store.description,
         logo: logo !== undefined ? logo : store.logo,
         cover: cover !== undefined ? cover : store.cover,
