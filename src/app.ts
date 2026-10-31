@@ -198,6 +198,10 @@ export const createApp = (): Application => {
     'if-none-match',
     'if-match',
     'if-modified-since',
+    'x-destination-city',
+    'x-delivery-city-id',
+    'x-destination-lat',
+    'x-destination-lng',
   ];
 
   const corsOptions: cors.CorsOptions = {
