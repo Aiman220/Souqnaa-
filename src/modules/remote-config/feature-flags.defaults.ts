@@ -737,7 +737,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagSeedDefinition[] = [
   },
   {
     key: 'city_based_product_discovery',
-    enabled: false,
+    enabled: true,
     displayNameAr: 'استكشاف المنتجات ونطاق التوصيل حسب المدينة',
     displayNameEn: 'City-Based Product Discovery & Delivery Serviceability',
     descriptionAr: 'حصر استكشاف المنتجات وعمليات التوصيل في المناطق العشر المدعومة حصراً في اليمن مع التحقق الصارم من أهلية توصيل البائع',

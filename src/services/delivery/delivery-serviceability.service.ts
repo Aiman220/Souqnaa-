@@ -68,7 +68,15 @@ export class DeliveryServiceabilityService {
     } = req.query;
 
     const rawCityId = (destinationCityId || cityId || req.headers['x-delivery-city-id']) as string | undefined;
-    const rawCityName = (destinationCity || city || req.headers['x-destination-city']) as string | undefined;
+    const rawCityHeader = (destinationCity || city || req.headers['x-destination-city']) as string | undefined;
+    let rawCityName = rawCityHeader;
+    if (rawCityHeader) {
+      try {
+        rawCityName = decodeURIComponent(rawCityHeader);
+      } catch (_) {
+        rawCityName = rawCityHeader;
+      }
+    }
     const rawLat = lat || latitude || req.headers['x-destination-lat'];
     const rawLng = lng || longitude || req.headers['x-destination-lng'];
 
@@ -89,12 +97,30 @@ export class DeliveryServiceabilityService {
 
       const match = supportedAreasService.matchSupportedArea(resolvedCityName || rawCityId);
       if (match.isSupported && match.area) {
+        // Validate coordinates: if client sends stale GPS coordinates (e.g. Sanaa GPS)
+        // while selecting a different area (e.g. Saada), fallback to the area's canonical center coordinates.
+        let effectiveLat = match.area.centerLat;
+        let effectiveLng = match.area.centerLng;
+
+        if (parsedLat !== undefined && parsedLng !== undefined) {
+          const distToAreaCenter = supportedAreasService.calculateGeodesicDistanceKm(
+            parsedLat,
+            parsedLng,
+            match.area.centerLat,
+            match.area.centerLng
+          );
+          if (distToAreaCenter <= match.area.defaultMaxRadiusKm) {
+            effectiveLat = parsedLat;
+            effectiveLng = parsedLng;
+          }
+        }
+
         return {
           cityId: rawCityId || match.canonicalCityId,
           cityName: match.area.nameAr,
           canonicalCityId: match.area.canonicalId,
-          latitude: parsedLat ?? match.area.centerLat,
-          longitude: parsedLng ?? match.area.centerLng,
+          latitude: effectiveLat,
+          longitude: effectiveLng,
           isSupported: true,
           matchResult: match,
         };

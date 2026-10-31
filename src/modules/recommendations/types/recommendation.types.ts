@@ -70,6 +70,8 @@ export interface RecommendationContext {
   limit?: number;
   offset?: number;
   cursor?: string;
+  cityId?: string;
+  serviceableStoreIds?: string[];
 }
 
 export interface CandidateProduct {

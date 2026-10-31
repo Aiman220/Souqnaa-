@@ -6,6 +6,8 @@ import { AppError } from '../../middleware/error.middleware';
 import { flashSaleService } from './flash-sale.service';
 import { FlashSaleStatus, FlashSaleItemStatus, FlashSaleReservationStatus } from '@prisma/client';
 import rateLimit from 'express-rate-limit';
+import { RemoteConfigService } from '../remote-config/remote-config.service';
+import { deliveryServiceabilityService } from '../../services/delivery/delivery-serviceability.service';
 
 const router = Router();
 
@@ -25,14 +27,32 @@ const reservationLimiter = rateLimit({
 // GET /api/v1/flash-sales — List all public campaigns
 router.get('/', optionalAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const isCityDiscoveryActive = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
+      userId: (req as any).user?.userId,
+    });
+    const destination = isCityDiscoveryActive ? await deliveryServiceabilityService.resolveCustomerDestination(req) : null;
+    let storeFilter: any = {};
+    if (isCityDiscoveryActive && destination) {
+      if (!destination.isSupported) {
+        storeFilter = { id: '__none__' };
+      } else {
+        const serviceableIds = await deliveryServiceabilityService.getServiceableStoreIds(destination);
+        storeFilter = { id: { in: Array.from(serviceableIds) } };
+      }
+    }
+
     const campaigns = await prisma.flashSaleCampaign.findMany({
       where: {
         status: { in: [FlashSaleStatus.ACTIVE, FlashSaleStatus.SCHEDULED] },
+        ...(storeFilter.id ? { items: { some: { product: { storeId: storeFilter.id } } } } : {}),
       },
       orderBy: [{ priority: 'desc' }, { startAt: 'asc' }],
       include: {
         items: {
-          where: { status: { in: [FlashSaleItemStatus.ACTIVE, FlashSaleItemStatus.SOLD_OUT] } },
+          where: {
+            status: { in: [FlashSaleItemStatus.ACTIVE, FlashSaleItemStatus.SOLD_OUT] },
+            ...(storeFilter.id ? { product: { storeId: storeFilter.id } } : {}),
+          },
           take: 8,
           include: {
             product: {
@@ -46,9 +66,26 @@ router.get('/', optionalAuth, async (req: Request, res: Response, next: NextFunc
       },
     });
 
+    const isStoreAllowed = (storeId?: string | null) => {
+      if (!storeFilter.id) return true;
+      if (!storeId) return false;
+      if (storeFilter.id === '__none__') return false;
+      if (storeFilter.id.in && Array.isArray(storeFilter.id.in)) {
+        return storeFilter.id.in.includes(storeId);
+      }
+      return storeFilter.id === storeId;
+    };
+
+    const filteredCampaigns = campaigns
+      .map((c) => ({
+        ...c,
+        items: c.items.filter((item) => item.product != null && isStoreAllowed(item.product.storeId)),
+      }))
+      .filter((c) => c.items.length > 0);
+
     ResponseUtil.success(res, {
       serverTime: new Date().toISOString(),
-      campaigns,
+      campaigns: filteredCampaigns,
     });
   } catch (error) {
     next(error);
@@ -59,16 +96,34 @@ router.get('/', optionalAuth, async (req: Request, res: Response, next: NextFunc
 router.get('/active', optionalAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const now = new Date();
+    const isCityDiscoveryActive = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
+      userId: (req as any).user?.userId,
+    });
+    const destination = isCityDiscoveryActive ? await deliveryServiceabilityService.resolveCustomerDestination(req) : null;
+    let storeFilter: any = {};
+    if (isCityDiscoveryActive && destination) {
+      if (!destination.isSupported) {
+        storeFilter = { id: '__none__' };
+      } else {
+        const serviceableIds = await deliveryServiceabilityService.getServiceableStoreIds(destination);
+        storeFilter = { id: { in: Array.from(serviceableIds) } };
+      }
+    }
+
     const campaigns = await prisma.flashSaleCampaign.findMany({
       where: {
         status: FlashSaleStatus.ACTIVE,
         startAt: { lte: now },
         endAt: { gt: now },
+        ...(storeFilter.id ? { items: { some: { product: { storeId: storeFilter.id } } } } : {}),
       },
       orderBy: [{ priority: 'desc' }, { displayOrder: 'asc' }],
       include: {
         items: {
-          where: { status: { in: [FlashSaleItemStatus.ACTIVE, FlashSaleItemStatus.SOLD_OUT] } },
+          where: {
+            status: { in: [FlashSaleItemStatus.ACTIVE, FlashSaleItemStatus.SOLD_OUT] },
+            ...(storeFilter.id ? { product: { storeId: storeFilter.id } } : {}),
+          },
           include: {
             product: {
               include: {
@@ -82,9 +137,26 @@ router.get('/active', optionalAuth, async (req: Request, res: Response, next: Ne
       },
     });
 
+    const isStoreAllowed = (storeId?: string | null) => {
+      if (!storeFilter.id) return true;
+      if (!storeId) return false;
+      if (storeFilter.id === '__none__') return false;
+      if (storeFilter.id.in && Array.isArray(storeFilter.id.in)) {
+        return storeFilter.id.in.includes(storeId);
+      }
+      return storeFilter.id === storeId;
+    };
+
+    const filteredCampaigns = campaigns
+      .map((c) => ({
+        ...c,
+        items: c.items.filter((item) => item.product != null && isStoreAllowed(item.product.storeId)),
+      }))
+      .filter((c) => c.items.length > 0);
+
     ResponseUtil.success(res, {
       serverTime: now.toISOString(),
-      campaigns,
+      campaigns: filteredCampaigns,
     });
   } catch (error) {
     next(error);

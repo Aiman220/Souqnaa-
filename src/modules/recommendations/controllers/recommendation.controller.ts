@@ -1,3 +1,5 @@
+import { RemoteConfigService } from '../../remote-config/remote-config.service';
+import { deliveryServiceabilityService } from '../../../services/delivery/delivery-serviceability.service';
 import { Request, Response } from 'express';
 import { recommendationService } from '../services/recommendation.service';
 import { eventCollectorService } from '../services/event-collector.service';
@@ -36,6 +38,20 @@ export class RecommendationController {
         }
       }
 
+      const isCityDiscoveryActive = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
+        userId,
+      });
+      const destination = isCityDiscoveryActive ? await deliveryServiceabilityService.resolveCustomerDestination(req) : null;
+      let serviceableStoreIds: string[] | undefined;
+      if (isCityDiscoveryActive && destination) {
+        if (!destination.isSupported) {
+          res.json({ success: true, data: { sections: [], cursor: null } });
+          return;
+        }
+        const ids = await deliveryServiceabilityService.getServiceableStoreIds(destination);
+        serviceableStoreIds = Array.from(ids);
+      }
+
       const context: RecommendationContext = {
         userId,
         sessionId,
@@ -43,6 +59,8 @@ export class RecommendationController {
         cartProductIds,
         limit,
         cursor,
+        cityId: destination?.canonicalCityId || destination?.cityId,
+        serviceableStoreIds,
         platform: (req.headers['x-platform'] as string) || 'flutter_customer',
         appVersion: (req.headers['x-app-version'] as string) || '1.0.0',
       };

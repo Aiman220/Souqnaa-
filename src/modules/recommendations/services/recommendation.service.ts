@@ -33,12 +33,13 @@ export class RecommendationService {
         context.sessionId === 'customer_session');
 
     let cacheKey: string;
+    const citySuffix = context.cityId ? `:city:${context.cityId}` : '';
     if (context.userId) {
-      cacheKey = `recommendations:home:user:${context.userId}`;
+      cacheKey = `recommendations:home:user:${context.userId}${citySuffix}`;
     } else if (!isGenericGuest) {
-      cacheKey = `recommendations:home:session:${context.sessionId}`;
+      cacheKey = `recommendations:home:session:${context.sessionId}${citySuffix}`;
     } else {
-      cacheKey = 'recommendations:home:public_guest';
+      cacheKey = `recommendations:home:public_guest${citySuffix}`;
     }
 
     const hasPrivateSignals = Boolean(
@@ -352,6 +353,17 @@ export class RecommendationService {
       }
     }
 
+    // Filter products by serviceable stores if destination is active
+    if (context.serviceableStoreIds && Array.isArray(context.serviceableStoreIds)) {
+      const allowedIds = new Set(context.serviceableStoreIds);
+      for (const sec of sections) {
+        sec.products = sec.products.filter((p: any) => {
+          const sId = p.storeId || p.store?.id;
+          return sId ? allowedIds.has(sId) : false;
+        });
+      }
+    }
+
     // Format all products within all sections for Flutter client compatibility with active campaign badges
     for (const sec of sections) {
       sec.products = await formatProductsWithCampaigns(sec.products);
@@ -365,11 +377,13 @@ export class RecommendationService {
       }
     }
 
+    const filteredSections = sections.filter((sec) => sec.products && sec.products.length > 0);
+
     // Cache the assembled Home sections for 15 minutes only when safe from leaking private browsing
     if (!isGenericGuest || !hasPrivateSignals) {
-      await redisService.setJson(cacheKey, sections, 900);
+      await redisService.setJson(cacheKey, filteredSections, 900);
     }
-    return sections;
+    return filteredSections;
   }
 
   /**

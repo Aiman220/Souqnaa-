@@ -63,12 +63,16 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
             status: 'ACTIVE',
             startAt: { lte: new Date() },
             endAt: { gt: new Date() },
+            ...(storeFilter.id ? { items: { some: { product: { storeId: storeFilter.id } } } } : {}),
           },
           orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
           take: 6,
           include: {
             items: {
-              where: { status: 'ACTIVE' },
+              where: {
+                status: 'ACTIVE',
+                ...(storeFilter.id ? { product: { storeId: storeFilter.id } } : {}),
+              },
               take: 12,
               include: {
                 product: {
@@ -124,10 +128,22 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
         }),
       ]);
 
-    const formattedFlashSales = flashSales.map((campaign) => {
-      const mappedProducts = campaign.items
-        .filter((item) => item.product != null)
-        .map((item) => {
+    const isStoreAllowed = (storeId?: string | null) => {
+      if (!storeFilter.id) return true;
+      if (!storeId) return false;
+      if (storeFilter.id === '__none__') return false;
+      if (storeFilter.id.in && Array.isArray(storeFilter.id.in)) {
+        return storeFilter.id.in.includes(storeId);
+      }
+      return storeFilter.id === storeId;
+    };
+
+    const formattedFlashSales = flashSales
+      .map((campaign) => {
+        const eligibleItems = campaign.items.filter(
+          (item) => item.product != null && isStoreAllowed(item.product.storeId)
+        );
+        const mappedProducts = eligibleItems.map((item) => {
           const p = item.product;
           const finalPrice =
             item.flashSalePrice && item.flashSalePrice > 0
@@ -149,14 +165,15 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
           };
         });
 
-      return {
-        ...campaign,
-        startsAt: campaign.startAt,
-        endsAt: campaign.endAt,
-        items: campaign.items,
-        products: mappedProducts,
-      };
-    });
+        return {
+          ...campaign,
+          startsAt: campaign.startAt,
+          endsAt: campaign.endAt,
+          items: eligibleItems,
+          products: mappedProducts,
+        };
+      })
+      .filter((campaign) => campaign.products.length > 0);
 
     const featuredProducts = formatProductsForClient(rawFeaturedProducts);
     const bestSellers = formatProductsForClient(rawBestSellers);
