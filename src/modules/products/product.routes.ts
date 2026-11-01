@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../../database/prisma';
 import { authenticate, optionalAuth } from '../../middleware/auth.middleware';
+import { storefrontLimiter } from '../../middleware/rate-limiter.middleware';
 import { requireSeller } from '../../middleware/rbac.middleware';
 import { ResponseUtil } from '../../utils/response.util';
 import { AppError } from '../../middleware/error.middleware';
@@ -20,7 +21,7 @@ import { RemoteConfigService } from '../remote-config/remote-config.service';
 const router = Router();
 
 // GET /api/v1/products — Search & Filtering
-router.get('/', optionalAuth, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/', storefrontLimiter, optionalAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const rawPage = parseInt(String(req.query.page || '1'), 10);
     const page = !isNaN(rawPage) && rawPage >= 1 ? rawPage : 1;
@@ -294,7 +295,7 @@ router.get('/:id/recommendations', optionalAuth, async (req: Request, res: Respo
 });
 
 // GET /api/v1/products/:id
-router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/:id', storefrontLimiter, optionalAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
     const product = await prisma.product.findFirst({
@@ -337,6 +338,16 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
     });
 
     if (!product) throw new AppError('Product not found', 404);
+
+    // Security Mandates 3 & 5: Ensure unpublished/inactive products cannot be viewed publicly.
+    // Allow access only if active OR if caller is admin or the seller owning this product.
+    if (!product.isActive) {
+      const user = (req as any).user;
+      const isOwnerSeller = user && (user.sellerId === product.store?.sellerId || user.role === 'ADMIN');
+      if (!isOwnerSeller) {
+        throw new AppError('Product not found', 404);
+      }
+    }
     const locale = req.headers['accept-language']?.includes('en') ? 'en' : 'ar';
     const formatted = await formatProductWithCampaign(product, locale);
 

@@ -32,6 +32,7 @@ import { config } from '../../config';
 
 import { adminDeliveryRoutes } from './delivery-zones.routes';
 import { adminDeliveryScheduleRoutes } from './delivery-schedule.routes';
+import { adminInterGovernorateRoutes } from './inter-governorate-admin.routes';
 import { adminUsersRoutes } from './admin-users.routes';
 import { notificationScheduler } from '../notifications/services/notification-scheduler';
 import { notificationEventBus } from '../notifications/services/event-bus';
@@ -50,6 +51,8 @@ router.use('/users', adminUsersRoutes);
 router.use('/delivery', adminDeliveryRoutes);
 // Mount delivery scheduling admin routes (time slots, rules, capacity)
 router.use('/delivery', adminDeliveryScheduleRoutes);
+// Mount inter-governorate logistics & smart routing admin routes
+router.use('/delivery/inter-governorate', adminInterGovernorateRoutes);
 
 // Helper for audit logging
 async function logAdminAction(

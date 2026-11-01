@@ -7,6 +7,8 @@ import { authenticate } from '../../middleware/auth.middleware';
 import { deliveryFeeService } from '../../services/delivery/delivery-fee.service';
 import { deliveryQuoteService } from '../../services/delivery/delivery-quote.service';
 import { deliverySlotService } from '../../services/delivery/delivery-slot.service';
+import { interGovernorateRouteService } from '../../services/delivery/inter-governorate-route.service';
+import { interGovernorateTrackingService } from '../../services/delivery/inter-governorate-tracking.service';
 
 const router = Router();
 
@@ -233,6 +235,113 @@ router.post('/quote', authenticate, async (req: Request, res: Response, next: Ne
     });
 
     ResponseUtil.success(res, result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Inter-Governorate Public Discovery & Tracking Endpoints
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/v1/delivery/inter-governorate/routes
+ * Discovers active, approved inter-governorate routes and supported delivery methods.
+ */
+router.get('/inter-governorate/routes', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const isEnabled = await interGovernorateRouteService.isInterGovernorateEnabled();
+    if (!isEnabled) {
+      return ResponseUtil.success(res, {
+        enabled: false,
+        routes: [],
+        message: 'خدمة الشحن بين المحافظات غير مفعلة حالياً',
+      });
+    }
+
+    const routes = await interGovernorateRouteService.listRoutes({ isActive: true });
+    ResponseUtil.success(res, {
+      enabled: true,
+      routes,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/v1/delivery/inter-governorate/pickup-points
+ * Lists designated pickup hubs in destination areas.
+ */
+router.get('/inter-governorate/pickup-points', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { areaId } = req.query;
+    const hubs = await interGovernorateTrackingService.listHubs({
+      areaId: areaId ? String(areaId) : undefined,
+      isPickupPoint: true,
+    });
+    ResponseUtil.success(res, hubs);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/v1/delivery/tracking/:trackingNumber
+ * Returns authoritative shipment tracking timeline and checkpoints.
+ */
+router.get('/tracking/:trackingNumber', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const trackingNumber = String(req.params.trackingNumber || '');
+    if (!trackingNumber) throw new AppError('رقم التتبع مطلوب', 400);
+
+    const timeline = await interGovernorateTrackingService.getTrackingTimeline(trackingNumber);
+    ResponseUtil.success(res, timeline);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/v1/delivery/tracking/:trackingNumber/checkpoint
+ * Updates checkpoint (requires authentication: Carrier, Hub Staff, Seller, or Admin).
+ */
+router.post('/tracking/:trackingNumber/checkpoint', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const trackingNumber = String(req.params.trackingNumber || '');
+    const {
+      status,
+      locationName,
+      descriptionAr,
+      descriptionEn,
+      hubId,
+      hubName,
+      failedReason,
+      rescheduledDate,
+      notes,
+    } = req.body;
+
+    if (!trackingNumber || !status || !locationName || !descriptionAr) {
+      throw new AppError('بيانات التتبع المطلوبة غير مكتملة', 400);
+    }
+
+    const checkpoint = await interGovernorateTrackingService.recordCheckpoint({
+      trackingNumber,
+      status,
+      locationName,
+      descriptionAr,
+      descriptionEn,
+      hubId,
+      hubName,
+      actorType: (req.user?.role as any) || 'SYSTEM',
+      actorId: req.user?.userId,
+      actorName: req.user?.email || 'مشرف النظام',
+      failedReason,
+      rescheduledDate: rescheduledDate ? new Date(rescheduledDate) : undefined,
+      notes,
+    });
+
+    ResponseUtil.created(res, checkpoint, 'تم تسجيل نقطة التتبع بنجاح');
   } catch (error) {
     next(error);
   }

@@ -47,7 +47,6 @@ async function resolveStore(idOrSlug: string) {
           userId: true,
           status: true,
           businessType: true,
-          user: { select: { phone: true, email: true } },
         },
       },
       enhancement: true,
@@ -62,7 +61,7 @@ async function resolveStore(idOrSlug: string) {
 // ── List active stores ────────────────────────────────────────────────────────
 
 // GET /api/v1/stores
-router.get('/', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/', storefrontLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const rawPage = parseInt(String(req.query.page || '1'), 10);
     const page = !isNaN(rawPage) && rawPage >= 1 ? rawPage : 1;
@@ -200,7 +199,6 @@ router.get('/:slug/storefront', optionalAuth, storefrontLimiter, async (req: Req
       store: {
         id: store.id,
         sellerId: store.sellerId,
-        sellerUserId: store.seller.userId,
         name: store.name,
         slug: store.slug,
         description: store.description,
@@ -218,8 +216,8 @@ router.get('/:slug/storefront', optionalAuth, storefrontLimiter, async (req: Req
         acceptsScheduled: store.acceptsScheduled,
         busyMode: store.busyMode,
         closedReason: store.closedReason,
-        phone: store.seller.user?.phone ?? null,
-        email: store.seller.user?.email ?? null,
+        phone: null,
+        email: null,
         latitude: store.latitude,
         longitude: store.longitude,
         joinedDate: store.enhancement?.joinedDate ?? store.createdAt,

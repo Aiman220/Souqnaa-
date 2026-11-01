@@ -56,6 +56,16 @@ enum DeliveryCalculationType {
   TIERED
 }
 
+enum RoutePricingMode {
+  FIXED
+  DISTANCE_BASED
+}
+
+enum RouteDirection {
+  ONE_WAY
+  BIDIRECTIONAL
+}
+
 enum ShippingPromotionCostBearer {
   PLATFORM
   SELLER
@@ -976,10 +986,37 @@ model DeliveryQuoteSnapshot {
   timeSlotNameAr        String?
   timeSlotStart         String?                  // HH:mm
   timeSlotEnd           String?                  // HH:mm
+  // Inter-Governorate route & pricing snapshot
+  isInterGovernorate    Boolean                  @default(false)
+  routeId               String?
+  routeKey              String?
+  interGovernorateRoute InterGovernorateRoute?   @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  deliveryMethodCode    String?
+  shippingProvider      String?
+  actualWeightKg        Float?
+  volumetricWeightKg    Float?
+  chargeableWeightKg    Float?
+  packageLengthCm       Float?
+  packageWidthCm        Float?
+  packageHeightCm       Float?
+  roadDistanceKm        Float?
+  routeBaseFee          Float?
+  distanceCharge        Float?
+  weightSurcharge       Float?
+  oversizedSurcharge    Float?
+  deliveryMethodCharge  Float?
+  expressCharge         Float?
+  remoteAreaCharge      Float?
+  specialHandlingCharge Float?
+  carrierCost           Float?                   @default(0.0)
+  sellerContribution    Float?                   @default(0.0)
+  marketplaceSubsidy    Float?                   @default(0.0)
+  pricingBreakdownJson  String?
   calculatedAt          DateTime                 @default(now())
 
   @@index([sellerOrderId])
   @@index([zonePricingId])
+  @@index([routeId])
 }
 
 // System-wide delivery configuration controlled by Admin
@@ -1093,10 +1130,163 @@ model DeliveryOrder {
   driverName     String?
   driverPhone    String?
   status         String      @default("ASSIGNED")
+  deliveryMethodCode  String?
+  originHubId         String?
+  destinationHubId    String?
+  currentHubId        String?
+  carrierCost         Float?    @default(0.0)
+  estimatedDeliveryAt DateTime?
+  rescheduledAt       DateTime?
+  failedReason        String?
   pickupTime     DateTime?
   deliveryTime   DateTime?
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
+
+  checkpoints    InterGovernorateTrackingCheckpoint[]
+}
+
+// ── Inter-Governorate Route & Logistics Engine ───────────────────────────────
+
+model InterGovernorateRoute {
+  id                        String                       @id @default(uuid())
+  originAreaId              String                       // e.g. "loc-ye-sanaa"
+  destinationAreaId         String                       // e.g. "loc-ye-taiz-al-hawban"
+  originGovernorate         String                       // "صنعاء"
+  destinationGovernorate    String                       // "تعز"
+  originCityName            String                       // "صنعاء"
+  destinationCityName       String                       // "تعز – الحوبان"
+  routeKey                  String                       @unique // "loc-ye-sanaa:loc-ye-taiz-al-hawban"
+  nameAr                    String                       // "صنعاء إلى تعز – الحوبان"
+  nameEn                    String                       // "Sanaa to Taiz - Al Hawban"
+  direction                 RouteDirection               @default(BIDIRECTIONAL)
+  isActive                  Boolean                      @default(false) // Default inactive until admin-approved
+  pricingMode               RoutePricingMode             @default(FIXED)
+  baseFee                   Float                        // Fixed route base fee
+  ratePerKm                 Float                        @default(0.0) // Per km if distance-based
+  roadDistanceKm            Float?                       // Configured road distance in km
+  minDeliveryFee            Float?                       // Minimum delivery fee cap
+  maxDeliveryFee            Float?                       // Maximum delivery fee cap
+  includedWeightKg          Float                        @default(5.0)
+  extraWeightRatePerKg      Float                        @default(100.0)
+  volumetricDivisor         Float                        @default(5000.0)
+  oversizedMaxDimensionCm   Float?                       @default(100.0)
+  oversizedMaxWeightKg      Float?                       @default(30.0)
+  oversizedSurcharge        Float                        @default(0.0)
+  expressSupported          Boolean                      @default(true)
+  expressSurcharge          Float                        @default(500.0)
+  estimatedHoursMin         Int                          @default(24)
+  estimatedHoursMax         Int                          @default(72)
+  expressHoursMin           Int?                         @default(12)
+  expressHoursMax           Int?                         @default(24)
+  remoteAreaSurcharge       Float                        @default(0.0)
+  specialHandlingSurcharge  Float                        @default(0.0)
+  allowedMethodCodes        String                       @default("[\"seller_managed\",\"third_party_courier\",\"marketplace_managed\",\"intercity_transport\",\"pickup_point\",\"hub_to_hub\"]")
+  approvedProviderId        String?                      // "yemen_post", "al_mamoon", "al_barq", "local_fleet"
+  approvedProviderName      String?
+  providerBaseCost          Float                        @default(0.0)
+  providerPerKmCost         Float                        @default(0.0)
+  providerPerKgCost         Float                        @default(0.0)
+  version                   Int                          @default(1)
+  effectiveFrom             DateTime?
+  effectiveTo               DateTime?
+  updatedBy                 String?
+  createdAt                 DateTime                     @default(now())
+  updatedAt                 DateTime                     @updatedAt
+
+  routeMethods              InterGovernorateRouteMethod[]
+  quoteSnapshots            DeliveryQuoteSnapshot[]
+  auditLogs                 InterGovernorateAuditLog[]
+
+  @@index([originAreaId])
+  @@index([destinationAreaId])
+  @@index([isActive])
+}
+
+model InterGovernorateRouteMethod {
+  id                 String                @id @default(uuid())
+  routeId            String
+  route              InterGovernorateRoute @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  methodCode         String                // "seller_managed" | "third_party_courier" | ...
+  methodNameAr       String
+  methodNameEn       String
+  isAvailable        Boolean               @default(true)
+  methodSurcharge    Float                 @default(0.0)
+  estimatedHoursMin  Int?
+  estimatedHoursMax  Int?
+  providerId         String?
+  providerName       String?
+  carrierBaseCost    Float                 @default(0.0)
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  @@unique([routeId, methodCode])
+  @@index([routeId])
+}
+
+model InterGovernorateHub {
+  id             String    @id @default(uuid())
+  code           String    @unique // e.g. "HUB-SANAA-01"
+  nameAr         String
+  nameEn         String
+  governorate    String
+  areaId         String    // canonical location ID
+  address        String
+  latitude       Float
+  longitude      Float
+  contactPhone   String?
+  operatingHours String?
+  isPickupPoint  Boolean   @default(false)
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([areaId])
+  @@index([isActive])
+}
+
+model InterGovernorateTrackingCheckpoint {
+  id              String         @id @default(uuid())
+  sellerOrderId   String
+  trackingNumber  String
+  status          String         // InterGovernorateShipmentStatus string
+  stageIndex      Int            @default(0)
+  hubId           String?
+  hubName         String?
+  locationName    String
+  descriptionAr   String
+  descriptionEn   String
+  actorType       String         // "SELLER", "CARRIER", "HUB_STAFF", "SYSTEM", "ADMIN", "CUSTOMER"
+  actorId         String?
+  actorName       String?
+  failedReason    String?
+  rescheduledDate DateTime?
+  notes           String?
+  metadata        String?
+  createdAt       DateTime       @default(now())
+
+  deliveryOrder   DeliveryOrder? @relation(fields: [trackingNumber], references: [trackingNumber], onDelete: Cascade)
+
+  @@index([sellerOrderId])
+  @@index([trackingNumber])
+  @@index([createdAt])
+}
+
+model InterGovernorateAuditLog {
+  id        String                 @id @default(uuid())
+  routeId   String?
+  route     InterGovernorateRoute? @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  action    String                 // "ROUTE_CREATED", "ROUTE_UPDATED", "ROUTE_ACTIVATED", "ROUTE_DEACTIVATED", "PRICING_UPDATED"
+  oldValue  String?
+  newValue  String?
+  reason    String?
+  changedBy String?
+  ipAddress String?
+  createdAt DateTime               @default(now())
+
+  @@index([routeId])
+  @@index([action])
+  @@index([createdAt])
 }
 
 // ==========================================
@@ -1449,6 +1639,13 @@ model SellerOrder {
   distanceKm           Float?
   durationMinutes      Float?
   deliveryZoneName     String?
+  // Inter-Governorate fields
+  isInterGovernorate          Boolean                @default(false)
+  interGovernorateRouteKey    String?
+  trackingNumber              String?
+  carrierCost                 Float?                 @default(0.0)
+  carrierName                 String?
+  pickupPointId               String?
   deliveredAt          DateTime?              // Server-authoritative delivery timestamp
   createdAt            DateTime               @default(now())
   updatedAt            DateTime               @updatedAt

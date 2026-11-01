@@ -10,6 +10,8 @@ import { prisma } from '../../database/prisma';
 import { config } from '../../config';
 import { geoService } from '../geo/geo.service';
 import type { GeoCoordinates } from '../geo/providers/map.provider';
+import { interGovernorateRouteService } from './inter-governorate-route.service';
+import { supportedAreasService } from '../../modules/locations/supported-areas.service';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
@@ -20,9 +22,17 @@ export interface DeliveryFeeOptions {
   extraSellerFee?: number;
   weightKg?: number;
   weightFeePerKg?: number;
+  lengthCm?: number;
+  widthCm?: number;
+  heightCm?: number;
   slotFee?: number;          // time-slot surcharge from DeliveryTimeSlot.slotFee
   discountAmount?: number;
   discountFundedBy?: 'MARKETPLACE' | 'SELLER' | 'COUPON';
+  deliveryMethodCode?: string;
+  originAreaId?: string;
+  destinationAreaId?: string;
+  isRemoteArea?: boolean;
+  isSpecialHandling?: boolean;
 }
 
 export interface SellerDeliveryQuote {
@@ -36,7 +46,7 @@ export interface SellerDeliveryQuote {
 
 export interface DeliveryQuoteResult {
   deliveryAvailable: boolean;
-  reason?: string; // OUTSIDE_DELIVERY_AREA | NO_ROUTE_FOUND | PROVIDER_UNAVAILABLE
+  reason?: string; // OUTSIDE_DELIVERY_AREA | NO_ROUTE_FOUND | PROVIDER_UNAVAILABLE | ROUTE_NOT_SERVICEABLE
 
   distanceKm: number;
   durationMinutes: number;
@@ -56,6 +66,37 @@ export interface DeliveryQuoteResult {
   currency: string;
   pricingVersion: string;
   isExpress: boolean;
+
+  // Inter-Governorate route & pricing details
+  isInterGovernorate?: boolean;
+  routeId?: string;
+  routeKey?: string;
+  deliveryMethodCode?: string;
+  shippingProviderId?: string;
+  shippingProviderName?: string;
+  actualWeightKg?: number;
+  volumetricWeightKg?: number;
+  chargeableWeightKg?: number;
+  routeBaseFee?: number;
+  distanceCharge?: number;
+  weightSurcharge?: number;
+  oversizedSurcharge?: number;
+  deliveryMethodCharge?: number;
+  remoteAreaCharge?: number;
+  specialHandlingCharge?: number;
+  carrierCost?: number;
+  sellerContribution?: number;
+  marketplaceSubsidy?: number;
+  estimatedHoursMin?: number;
+  estimatedHoursMax?: number;
+  allowedDeliveryMethods?: Array<{
+    code: string;
+    nameAr: string;
+    nameEn: string;
+    surcharge: number;
+    estimatedHoursMin?: number;
+    estimatedHoursMax?: number;
+  }>;
 }
 
 export interface MultiVendorDeliveryResult {
@@ -253,6 +294,127 @@ export class DeliveryFeeService {
         pricingVersion,
         isExpress,
       };
+    }
+
+    // 1.1 Inter-Governorate Route Check
+    let originAreaId = options.originAreaId;
+    let destAreaId = options.destinationAreaId;
+
+    if (!originAreaId) {
+      const match = supportedAreasService.findSupportedAreaByCoordinates(sellerLat, sellerLng, 60.0);
+      originAreaId = match.area?.canonicalId;
+    }
+    if (!destAreaId) {
+      const match = supportedAreasService.findSupportedAreaByCoordinates(customerLat, customerLng, 60.0);
+      destAreaId = match.area?.canonicalId;
+    }
+
+    const isDifferentAreas = Boolean(originAreaId && destAreaId && originAreaId !== destAreaId);
+
+    if (isDifferentAreas) {
+      const isInterEnabled = await interGovernorateRouteService.isInterGovernorateEnabled();
+      if (!isInterEnabled) {
+        return {
+          deliveryAvailable: false,
+          reason: 'INTER_GOVERNORATE_DISABLED',
+          distanceKm,
+          durationMinutes,
+          zoneId: null,
+          zoneName: 'الشحن بين المحافظات غير مفعل حالياً',
+          baseFee: 0,
+          extraSellerFee: 0,
+          weightFee: 0,
+          slotFee: 0,
+          expressFee: 0,
+          deliveryDiscount: 0,
+          deliveryFee: 0,
+          currency,
+          pricingVersion,
+          isExpress,
+        };
+      }
+
+      try {
+        const interPricing = await interGovernorateRouteService.calculatePricing({
+          originAreaId: originAreaId!,
+          destinationAreaId: destAreaId!,
+          originCoords: { lat: sellerLat, lng: sellerLng },
+          destinationCoords: { lat: customerLat, lng: customerLng },
+          deliveryMethodCode: options.deliveryMethodCode,
+          isExpress,
+          actualWeightKg: options.weightKg || 1.0,
+          packageDimensions: {
+            lengthCm: options.lengthCm,
+            widthCm: options.widthCm,
+            heightCm: options.heightCm,
+          },
+          isRemoteArea: options.isRemoteArea,
+          isSpecialHandling: options.isSpecialHandling,
+          discountAmount,
+          discountFundedBy,
+        });
+
+        const result: DeliveryQuoteResult = {
+          deliveryAvailable: true,
+          distanceKm: interPricing.roadDistanceKm,
+          durationMinutes: Math.round((interPricing.roadDistanceKm / 45) * 60) + 15,
+          zoneId: null,
+          zoneName: interPricing.routeNameAr,
+          baseFee: interPricing.routeBaseFee,
+          extraSellerFee: interPricing.deliveryMethodCharge,
+          weightFee: interPricing.weightSurcharge,
+          slotFee,
+          expressFee: interPricing.expressCharge,
+          deliveryDiscount: interPricing.deliveryDiscount,
+          discountFundedBy,
+          deliveryFee: interPricing.finalDeliveryFee,
+          currency,
+          pricingVersion: interPricing.pricingVersion,
+          isExpress,
+          isInterGovernorate: true,
+          routeId: interPricing.routeId,
+          routeKey: interPricing.routeKey,
+          deliveryMethodCode: interPricing.deliveryMethodCode,
+          shippingProviderId: interPricing.shippingProviderId,
+          shippingProviderName: interPricing.shippingProviderName,
+          actualWeightKg: interPricing.actualWeightKg,
+          volumetricWeightKg: interPricing.volumetricWeightKg,
+          chargeableWeightKg: interPricing.chargeableWeightKg,
+          routeBaseFee: interPricing.routeBaseFee,
+          distanceCharge: interPricing.distanceCharge,
+          weightSurcharge: interPricing.weightSurcharge,
+          oversizedSurcharge: interPricing.oversizedSurcharge,
+          deliveryMethodCharge: interPricing.deliveryMethodCharge,
+          remoteAreaCharge: interPricing.remoteAreaCharge,
+          specialHandlingCharge: interPricing.specialHandlingCharge,
+          carrierCost: interPricing.carrierCost,
+          sellerContribution: interPricing.sellerContribution,
+          marketplaceSubsidy: interPricing.marketplaceSubsidy,
+          allowedDeliveryMethods: interPricing.allowedDeliveryMethods,
+        };
+
+        setCached(cacheKey, result);
+        return result;
+      } catch (err: any) {
+        return {
+          deliveryAvailable: false,
+          reason: err?.code || 'ROUTE_NOT_SERVICEABLE',
+          distanceKm,
+          durationMinutes,
+          zoneId: null,
+          zoneName: err?.message || 'المسار بين هذه المحافظات غير متاح حالياً',
+          baseFee: 0,
+          extraSellerFee: 0,
+          weightFee: 0,
+          slotFee: 0,
+          expressFee: 0,
+          deliveryDiscount: 0,
+          deliveryFee: 0,
+          currency,
+          pricingVersion,
+          isExpress,
+        };
+      }
     }
 
     // 2. Check max delivery radius (§32)

@@ -750,6 +750,68 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagSeedDefinition[] = [
     dependencies: ['standard_delivery'],
   },
   {
+    key: 'inter_governorate_delivery',
+    enabled: false, // Default disabled until approved and configured by admin
+    displayNameAr: 'الشحن والتوصيل بين المحافظات اليمنية',
+    displayNameEn: 'Inter-Governorate Delivery & Smart Routing',
+    descriptionAr: 'تفعيل نظام الشحن الذكي ونقل البضائع والطرود بين المحافظات اليمنية المعتمدة وفق المسارات المعتمدة',
+    descriptionEn: 'Enable inter-governorate parcel shipping across approved Yemeni governorate routes with backend-authoritative pricing',
+    maintenanceMessageAr: 'خدمة الشحن بين المحافظات متوقفة مؤقتاً لأعمال الصيانة والجدولة',
+    maintenanceMessageEn: 'Inter-governorate shipping is temporarily paused for route maintenance',
+    isSensitive: true,
+    rolloutPercentage: 100,
+    platforms: ['android', 'ios', 'web'],
+    dependencies: [],
+  },
+  {
+    key: 'inter_governorate_distance_pricing',
+    enabled: false, // Default disabled until activated
+    displayNameAr: 'التسعير القائم على المسافة البرية الفعلية بين المحافظات',
+    displayNameEn: 'Inter-Governorate Road Distance-Based Pricing',
+    descriptionAr: 'احتساب رسوم الشحن بناء على مسافة الطريق الفعلية بالكيلومتر عبر محرك الملاحة البري',
+    descriptionEn: 'Calculate route delivery fee using road routing kilometers and configured rate per kilometer',
+    isSensitive: true,
+    rolloutPercentage: 100,
+    platforms: ['android', 'ios', 'web'],
+    dependencies: ['inter_governorate_delivery'],
+  },
+  {
+    key: 'inter_governorate_weight_pricing',
+    enabled: false, // Default disabled until activated
+    displayNameAr: 'تسعير الوزن الفعلي والوزن الحجمي للطرود بين المحافظات',
+    displayNameEn: 'Inter-Governorate Weight & Volumetric Pricing',
+    descriptionAr: 'احتساب رسوم إضافية للوزن الزائد والوزن الحجمي للطرود والمنتجات الكبيرة',
+    descriptionEn: 'Charge package surcharges for excess actual weight and dimensional/volumetric weight',
+    isSensitive: true,
+    rolloutPercentage: 100,
+    platforms: ['android', 'ios', 'web'],
+    dependencies: ['inter_governorate_delivery'],
+  },
+  {
+    key: 'inter_governorate_express',
+    enabled: false, // Default disabled until activated
+    displayNameAr: 'الشحن السريع بين المحافظات (Express)',
+    displayNameEn: 'Inter-Governorate Express Delivery',
+    descriptionAr: 'تفعيل التوصيل السريع والمستعجل بين المحافظات للمسارات المؤهلة',
+    descriptionEn: 'Enable expedited inter-governorate delivery for approved routes',
+    isSensitive: true,
+    rolloutPercentage: 100,
+    platforms: ['android', 'ios', 'web'],
+    dependencies: ['inter_governorate_delivery'],
+  },
+  {
+    key: 'inter_governorate_pickup_points',
+    enabled: false, // Default disabled until activated
+    displayNameAr: 'نقاط الاستلام المعتمدة للشحن بين المحافظات',
+    displayNameEn: 'Designated Inter-Governorate Pickup Points',
+    descriptionAr: 'تمكين العملاء من استلام شحناتهم من مراكز ونقاط الاستلام الإقليمية المعتمدة',
+    descriptionEn: 'Allow customers to collect parcels from designated logistics hubs and pickup points',
+    isSensitive: true,
+    rolloutPercentage: 100,
+    platforms: ['android', 'ios', 'web'],
+    dependencies: ['inter_governorate_delivery'],
+  },
+  {
     key: 'refunds',
     enabled: true, // Standard marketplace consumer rights
     displayNameAr: 'نظام المرتجعات واسترداد المبالغ',

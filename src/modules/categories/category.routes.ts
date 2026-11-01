@@ -2,12 +2,13 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../../database/prisma';
 import { authenticate } from '../../middleware/auth.middleware';
 import { requireAdmin } from '../../middleware/rbac.middleware';
+import { storefrontLimiter } from '../../middleware/rate-limiter.middleware';
 import { ResponseUtil } from '../../utils/response.util';
 import { AppError } from '../../middleware/error.middleware';
 
 const router = Router();
 
-router.get('/', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/', storefrontLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const rootOnly = req.query.rootOnly === 'true';
     const categories = await prisma.category.findMany({
@@ -37,13 +38,16 @@ router.get('/brands/all', async (req: Request, res: Response, next: NextFunction
   }
 });
 
-router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/:id', storefrontLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
-    const category = await prisma.category.findUnique({
-      where: { id },
+    const category = await prisma.category.findFirst({
+      where: {
+        OR: [{ id }, { slug: id }],
+        isActive: true,
+      },
       include: {
-        children: true,
+        children: { where: { isActive: true } },
         parent: true,
       },
     });

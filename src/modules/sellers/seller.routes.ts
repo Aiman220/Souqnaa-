@@ -33,6 +33,7 @@ import { SellerFinancialRiskService } from '../commission/seller-financial-risk.
 import { RefundService } from '../refunds/services/refund.service';
 import { notificationDispatcher } from '../notifications/services/notification-dispatcher';
 import { NotificationEventFactory } from '../notifications/events/domain-events';
+import { interGovernorateTrackingService } from '../../services/delivery/inter-governorate-tracking.service';
 import { WishlistAlertsJob } from '../../services/jobs/wishlist-alerts.job';
 
 const router = Router();
@@ -2538,6 +2539,55 @@ router.post(['/me/orders/:id/shipped', '/me/orders/:id/ship'], async (req: Reque
 
     const fullOrder = await getFullSellerOrder(resolvedId);
     ResponseUtil.success(res, fullOrder || result.sellerOrder, 'تم شحن الطلب بنجاح وهو بانتظار استلام العميل');
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /me/orders/:id/handover — Inter-governorate shipment handover to approved carrier/hub
+router.post('/me/orders/:id/handover', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const seller = await getSeller(req.user!.userId);
+    const resolvedId = await resolveSellerOrderId(seller.id, String(req.params.id));
+    const { handoverNotes, carrierName, hubName } = req.body;
+
+    const sellerOrder = await prisma.sellerOrder.findUnique({
+      where: { id: resolvedId },
+      include: { deliveryOrder: true },
+    });
+
+    if (!sellerOrder) throw new AppError('طلب التاجر غير موجود', 404);
+
+    // Guard: Prevent seller from manipulating platform-calculated fees
+    if (req.body.deliveryFee !== undefined || req.body.carrierCost !== undefined) {
+      throw new AppError('غير مصرح للتاجر بتعديل رسوم الشحن أو تكلفة النقل المعتمدة للمنصة', 403);
+    }
+
+    const trackingNumber = sellerOrder.trackingNumber || sellerOrder.deliveryOrder?.trackingNumber;
+    if (trackingNumber) {
+      await interGovernorateTrackingService.recordCheckpoint({
+        trackingNumber,
+        status: 'PICKED_UP',
+        locationName: hubName || 'مستودع التاجر',
+        descriptionAr: `تم تسليم الشحنة رسمياً إلى مندوب شركة الشحن (${carrierName || sellerOrder.carrierName || 'الناقل المعتمد'})`,
+        descriptionEn: `Parcel officially handed over to approved carrier`,
+        actorType: 'SELLER',
+        actorId: req.user!.userId,
+        actorName: req.user!.email,
+        notes: handoverNotes,
+      });
+    }
+
+    const result = await OrderStateMachine.transitionSellerOrder({
+      sellerOrderId: resolvedId,
+      targetStatus: SellerOrderStatus.SHIPPED,
+      changedBy: req.user!.userId,
+      changedByRole: 'SELLER',
+      note: `تم تسليم الشحنة للناقل المعتمد ${carrierName ? `(${carrierName})` : ''}`,
+    });
+
+    const fullOrder = await getFullSellerOrder(resolvedId);
+    ResponseUtil.success(res, fullOrder || result.sellerOrder, 'تم تسليم الشحنة لشركة النقل بنجاح وتحديث مسار التتبع');
   } catch (error) {
     next(error);
   }

@@ -21,6 +21,7 @@ import {
 import { OrderStateMachine } from './order.state-machine';
 import { SocketService } from '../../services/websocket/socket.service';
 import { deliveryQuoteService } from '../../services/delivery/delivery-quote.service';
+import { interGovernorateTrackingService } from '../../services/delivery/inter-governorate-tracking.service';
 import { supportedAreasService } from '../locations/supported-areas.service';
 import { RemoteConfigService } from '../remote-config/remote-config.service';
 import { deliverySlotService } from '../../services/delivery/delivery-slot.service';
@@ -1591,6 +1592,19 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           promotionalDiscount: sellerShipDiscount,
           discountFundedBy: promoCostBearer || undefined,
         });
+
+        // Initialize inter-governorate tracking & initial checkpoint
+        if (sq.isInterGovernorate) {
+          await interGovernorateTrackingService.initializeShipment({
+            sellerOrderId: so.id,
+            originCityName: sq.zoneName?.split('—')[0]?.trim() || 'صنعاء',
+            destinationCityName: address?.city?.nameAr || 'المدينة المحددة',
+            deliveryMethodCode: sq.deliveryMethodCode,
+            carrierName: sq.shippingProviderName,
+            carrierCost: sq.carrierCost,
+            estimatedDeliveryHours: sq.estimatedHoursMax || 48,
+          });
+        }
       }
     }
 

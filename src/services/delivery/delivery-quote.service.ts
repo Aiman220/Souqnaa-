@@ -19,6 +19,12 @@ export interface SellerOrderInput {
   storeId: string;
   deliveryMethod?: string;
   isExpress?: boolean;
+  weightKg?: number;
+  lengthCm?: number;
+  widthCm?: number;
+  heightCm?: number;
+  isRemoteArea?: boolean;
+  isSpecialHandling?: boolean;
 }
 
 export interface StoreAvailabilityStatus {
@@ -165,6 +171,7 @@ export class DeliveryQuoteService {
     const {
       customerAddressId,
       sellerOrders,
+      deliveryMethod = 'standard',
       isExpress = false,
       deliveryScheduleType = 'ASAP',
       deliveryDate,
@@ -242,11 +249,25 @@ export class DeliveryQuoteService {
 
     const customerLat = address.latitude ?? address.city?.latitude ?? 15.3694;
     const customerLng = address.longitude ?? address.city?.longitude ?? 44.1910;
+    const customerAreaMatch = supportedAreasService.isAddressSupported(address);
+    const destinationAreaId = customerAreaMatch.area?.canonicalId;
 
     // 2. For each seller, get store coordinates + evaluate availability + calculate quote
     const storesStatusList: StoreAvailabilityStatus[] = [];
 
-    const sellerQuotePromises = sellerOrders.map(async ({ sellerId, storeId, deliveryMethod: itemDeliveryMethod, isExpress: itemExpress }) => {
+    const sellerQuotePromises = sellerOrders.map(async (soInput) => {
+      const {
+        sellerId,
+        storeId,
+        deliveryMethod: itemDeliveryMethod,
+        isExpress: itemExpress,
+        weightKg,
+        lengthCm,
+        widthCm,
+        heightCm,
+        isRemoteArea,
+        isSpecialHandling,
+      } = soInput;
       let store = storeId ? await prisma.store.findUnique({ where: { id: storeId } }) : null;
       if (!store && sellerId) {
         store = await prisma.store.findFirst({ where: { sellerId } });
@@ -272,6 +293,9 @@ export class DeliveryQuoteService {
       storeLat = storeLat ?? 15.3500;
       storeLng = storeLng ?? 44.2000;
 
+      const storeAreaMatch = supportedAreasService.findSupportedAreaByCoordinates(storeLat, storeLng, 60.0);
+      const originAreaId = storeAreaMatch.area?.canonicalId;
+
       const sellerIsExpress = typeof itemExpress === 'boolean'
         ? itemExpress
         : (itemDeliveryMethod?.toLowerCase() === 'express' || isExpress);
@@ -281,6 +305,15 @@ export class DeliveryQuoteService {
         discountAmount,
         discountFundedBy,
         slotFee, // applied per seller quote
+        deliveryMethodCode: itemDeliveryMethod || deliveryMethod || 'intercity_transport',
+        originAreaId,
+        destinationAreaId,
+        weightKg,
+        lengthCm,
+        widthCm,
+        heightCm,
+        isRemoteArea,
+        isSpecialHandling,
       };
 
       const quote = await deliveryFeeService.calculateFee(
@@ -393,6 +426,45 @@ export class DeliveryQuoteService {
 
     const effectiveFundedBy = scheduleInfo?.discountFundedBy || quote.discountFundedBy;
 
+    const interGovSnapshotData = quote.isInterGovernorate ? {
+      isInterGovernorate: true,
+      routeId: quote.routeId,
+      routeKey: quote.routeKey,
+      deliveryMethodCode: quote.deliveryMethodCode,
+      shippingProvider: quote.shippingProviderName || quote.shippingProviderId,
+      actualWeightKg: quote.actualWeightKg,
+      volumetricWeightKg: quote.volumetricWeightKg,
+      chargeableWeightKg: quote.chargeableWeightKg,
+      roadDistanceKm: quote.distanceKm,
+      routeBaseFee: quote.routeBaseFee ?? quote.baseFee,
+      distanceCharge: quote.distanceCharge ?? 0,
+      weightSurcharge: quote.weightSurcharge ?? quote.weightFee,
+      oversizedSurcharge: quote.oversizedSurcharge ?? 0,
+      deliveryMethodCharge: quote.deliveryMethodCharge ?? quote.extraSellerFee,
+      expressCharge: quote.expressFee,
+      remoteAreaCharge: quote.remoteAreaCharge ?? 0,
+      specialHandlingCharge: quote.specialHandlingCharge ?? 0,
+      carrierCost: quote.carrierCost ?? 0,
+      sellerContribution: quote.sellerContribution ?? 0,
+      marketplaceSubsidy: quote.marketplaceSubsidy ?? 0,
+      pricingBreakdownJson: JSON.stringify({
+        routeKey: quote.routeKey,
+        roadDistanceKm: quote.distanceKm,
+        chargeableWeightKg: quote.chargeableWeightKg,
+        routeBaseFee: quote.routeBaseFee ?? quote.baseFee,
+        distanceCharge: quote.distanceCharge ?? 0,
+        weightSurcharge: quote.weightSurcharge ?? quote.weightFee,
+        oversizedSurcharge: quote.oversizedSurcharge ?? 0,
+        deliveryMethodCharge: quote.deliveryMethodCharge ?? quote.extraSellerFee,
+        expressCharge: quote.expressFee,
+        remoteAreaCharge: quote.remoteAreaCharge ?? 0,
+        specialHandlingCharge: quote.specialHandlingCharge ?? 0,
+        carrierCost: quote.carrierCost ?? 0,
+        deliveryDiscount: effectiveDiscount,
+        finalDeliveryFee: effectiveFee,
+      }),
+    } : {};
+
     await prisma.deliveryQuoteSnapshot.upsert({
       where: { sellerOrderId },
       update: {
@@ -413,6 +485,7 @@ export class DeliveryQuoteService {
         calculatedAt: new Date(),
         zonePricingId: quote.zoneId,
         ...slotData,
+        ...interGovSnapshotData,
       },
       create: {
         sellerOrderId,
@@ -432,6 +505,7 @@ export class DeliveryQuoteService {
         isExpress: quote.isExpress,
         zonePricingId: quote.zoneId,
         ...slotData,
+        ...interGovSnapshotData,
       },
     });
 
@@ -443,6 +517,10 @@ export class DeliveryQuoteService {
         distanceKm: quote.distanceKm,
         durationMinutes: quote.durationMinutes,
         deliveryZoneName: quote.zoneName,
+        isInterGovernorate: Boolean(quote.isInterGovernorate),
+        ...(quote.routeKey ? { interGovernorateRouteKey: quote.routeKey } : {}),
+        ...(quote.carrierCost !== undefined ? { carrierCost: quote.carrierCost } : {}),
+        ...(quote.shippingProviderName ? { carrierName: quote.shippingProviderName } : {}),
         ...(scheduleInfo?.actualCustomerDeliveryFee !== undefined
           ? { deliveryFee: scheduleInfo.actualCustomerDeliveryFee }
           : {}),

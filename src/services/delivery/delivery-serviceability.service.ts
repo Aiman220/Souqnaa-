@@ -12,6 +12,7 @@ import { config } from '../../config';
 import { RemoteConfigService } from '../../modules/remote-config/remote-config.service';
 import { supportedAreasService, LocationMatchResult } from '../../modules/locations/supported-areas.service';
 import { deliveryFeeService } from './delivery-fee.service';
+import { interGovernorateRouteService } from './inter-governorate-route.service';
 
 export interface CustomerDestination {
   cityId?: string;
@@ -261,13 +262,33 @@ export class DeliveryServiceabilityService {
       };
     }
 
+    // Inter-governorate route serviceability check
+    if (storeAreaMatch.area && destination.matchResult.area) {
+      const isInterEnabled = await interGovernorateRouteService.isInterGovernorateEnabled();
+      if (isInterEnabled) {
+        const approvedRoute = await interGovernorateRouteService.resolveRoute(
+          storeAreaMatch.area.canonicalId,
+          destination.matchResult.area.canonicalId,
+        );
+        if (approvedRoute && approvedRoute.isActive) {
+          return {
+            storeId: store.id,
+            sellerId: store.sellerId,
+            isDeliverable: true,
+            distanceKm,
+            reason: 'OK',
+          };
+        }
+      }
+    }
+
     return {
       storeId: store.id,
       sellerId: store.sellerId,
       isDeliverable: false,
       distanceKm,
       reason: 'OUTSIDE_DELIVERY_RADIUS',
-      reasonAr: `المتجر يبعد مسافة (${distanceKm} كم) وهي تتجاوز الحد الأقصى لنطاق التوصيل المسموح (${maxRadius} كم)`,
+      reasonAr: `المتجر يبعد مسافة (${distanceKm} كم) ولا يوجد مسار شحن معتمد ومفعل بين المحافظتين حالياً`,
     };
   }
 
