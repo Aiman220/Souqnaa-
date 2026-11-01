@@ -896,8 +896,9 @@ class CampaignService {
   // ────────────────────────────────────────────────────────────────────────────
   // MEGA CAMPAIGN LANDING PAGE AGGREGATOR (Clauses 5, 6, 20, 21)
   // ────────────────────────────────────────────────────────────────────────────
-  async getCampaignLandingPage(identifier: string) {
+  async getCampaignLandingPage(identifier: string, serviceableStoreIds?: string[]) {
     const campaign = await this.getCampaignBySlugOrId(identifier);
+    const storeSet = serviceableStoreIds ? new Set(serviceableStoreIds) : null;
 
     const now = new Date();
     const isLive = campaign.status === 'ACTIVE' && now >= campaign.startAt && now <= campaign.endAt;
@@ -1043,12 +1044,28 @@ class CampaignService {
       take: 12,
     });
 
+    // Filter by serviceable stores if city discovery active
+    const effectiveFlashSales = storeSet
+      ? flashSales.map(fs => ({
+          ...fs,
+          items: fs.items.filter(item => item.product && storeSet.has(item.product.storeId || (item.product as any).store?.id)),
+        })).filter(fs => fs.items.length > 0)
+      : flashSales;
+
+    const effectiveStores = storeSet
+      ? featuredStores.filter(fs => fs.store && storeSet.has(fs.store.id))
+      : featuredStores;
+
+    const effectiveMegaDeals = storeSet
+      ? megaDeals.filter(cp => cp.product && storeSet.has(cp.product.storeId || (cp.product as any).store?.id))
+      : megaDeals;
+
     // Build unique store map combining registered sellers & stores with approved products
     const storeMap = new Map<string, any>();
-    for (const fs of featuredStores) {
+    for (const fs of effectiveStores) {
       if (fs.store) storeMap.set(fs.store.id, fs.store);
     }
-    for (const cp of megaDeals) {
+    for (const cp of effectiveMegaDeals) {
       if (cp.product?.store && !storeMap.has(cp.product.store.id)) {
         storeMap.set(cp.product.store.id, cp.product.store);
       }
@@ -1129,9 +1146,9 @@ class CampaignService {
         remainingSeconds: Math.max(0, Math.floor((campaign.endAt.getTime() - now.getTime()) / 1000)),
       },
       vouchers,
-      flashSales,
+      flashSales: effectiveFlashSales,
       featuredStores: Array.from(storeMap.values()),
-      megaDeals: megaDeals
+      megaDeals: effectiveMegaDeals
         .filter((cp) => cp.product != null)
         .map((cp) => {
           const primaryImg = cp.product.images?.find((i: any) => i.isPrimary) || cp.product.images?.[0];
@@ -1174,8 +1191,12 @@ class CampaignService {
       sortBy?: 'popular' | 'price_low' | 'price_high' | 'discount' | 'newest';
       cursor?: string;
       limit?: number;
-    }
+    },
+    serviceableStoreIds?: string[]
   ) {
+    if (serviceableStoreIds !== undefined && serviceableStoreIds.length === 0) {
+      return { items: [], total: 0, nextCursor: null, hasMore: false };
+    }
     const campaign = await this.getCampaignBySlugOrId(identifier);
     const limit = Math.min(options.limit ? Number(options.limit) : 20, 50);
 
@@ -1183,6 +1204,10 @@ class CampaignService {
       campaignId: campaign.id,
       status: { in: ['APPROVED', 'ACTIVE'] },
     };
+
+    if (serviceableStoreIds && serviceableStoreIds.length > 0) {
+      where.product = { ...where.product, storeId: { in: serviceableStoreIds } };
+    }
 
     if (options.categoryId) {
       where.product = { ...where.product, categoryId: options.categoryId };

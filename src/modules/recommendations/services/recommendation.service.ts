@@ -390,19 +390,36 @@ export class RecommendationService {
    * Product Details Recommendations (§29, §83)
    * Returns: similar, frequentlyBoughtTogether, alsoViewed
    */
-  async getProductRecommendations(productId: string): Promise<{
+  async getProductRecommendations(
+    productId: string,
+    serviceableStoreIds?: string[],
+    cityId?: string
+  ): Promise<{
     similar: any[];
     frequentlyBoughtTogether: any[];
     alsoViewed: any[];
   }> {
-    const cacheKey = `recommendations:product_page:${productId}`;
+    const cacheKey = serviceableStoreIds !== undefined
+      ? `recommendations:product_page:${productId}:city:${cityId || 'all'}`
+      : `recommendations:product_page:${productId}`;
     const cached = await redisService.getJson<any>(cacheKey);
     if (cached) return cached;
 
-    const [similar, frequentlyBoughtTogether] = await Promise.all([
+    if (serviceableStoreIds !== undefined && serviceableStoreIds.length === 0) {
+      return { similar: [], frequentlyBoughtTogether: [], alsoViewed: [] };
+    }
+
+    const storeIdSet = serviceableStoreIds ? new Set(serviceableStoreIds) : null;
+
+    let [similar, frequentlyBoughtTogether] = await Promise.all([
       contentSimilarityService.getSimilarProducts(productId, 12),
       associationRulesService.getFrequentlyBoughtTogether(productId, 6),
     ]);
+
+    if (storeIdSet) {
+      similar = similar.filter((p: any) => storeIdSet.has(p.storeId || p.store?.id));
+      frequentlyBoughtTogether = frequentlyBoughtTogether.filter((p: any) => storeIdSet.has(p.storeId || p.store?.id));
+    }
 
     // Also Viewed: other items in same category
     const target = await prisma.product.findUnique({
@@ -412,13 +429,17 @@ export class RecommendationService {
 
     let alsoViewed: any[] = [];
     if (target?.categoryId) {
+      const alsoWhere: any = {
+        categoryId: target.categoryId,
+        id: { not: productId },
+        isActive: true,
+        isSuspended: false,
+      };
+      if (storeIdSet) {
+        alsoWhere.storeId = { in: Array.from(storeIdSet) };
+      }
       alsoViewed = await prisma.product.findMany({
-        where: {
-          categoryId: target.categoryId,
-          id: { not: productId },
-          isActive: true,
-          isSuspended: false,
-        },
+        where: alsoWhere,
         include: {
           store: true,
           category: true,
@@ -434,12 +455,16 @@ export class RecommendationService {
     // Fallback: If similar products calculation yielded empty, use alsoViewed or popular category products
     let finalSimilar = similar && similar.length > 0 ? similar : alsoViewed;
     if (!finalSimilar || finalSimilar.length === 0) {
+      const fallbackWhere: any = {
+        id: { not: productId },
+        isActive: true,
+        isSuspended: false,
+      };
+      if (storeIdSet) {
+        fallbackWhere.storeId = { in: Array.from(storeIdSet) };
+      }
       finalSimilar = await prisma.product.findMany({
-        where: {
-          id: { not: productId },
-          isActive: true,
-          isSuspended: false,
-        },
+        where: fallbackWhere,
         include: {
           store: true,
           category: true,
@@ -456,11 +481,17 @@ export class RecommendationService {
       ? frequentlyBoughtTogether
       : finalSimilar.slice(0, 4);
 
-    const [formattedSimilar, formattedFbt, formattedAlsoViewed] = await Promise.all([
+    let [formattedSimilar, formattedFbt, formattedAlsoViewed] = await Promise.all([
       formatProductsWithCampaigns(finalSimilar),
       formatProductsWithCampaigns(finalFbt),
       formatProductsWithCampaigns(alsoViewed.length > 0 ? alsoViewed : finalSimilar),
     ]);
+
+    if (storeIdSet) {
+      formattedSimilar = formattedSimilar.filter((p: any) => storeIdSet.has(p.storeId || p.store?.id));
+      formattedFbt = formattedFbt.filter((p: any) => storeIdSet.has(p.storeId || p.store?.id));
+      formattedAlsoViewed = formattedAlsoViewed.filter((p: any) => storeIdSet.has(p.storeId || p.store?.id));
+    }
 
     const payload = {
       similar: formattedSimilar,
@@ -482,6 +513,10 @@ export class RecommendationService {
     recentlyViewed: any[];
     becauseYouBought: any[];
   }> {
+    const storeIdSet = context.serviceableStoreIds ? new Set(context.serviceableStoreIds) : null;
+    if (storeIdSet && storeIdSet.size === 0) {
+      return { personalized: [], wishlist: [], recentlyViewed: [], becauseYouBought: [] };
+    }
     // 1. Personalized Candidates
     const candidates = await candidateGeneratorService.generateCandidates({ ...context, userId }, 60);
     const ranked = await recommendationRankerV2.rankCandidates(candidates, context);

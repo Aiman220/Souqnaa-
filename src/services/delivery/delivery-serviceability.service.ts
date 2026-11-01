@@ -67,8 +67,21 @@ export class DeliveryServiceabilityService {
       longitude,
     } = req.query;
 
-    const rawCityId = (destinationCityId || cityId || req.headers['x-delivery-city-id']) as string | undefined;
-    const rawCityHeader = (destinationCity || city || req.headers['x-destination-city']) as string | undefined;
+    const rawCityId = (
+      destinationCityId ||
+      cityId ||
+      req.headers['x-delivery-city-id'] ||
+      req.headers['x-destination-city-id'] ||
+      req.headers['x-city-id']
+    ) as string | undefined;
+
+    const rawCityHeader = (
+      destinationCity ||
+      city ||
+      req.headers['x-destination-city'] ||
+      req.headers['x-city']
+    ) as string | undefined;
+
     let rawCityName = rawCityHeader;
     if (rawCityHeader) {
       try {
@@ -77,8 +90,9 @@ export class DeliveryServiceabilityService {
         rawCityName = rawCityHeader;
       }
     }
-    const rawLat = lat || latitude || req.headers['x-destination-lat'];
-    const rawLng = lng || longitude || req.headers['x-destination-lng'];
+
+    const rawLat = lat || latitude || req.headers['x-destination-lat'] || req.headers['x-latitude'] || req.headers['x-lat'];
+    const rawLng = lng || longitude || req.headers['x-destination-lng'] || req.headers['x-longitude'] || req.headers['x-lng'];
 
     let parsedLat = rawLat ? parseFloat(String(rawLat)) : undefined;
     let parsedLng = rawLng ? parseFloat(String(rawLng)) : undefined;

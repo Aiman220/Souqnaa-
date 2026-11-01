@@ -16,6 +16,7 @@ export interface VisualSearchContext {
   maxPrice?: number;
   inStock?: boolean;
   limit?: number;
+  serviceableStoreIds?: string[];
 }
 
 export interface VisualSearchResult {
@@ -53,6 +54,18 @@ export class RuleBasedVisualSearchProvider implements IVisualSearchProvider {
   async search(context: VisualSearchContext): Promise<VisualSearchResult> {
     const queryId = `vs_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const limit = context.limit || 24;
+
+    if (context.serviceableStoreIds !== undefined && context.serviceableStoreIds.length === 0) {
+      return {
+        queryId,
+        provider: this.name,
+        detectedTags: [],
+        suggestedCategories: [],
+        similarProducts: [],
+        products: [],
+        metadata: { emptyServiceableStores: true },
+      };
+    }
 
     const detectedTags: string[] = [];
     let detectedCategory: { id: string; nameAr: string; nameEn: string; slug: string } | undefined;
@@ -130,6 +143,10 @@ export class RuleBasedVisualSearchProvider implements IVisualSearchProvider {
         isActive: true,
         isSuspended: false,
       };
+
+      if (context.serviceableStoreIds && context.serviceableStoreIds.length > 0) {
+        where.storeId = { in: context.serviceableStoreIds };
+      }
 
       if (context.minPrice != null || context.maxPrice != null) {
         where.price = {};

@@ -35,6 +35,8 @@ export class VisualSearchService {
       inStock?: boolean;
       userId?: string;
       limit?: number;
+      serviceableStoreIds?: string[];
+      cityId?: string;
     }
   ): Promise<VisualSearchResult> {
     // 1. Check Remote Config
@@ -50,7 +52,7 @@ export class VisualSearchService {
     if (file?.buffer && file.buffer.length > 0) {
       const crypto = await import('crypto');
       const bufHash = crypto.createHash('md5').update(file.buffer).digest('hex').substring(0, 16);
-      cacheKey = `search:visual:res:${bufHash}:${options.categoryId || 'all'}:${options.minPrice || 0}:${options.maxPrice || 0}:${options.inStock ? 1 : 0}:${options.limit || 24}:${options.textQuery ? options.textQuery.trim() : 'none'}`;
+      cacheKey = `search:visual:res:${bufHash}:${options.categoryId || 'all'}:${options.minPrice || 0}:${options.maxPrice || 0}:${options.inStock ? 1 : 0}:${options.limit || 24}:${options.textQuery ? options.textQuery.trim() : 'none'}:city:${options.cityId || 'all'}`;
       try {
         const cached = await redis.getJson<VisualSearchResult>(cacheKey);
         if (cached) {
@@ -98,6 +100,7 @@ export class VisualSearchService {
       maxPrice: options.maxPrice,
       inStock: options.inStock,
       limit: options.limit,
+      serviceableStoreIds: options.serviceableStoreIds,
     };
 
     // Determine active provider

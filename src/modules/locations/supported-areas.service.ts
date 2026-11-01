@@ -318,6 +318,15 @@ export class SupportedAreasService {
 
     // Check all other supported areas
     for (const area of STRICTLY_SUPPORTED_AREAS) {
+      // Direct canonical ID match
+      if (area.canonicalId === input || normalized === area.canonicalId.toLowerCase()) {
+        return {
+          isSupported: true,
+          area,
+          canonicalCityId: this.dbCityMap.get(area.canonicalId) || area.canonicalId,
+        };
+      }
+
       if (area.canonicalId === 'loc-ye-taiz-al-hawban') continue;
 
       for (const alias of area.aliases) {

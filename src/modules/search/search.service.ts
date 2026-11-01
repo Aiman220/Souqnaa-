@@ -242,6 +242,15 @@ export class SearchService {
         };
       }
       const serviceableStoreIds = await deliveryServiceabilityService.getServiceableStoreIds(params.destination);
+      if (serviceableStoreIds.size === 0) {
+        return {
+          products: [],
+          total: 0,
+          page,
+          limit,
+          nextCursor: null,
+        };
+      }
       where.storeId = { in: Array.from(serviceableStoreIds) };
     }
 
@@ -458,12 +467,14 @@ export class SearchService {
   /**
    * Fast, multi-source autocomplete suggestions with ranking and Redis caching.
    */
-  async getSuggestions(query: string, userId?: string): Promise<SuggestionItem[]> {
+  async getSuggestions(query: string, userId?: string, destination?: CustomerDestination | null): Promise<SuggestionItem[]> {
     const raw = (query || '').trim();
     if (raw.length === 0) return [];
 
     const normalized = normalizeArabic(raw);
-    const cacheKey = `search:suggestions:${normalized}`;
+    const cacheKey = destination?.cityId
+      ? `search:suggestions:${normalized}:city:${destination.canonicalCityId || destination.cityId}`
+      : `search:suggestions:${normalized}`;
 
     // Try Redis cache
     const cached = await redis.getJson<SuggestionItem[]>(cacheKey);
@@ -556,18 +567,39 @@ export class SearchService {
     }
 
     // 5. Matching Product Names
-    const products = await prisma.product.findMany({
-      where: {
-        isActive: true,
-        isSuspended: false,
-        OR: [
-          { nameAr: { contains: raw, mode: 'insensitive' } },
-          { nameEn: { contains: raw, mode: 'insensitive' } },
-        ],
-      },
-      select: { id: true, nameAr: true, nameEn: true, price: true, slug: true },
-      take: 6,
+    const productWhere: any = {
+      isActive: true,
+      isSuspended: false,
+      OR: [
+        { nameAr: { contains: raw, mode: 'insensitive' } },
+        { nameEn: { contains: raw, mode: 'insensitive' } },
+      ],
+    };
+
+    const isCityDiscoveryActive = await remoteConfigService.isFeatureActive('city_based_product_discovery', {
+      userId,
     });
+    let skipProductSuggestions = false;
+    if (isCityDiscoveryActive && destination) {
+      if (!destination.isSupported) {
+        skipProductSuggestions = true;
+      } else {
+        const serviceableStoreIds = await deliveryServiceabilityService.getServiceableStoreIds(destination);
+        if (serviceableStoreIds.size === 0) {
+          skipProductSuggestions = true;
+        } else {
+          productWhere.storeId = { in: Array.from(serviceableStoreIds) };
+        }
+      }
+    }
+
+    const products = skipProductSuggestions
+      ? []
+      : await prisma.product.findMany({
+          where: productWhere,
+          select: { id: true, nameAr: true, nameEn: true, price: true, slug: true },
+          take: 6,
+        });
 
     for (const p of products) {
       const pText = p.nameAr || p.nameEn;

@@ -175,19 +175,25 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       })
       .filter((campaign) => campaign.products.length > 0);
 
-    const featuredProducts = formatProductsForClient(rawFeaturedProducts);
-    const bestSellers = formatProductsForClient(rawBestSellers);
+    const featuredProducts = formatProductsForClient(
+      rawFeaturedProducts.filter((p) => isStoreAllowed(p.storeId || (p.store as any)?.id))
+    );
+    const bestSellers = formatProductsForClient(
+      rawBestSellers.filter((p) => isStoreAllowed(p.storeId || (p.store as any)?.id))
+    );
 
     const normalizedBanners = banners.map((b) => ({
       ...b,
       imageUrl: storageService.normalizeUrl(b.imageUrl),
     }));
 
-    const normalizedStores = featuredStores.map((s) => ({
-      ...s,
-      logo: s.logo ? storageService.normalizeUrl(s.logo) : null,
-      cover: s.cover ? storageService.normalizeUrl(s.cover) : null,
-    }));
+    const normalizedStores = featuredStores
+      .filter((s) => isStoreAllowed(s.id))
+      .map((s) => ({
+        ...s,
+        logo: s.logo ? storageService.normalizeUrl(s.logo) : null,
+        cover: s.cover ? storageService.normalizeUrl(s.cover) : null,
+      }));
 
     const payload = {
       banners: normalizedBanners,
@@ -199,8 +205,8 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       promotions,
     };
 
-    // Cache the assembled payload asynchronously
-    redis.setJson(HOME_CACHE_KEY, payload, HOME_CACHE_TTL_SECONDS).catch(() => {});
+    // Cache the assembled payload asynchronously under the city-partitioned key
+    redis.setJson(activeCacheKey, payload, HOME_CACHE_TTL_SECONDS).catch(() => {});
 
     ResponseUtil.success(res, payload);
   } catch (error) {

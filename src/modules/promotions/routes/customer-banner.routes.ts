@@ -7,6 +7,8 @@ import { deepLinkService } from '../services/deep-link.service';
 import { campaignService } from '../services/campaign.service';
 import { CustomerEvaluationContext } from '../services/targeting.service';
 import { placementService } from '../services/placement.service';
+import { deliveryServiceabilityService } from '../../../services/delivery/delivery-serviceability.service';
+import { RemoteConfigService } from '../../remote-config/remote-config.service';
 
 const router = Router();
 router.use(optionalAuth);
@@ -193,10 +195,29 @@ router.get('/sponsored-products', async (req: Request, res: Response, next: Next
     const placementKey = (req.query.placement as string) || 'SPONSORED_PRODUCTS';
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 8;
 
+    const isCityDiscoveryEnabled = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
+      userId: context.userId || undefined,
+    });
+    let serviceableStoreIds: string[] | undefined;
+    if (isCityDiscoveryEnabled) {
+      const destination = await deliveryServiceabilityService.resolveCustomerDestination(req);
+      if (destination) {
+        if (!destination.isSupported) {
+          return ResponseUtil.success(res, { items: [], total: 0 });
+        }
+        const ids = await deliveryServiceabilityService.getServiceableStoreIds(destination);
+        serviceableStoreIds = Array.from(ids);
+        if (serviceableStoreIds.length === 0) {
+          return ResponseUtil.success(res, { items: [], total: 0 });
+        }
+      }
+    }
+
     const results = await sellerPromotionService.getActiveSponsoredProducts(placementKey, {
       customerId: context.userId || undefined,
       sessionId: req.query.sessionId as string | undefined,
       limit,
+      serviceableStoreIds,
     });
 
     ResponseUtil.success(res, { items: results, total: results.length });

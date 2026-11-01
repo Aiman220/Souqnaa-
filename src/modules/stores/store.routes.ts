@@ -8,6 +8,8 @@ import { storefrontLimiter } from '../../middleware/rate-limiter.middleware';
 import { VoucherService } from '../vouchers/voucher.service';
 import { SellerPerformanceService } from '../seller-performance/seller-performance.service';
 import { StorefrontInvalidatorService } from '../../services/storefront-invalidator.service';
+import { deliveryServiceabilityService } from '../../services/delivery/delivery-serviceability.service';
+import { RemoteConfigService } from '../remote-config/remote-config.service';
 
 const router = Router();
 
@@ -68,10 +70,28 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     const limit = !isNaN(rawLimit) && rawLimit >= 1 ? Math.min(rawLimit, 50) : 20;
     const skip = (page - 1) * limit;
 
+    const where: any = { isActive: true };
+    const isCityDiscoveryEnabled = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
+      userId: (req as any).user?.userId,
+    });
+    if (isCityDiscoveryEnabled) {
+      const destination = await deliveryServiceabilityService.resolveCustomerDestination(req);
+      if (destination) {
+        if (!destination.isSupported) {
+          return ResponseUtil.paginated(res, [], 0, page, limit);
+        }
+        const serviceableStoreIds = await deliveryServiceabilityService.getServiceableStoreIds(destination);
+        if (serviceableStoreIds.size === 0) {
+          return ResponseUtil.paginated(res, [], 0, page, limit);
+        }
+        where.id = { in: Array.from(serviceableStoreIds) };
+      }
+    }
+
     const [total, stores] = await Promise.all([
-      prisma.store.count({ where: { isActive: true } }),
+      prisma.store.count({ where }),
       prisma.store.findMany({
-        where: { isActive: true },
+        where,
         include: {
           _count: { select: { products: { where: { isActive: true } } } },
           enhancement: { select: { followerCount: true, logoMedium: true, logoSmall: true } },

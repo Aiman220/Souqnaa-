@@ -10,6 +10,7 @@ import { catalogVisualIndexService } from './visual/catalog-visual-index.service
 import { validateImageBuffer } from './visual/image-hasher.util';
 import { AppError } from '../../middleware/error.middleware';
 import { searchLimiter } from '../../middleware/rate-limiter.middleware';
+import { RemoteConfigService } from '../remote-config/remote-config.service';
 
 const router = Router();
 
@@ -120,9 +121,11 @@ router.get('/suggestions', searchLimiter, optionalAuth, async (req: Request, res
       return ResponseUtil.success(res, []);
     }
 
+    const destination = await deliveryServiceabilityService.resolveCustomerDestination(req);
     const suggestions = await searchService.getSuggestions(
       String(q),
-      req.user?.userId
+      req.user?.userId,
+      destination
     );
 
     ResponseUtil.success(res, suggestions);
@@ -245,6 +248,38 @@ router.post(
         throw new AppError('Minimum price cannot exceed maximum price', 400);
       }
 
+      const destination = await deliveryServiceabilityService.resolveCustomerDestination(req);
+      const isCityDiscoveryActive = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
+        userId: req.user?.userId,
+      });
+      let serviceableStoreIds: string[] | undefined;
+      if (isCityDiscoveryActive && destination) {
+        if (!destination.isSupported) {
+          return ResponseUtil.success(res, {
+            queryId: `vs_${Date.now()}`,
+            provider: 'VisualSearchService',
+            detectedTags: [],
+            suggestedCategories: [],
+            similarProducts: [],
+            products: [],
+            metadata: { unsupportedLocation: true },
+          });
+        }
+        const ids = await deliveryServiceabilityService.getServiceableStoreIds(destination);
+        serviceableStoreIds = Array.from(ids);
+        if (serviceableStoreIds.length === 0) {
+          return ResponseUtil.success(res, {
+            queryId: `vs_${Date.now()}`,
+            provider: 'VisualSearchService',
+            detectedTags: [],
+            suggestedCategories: [],
+            similarProducts: [],
+            products: [],
+            metadata: { emptyServiceableStores: true },
+          });
+        }
+      }
+
       const visualResult = await visualSearchService.executeVisualSearch(file, {
         textQuery: textQuery ? String(textQuery).trim() : undefined,
         categoryId: categoryId ? String(categoryId).trim() : undefined,
@@ -253,6 +288,8 @@ router.post(
         inStock: inStock === 'true' || inStock === true,
         userId: req.user?.userId,
         limit: limit ? parseInt(String(limit), 10) : 24,
+        serviceableStoreIds,
+        cityId: destination?.canonicalCityId || destination?.cityId,
       });
 
       ResponseUtil.success(res, visualResult);

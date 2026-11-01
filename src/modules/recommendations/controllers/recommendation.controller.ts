@@ -95,7 +95,26 @@ export class RecommendationController {
         return;
       }
 
-      const recommendations = await recommendationService.getProductRecommendations(id);
+      const isCityDiscoveryActive = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
+        userId: (req as any).user?.userId,
+      });
+      const destination = isCityDiscoveryActive ? await deliveryServiceabilityService.resolveCustomerDestination(req) : null;
+      let serviceableStoreIds: string[] | undefined;
+      if (isCityDiscoveryActive && destination) {
+        if (!destination.isSupported) {
+          res.json({ success: true, data: { similar: [], frequentlyBoughtTogether: [], alsoViewed: [] } });
+          return;
+        }
+        const ids = await deliveryServiceabilityService.getServiceableStoreIds(destination);
+        serviceableStoreIds = Array.from(ids);
+        if (serviceableStoreIds.length === 0) {
+          res.json({ success: true, data: { similar: [], frequentlyBoughtTogether: [], alsoViewed: [] } });
+          return;
+        }
+      }
+
+      const cityId = destination?.canonicalCityId || destination?.cityId;
+      const recommendations = await recommendationService.getProductRecommendations(id, serviceableStoreIds, cityId);
       res.json({
         success: true,
         data: recommendations,
@@ -122,9 +141,31 @@ export class RecommendationController {
       }
 
       const sessionId = (req.headers['x-session-id'] as string) || 'authenticated_session';
+
+      const isCityDiscoveryActive = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
+        userId,
+      });
+      const destination = isCityDiscoveryActive ? await deliveryServiceabilityService.resolveCustomerDestination(req) : null;
+      let serviceableStoreIds: string[] | undefined;
+      if (isCityDiscoveryActive && destination) {
+        if (!destination.isSupported) {
+          res.json({ success: true, data: { personalized: [], wishlist: [], recentlyViewed: [], becauseYouBought: [] } });
+          return;
+        }
+        const ids = await deliveryServiceabilityService.getServiceableStoreIds(destination);
+        serviceableStoreIds = Array.from(ids);
+        if (serviceableStoreIds.length === 0) {
+          res.json({ success: true, data: { personalized: [], wishlist: [], recentlyViewed: [], becauseYouBought: [] } });
+          return;
+        }
+      }
+
+      const cityId = destination?.canonicalCityId || destination?.cityId;
       const context: RecommendationContext = {
         userId,
         sessionId,
+        cityId,
+        serviceableStoreIds,
       };
 
       const recommendations = await recommendationService.getUserRecommendations(userId, context);

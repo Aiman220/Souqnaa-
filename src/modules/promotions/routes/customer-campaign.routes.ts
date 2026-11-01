@@ -3,6 +3,8 @@ import { ResponseUtil } from '../../../utils/response.util';
 import { optionalAuth, authenticate } from '../../../middleware/auth.middleware';
 import { campaignService } from '../services/campaign.service';
 import { prisma } from '../../../database/prisma';
+import { deliveryServiceabilityService } from '../../../services/delivery/delivery-serviceability.service';
+import { RemoteConfigService } from '../../remote-config/remote-config.service';
 
 const router = Router();
 router.use(optionalAuth);
@@ -81,7 +83,23 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 // ────────────────────────────────────────────────────────────────────────────
 router.get('/:slug', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const landingPageData = await campaignService.getCampaignLandingPage(String(req.params.slug));
+    const isCityDiscoveryEnabled = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
+      userId: (req as any).user?.userId,
+    });
+    let serviceableStoreIds: string[] | undefined;
+    if (isCityDiscoveryEnabled) {
+      const destination = await deliveryServiceabilityService.resolveCustomerDestination(req);
+      if (destination) {
+        if (!destination.isSupported) {
+          serviceableStoreIds = [];
+        } else {
+          const ids = await deliveryServiceabilityService.getServiceableStoreIds(destination);
+          serviceableStoreIds = Array.from(ids);
+        }
+      }
+    }
+
+    const landingPageData = await campaignService.getCampaignLandingPage(String(req.params.slug), serviceableStoreIds);
     ResponseUtil.success(res, landingPageData);
   } catch (error) {
     next(error);
@@ -129,14 +147,36 @@ router.get('/:slug/products', async (req: Request, res: Response, next: NextFunc
   try {
     const { categoryId, brandId, search, sortBy, cursor, limit } = req.query;
 
-    const result = await campaignService.getCampaignProducts(String(req.params.slug), {
-      categoryId: categoryId as string,
-      brandId: brandId as string,
-      search: search as string,
-      sortBy: sortBy as any,
-      cursor: cursor as string,
-      limit: limit ? Number(limit) : 20,
+    const isCityDiscoveryEnabled = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
+      userId: (req as any).user?.userId,
     });
+    let serviceableStoreIds: string[] | undefined;
+    if (isCityDiscoveryEnabled) {
+      const destination = await deliveryServiceabilityService.resolveCustomerDestination(req);
+      if (destination) {
+        if (!destination.isSupported) {
+          return ResponseUtil.success(res, { items: [], total: 0, nextCursor: null, hasMore: false });
+        }
+        const ids = await deliveryServiceabilityService.getServiceableStoreIds(destination);
+        serviceableStoreIds = Array.from(ids);
+        if (serviceableStoreIds.length === 0) {
+          return ResponseUtil.success(res, { items: [], total: 0, nextCursor: null, hasMore: false });
+        }
+      }
+    }
+
+    const result = await campaignService.getCampaignProducts(
+      String(req.params.slug),
+      {
+        categoryId: categoryId as string,
+        brandId: brandId as string,
+        search: search as string,
+        sortBy: sortBy as any,
+        cursor: cursor as string,
+        limit: limit ? Number(limit) : 20,
+      },
+      serviceableStoreIds
+    );
 
     ResponseUtil.success(res, result);
   } catch (error) {

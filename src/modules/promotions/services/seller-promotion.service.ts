@@ -923,9 +923,14 @@ class SellerPromotionService {
       customerId?: string;
       sessionId?: string;
       limit?: number;
+      serviceableStoreIds?: string[];
     },
   ) {
-    const { customerId, sessionId, limit = 8 } = context;
+    const { customerId, sessionId, limit = 8, serviceableStoreIds } = context;
+    if (serviceableStoreIds !== undefined && serviceableStoreIds.length === 0) {
+      return [];
+    }
+    const storeIdSet = serviceableStoreIds ? new Set(serviceableStoreIds) : null;
     const now = new Date();
 
     // Fetch all active promotions for this placement
@@ -951,6 +956,13 @@ class SellerPromotionService {
 
     // Frequency cap: exclude promotions already shown N times to this session
     let eligible = promotions;
+    if (storeIdSet) {
+      eligible = eligible.filter(p => {
+        const storeId = p.seller.stores[0]?.id;
+        return storeId ? storeIdSet.has(storeId) : false;
+      });
+    }
+    if (eligible.length === 0) return [];
     if (sessionId || customerId) {
       const sessionImpressions = await prisma.sponsoredProductServing.groupBy({
         by: ['promotionId'],
@@ -977,6 +989,7 @@ class SellerPromotionService {
               include: { inventory: true },
             });
             if (!product || !product.isActive || product.isSuspended) return null;
+            if (storeIdSet && !storeIdSet.has(product.storeId)) return null;
             if (product.inventory && product.inventory.quantity - product.inventory.reserved <= 0) {
               return null; // Out of stock
             }

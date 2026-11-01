@@ -168,8 +168,26 @@ router.get('/', optionalAuth, async (req: Request, res: Response, next: NextFunc
 // GET /api/v1/products/featured
 router.get('/featured', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const where: any = { isActive: true, isFeatured: true };
+    const isCityDiscoveryEnabled = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
+      userId: req.user?.userId,
+    });
+    if (isCityDiscoveryEnabled) {
+      const destination = await deliveryServiceabilityService.resolveCustomerDestination(req);
+      if (destination) {
+        if (!destination.isSupported) {
+          return ResponseUtil.success(res, []);
+        }
+        const serviceableStoreIds = await deliveryServiceabilityService.getServiceableStoreIds(destination);
+        if (serviceableStoreIds.size === 0) {
+          return ResponseUtil.success(res, []);
+        }
+        where.storeId = { in: Array.from(serviceableStoreIds) };
+      }
+    }
+
     const products = await prisma.product.findMany({
-      where: { isActive: true, isFeatured: true },
+      where,
       take: 12,
       include: {
         store: { select: { id: true, name: true, logo: true, isVerified: true } },
@@ -188,8 +206,26 @@ router.get('/featured', async (req: Request, res: Response, next: NextFunction) 
 // GET /api/v1/products/best-sellers
 router.get('/best-sellers', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const where: any = { isActive: true };
+    const isCityDiscoveryEnabled = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
+      userId: req.user?.userId,
+    });
+    if (isCityDiscoveryEnabled) {
+      const destination = await deliveryServiceabilityService.resolveCustomerDestination(req);
+      if (destination) {
+        if (!destination.isSupported) {
+          return ResponseUtil.success(res, []);
+        }
+        const serviceableStoreIds = await deliveryServiceabilityService.getServiceableStoreIds(destination);
+        if (serviceableStoreIds.size === 0) {
+          return ResponseUtil.success(res, []);
+        }
+        where.storeId = { in: Array.from(serviceableStoreIds) };
+      }
+    }
+
     const products = await prisma.product.findMany({
-      where: { isActive: true },
+      where,
       orderBy: { soldCount: 'desc' },
       take: 12,
       include: {
@@ -214,14 +250,33 @@ router.get('/suggestions', async (req: Request, res: Response, next: NextFunctio
       return ResponseUtil.success(res, []);
     }
 
+    const where: any = {
+      isActive: true,
+      OR: [
+        { nameAr: { contains: String(q), mode: 'insensitive' } },
+        { nameEn: { contains: String(q), mode: 'insensitive' } },
+      ],
+    };
+
+    const isCityDiscoveryEnabled = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
+      userId: req.user?.userId,
+    });
+    if (isCityDiscoveryEnabled) {
+      const destination = await deliveryServiceabilityService.resolveCustomerDestination(req);
+      if (destination) {
+        if (!destination.isSupported) {
+          return ResponseUtil.success(res, []);
+        }
+        const serviceableStoreIds = await deliveryServiceabilityService.getServiceableStoreIds(destination);
+        if (serviceableStoreIds.size === 0) {
+          return ResponseUtil.success(res, []);
+        }
+        where.storeId = { in: Array.from(serviceableStoreIds) };
+      }
+    }
+
     const suggestions = await prisma.product.findMany({
-      where: {
-        isActive: true,
-        OR: [
-          { nameAr: { contains: String(q), mode: 'insensitive' } },
-          { nameEn: { contains: String(q), mode: 'insensitive' } },
-        ],
-      },
+      where,
       select: { id: true, nameAr: true, nameEn: true, price: true, slug: true },
       take: 6,
     });
