@@ -5,7 +5,7 @@
 
 import { prisma } from '../../database/prisma';
 import { deliveryFeeService, type DeliveryFeeOptions, type DeliveryQuoteResult } from './delivery-fee.service';
-import { supportedAreasService } from '../../modules/locations/supported-areas.service';
+import { supportedAreasService, STRICTLY_SUPPORTED_AREAS } from '../../modules/locations/supported-areas.service';
 import { RemoteConfigService } from '../../modules/remote-config/remote-config.service';
 import { config } from '../../config';
 import { deliverySlotService } from './delivery-slot.service';
@@ -48,6 +48,7 @@ export interface QuoteRequest {
   sellerOrders: SellerOrderInput[];
   deliveryMethod?: string;
   isExpress?: boolean;
+  destinationAreaId?: string;
   // Scheduled delivery
   deliveryScheduleType?: 'ASAP' | 'SCHEDULED' | 'EXPRESS';
   deliveryDate?: string;       // YYYY-MM-DD, required when SCHEDULED
@@ -193,6 +194,7 @@ export class DeliveryQuoteService {
       sellerOrders,
       deliveryMethod = 'standard',
       isExpress = false,
+      destinationAreaId: requestedDestAreaId,
       deliveryScheduleType = 'ASAP',
       deliveryDate,
       deliveryTimeSlotId,
@@ -249,7 +251,21 @@ export class DeliveryQuoteService {
 
     const isCityDiscoveryEnabled = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery');
 
-    if (isCityDiscoveryEnabled) {
+    const customerAreaMatch = supportedAreasService.isAddressSupported(address);
+    let destinationAreaId = requestedDestAreaId || customerAreaMatch.area?.canonicalId;
+    let customerLat = address.latitude ?? address.city?.latitude ?? 15.3694;
+    let customerLng = address.longitude ?? address.city?.longitude ?? 44.1910;
+
+    if (requestedDestAreaId) {
+      const explicitArea = STRICTLY_SUPPORTED_AREAS.find((a: any) => a.canonicalId === requestedDestAreaId);
+      if (explicitArea) {
+        destinationAreaId = explicitArea.canonicalId;
+        customerLat = explicitArea.centerLat;
+        customerLng = explicitArea.centerLng;
+      }
+    }
+
+    if (isCityDiscoveryEnabled && !requestedDestAreaId) {
       const match = supportedAreasService.isAddressSupported(address);
       if (!match.isSupported) {
         return {
@@ -266,11 +282,6 @@ export class DeliveryQuoteService {
         };
       }
     }
-
-    const customerLat = address.latitude ?? address.city?.latitude ?? 15.3694;
-    const customerLng = address.longitude ?? address.city?.longitude ?? 44.1910;
-    const customerAreaMatch = supportedAreasService.isAddressSupported(address);
-    const destinationAreaId = customerAreaMatch.area?.canonicalId;
 
     // 2. For each seller, get store coordinates + evaluate availability + calculate quote
     const storesStatusList: StoreAvailabilityStatus[] = [];

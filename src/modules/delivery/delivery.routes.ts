@@ -192,6 +192,7 @@ router.post('/quote', authenticate, async (req: Request, res: Response, next: Ne
       deliveryTimeSlotId,
       discountAmount = 0,
       discountFundedBy,
+      destinationAreaId,
     } = req.body;
 
     if (!customerAddressId) throw new AppError('customerAddressId is required', 400);
@@ -232,6 +233,7 @@ router.post('/quote', authenticate, async (req: Request, res: Response, next: Ne
       deliveryTimeSlotId,
       discountAmount: parseFloat(String(discountAmount)) || 0,
       discountFundedBy,
+      destinationAreaId,
     });
 
     ResponseUtil.success(res, result);
