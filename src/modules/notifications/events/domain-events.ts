@@ -773,4 +773,61 @@ export class NotificationEventFactory {
       createdAt: new Date(),
     };
   }
+
+  // ── Store & Seller Verification ───────────────────────────────────────────
+  static storeVerificationEvent(params: {
+    eventType:
+      | 'STORE_VERIFICATION_APPROVED'
+      | 'STORE_VERIFICATION_REJECTED'
+      | 'STORE_VERIFICATION_SUBMITTED'
+      | 'STORE_SUSPENDED'
+      | 'STORE_ACTIVATED'
+      | 'STORE_BADGE_GRANTED'
+      | 'STORE_BADGE_REVOKED';
+    recipientId: string; // The seller's User ID (User.id)
+    sellerId: string;
+    storeId?: string;
+    storeName?: string;
+    sellerName?: string;
+    notes?: string;
+    reason?: string;
+    deepLink?: string;
+  }): DomainNotificationEvent {
+    const isUrgent =
+      params.eventType === 'STORE_VERIFICATION_REJECTED' ||
+      params.eventType === 'STORE_SUSPENDED';
+
+    const defaultDeepLink =
+      params.eventType === 'STORE_SUSPENDED'
+        ? 'souqnaa://seller/settings'
+        : params.eventType === 'STORE_ACTIVATED' ||
+          params.eventType === 'STORE_BADGE_GRANTED' ||
+          params.eventType === 'STORE_BADGE_REVOKED'
+        ? 'souqnaa://seller/store'
+        : 'souqnaa://seller/verification';
+
+    return {
+      eventId: randomUUID(),
+      idempotencyKey: `store_verif_${params.sellerId}_${params.eventType}_${Date.now()}`,
+      eventType: params.eventType,
+      category: NotificationCategory.SELLER,
+      priority: isUrgent ? NotificationPriority.URGENT : NotificationPriority.HIGH,
+      recipientId: params.recipientId,
+      recipientType: AppType.SELLER,
+      entityType: 'store_verification',
+      entityId: params.storeId || params.sellerId,
+      data: {
+        sellerId: params.sellerId,
+        storeId: params.storeId,
+        storeName: params.storeName || 'متجرك',
+        sellerName: params.sellerName,
+        notes: params.notes,
+        reason: params.reason,
+        deepLink: params.deepLink || defaultDeepLink,
+      },
+      bypassQuietHours: true,
+      bypassRateLimit: true,
+      createdAt: new Date(),
+    };
+  }
 }

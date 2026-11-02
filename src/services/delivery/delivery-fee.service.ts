@@ -89,6 +89,8 @@ export interface DeliveryQuoteResult {
   marketplaceSubsidy?: number;
   estimatedHoursMin?: number;
   estimatedHoursMax?: number;
+  expressSupported?: boolean;
+  expressSurcharge?: number;
   allowedDeliveryMethods?: Array<{
     code: string;
     nameAr: string;
@@ -391,6 +393,10 @@ export class DeliveryFeeService {
           sellerContribution: interPricing.sellerContribution,
           marketplaceSubsidy: interPricing.marketplaceSubsidy,
           allowedDeliveryMethods: interPricing.allowedDeliveryMethods,
+          estimatedHoursMin: interPricing.estimatedHoursMin,
+          estimatedHoursMax: interPricing.estimatedHoursMax,
+          expressSupported: interPricing.expressSupported,
+          expressSurcharge: interPricing.expressSurcharge,
         };
 
         setCached(cacheKey, result);

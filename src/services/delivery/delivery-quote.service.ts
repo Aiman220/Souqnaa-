@@ -79,6 +79,26 @@ export interface FullQuoteResponse {
   expressAvailable: boolean;
   expressDisabledReason?: string;
   storeWarning?: string;
+  // Inter-Governorate top-level metadata
+  isInterGovernorate?: boolean;
+  routeKey?: string;
+  routeNameAr?: string;
+  shippingProvider?: string;
+  allowedDeliveryMethods?: Array<{
+    code: string;
+    nameAr: string;
+    nameEn: string;
+    surcharge: number;
+    estimatedHoursMin?: number;
+    estimatedHoursMax?: number;
+  }>;
+  expressSupported?: boolean;
+  expressSurcharge?: number;
+  carrierCost?: number;
+  sellerContribution?: number;
+  marketplaceSubsidy?: number;
+  estimatedHoursMin?: number;
+  estimatedHoursMax?: number;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -360,6 +380,9 @@ export class DeliveryQuoteService {
       unavailableReason = 'EXPRESS_UNAVAILABLE';
     }
 
+    const firstInterQuote = sellerQuotes.find((q) => q.isInterGovernorate);
+    const isInterGov = Boolean(firstInterQuote);
+
     return {
       deliveryAvailable: isAvailable,
       reason: unavailableReason,
@@ -368,6 +391,19 @@ export class DeliveryQuoteService {
       totalDeliveryFee: multiResult.totalDeliveryFee,
       currency: multiResult.currency,
       policy: multiResult.policy,
+      // Inter-Governorate top-level metadata
+      isInterGovernorate: isInterGov,
+      routeKey: firstInterQuote?.routeKey,
+      routeNameAr: firstInterQuote?.zoneName,
+      shippingProvider: firstInterQuote?.shippingProviderName || firstInterQuote?.shippingProviderId,
+      allowedDeliveryMethods: firstInterQuote?.allowedDeliveryMethods || [],
+      expressSupported: firstInterQuote?.expressSupported ?? false,
+      expressSurcharge: firstInterQuote?.expressSurcharge ?? 0,
+      carrierCost: firstInterQuote?.carrierCost,
+      sellerContribution: firstInterQuote?.sellerContribution,
+      marketplaceSubsidy: firstInterQuote?.marketplaceSubsidy,
+      estimatedHoursMin: firstInterQuote?.estimatedHoursMin,
+      estimatedHoursMax: firstInterQuote?.estimatedHoursMax,
       // Echo scheduled delivery data back to Flutter
       deliveryScheduleType,
       deliveryDate: deliveryDate ?? undefined,

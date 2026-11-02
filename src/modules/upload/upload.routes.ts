@@ -7,6 +7,7 @@ import { authenticate } from '../../middleware/auth.middleware';
 import { ResponseUtil } from '../../utils/response.util';
 import { AppError } from '../../middleware/error.middleware';
 import { uploadFileLimiter, uploadByUrlLimiter } from '../../middleware/rate-limiter.middleware';
+import { ImageProcessorService } from '../../services/storage/image-processor.service';
 
 const router = Router();
 router.use(authenticate);
@@ -27,7 +28,40 @@ export const ALLOWED_UPLOAD_FOLDERS = new Set([
   'documents',
   'reports',
   'promotions',
+  'campaign-badges',
+  'branding',
 ]);
+
+/** Folder specific file-size limits (§7) */
+const FOLDER_MAX_SIZES: Record<string, number> = {
+  avatars: 5 * 1024 * 1024,
+  stores: 5 * 1024 * 1024,
+  categories: 5 * 1024 * 1024,
+  'campaign-badges': 5 * 1024 * 1024,
+  branding: 5 * 1024 * 1024,
+  products: 10 * 1024 * 1024,
+  promotions: 10 * 1024 * 1024,
+  general: 10 * 1024 * 1024,
+  reviews: 10 * 1024 * 1024,
+  chat: 25 * 1024 * 1024,
+  support: 25 * 1024 * 1024,
+  refunds: 25 * 1024 * 1024,
+  disputes: 25 * 1024 * 1024,
+  documents: 25 * 1024 * 1024,
+  reports: 25 * 1024 * 1024,
+};
+
+function enforceFolderFileSizeLimit(file: Express.Multer.File, folder: string) {
+  const maxSize = FOLDER_MAX_SIZES[folder] || 15 * 1024 * 1024;
+  if (file.size > maxSize) {
+    const mb = Math.round(maxSize / (1024 * 1024));
+    throw new AppError(
+      `حجم الملف يتجاوز الحد الأقصى المسموح به لمجلد ${folder} (${mb} ميجابايت)`,
+      400,
+      'FILE_TOO_LARGE'
+    );
+  }
+}
 
 /** Sanitise a client-supplied folder name: must be in the allowlist, no path traversal. */
 function sanitizeFolder(raw: unknown, defaultFolder = 'general'): string {
@@ -41,6 +75,7 @@ export const ALLOWED_MIME_TYPES = new Set([
   'image/png',
   'image/webp',
   'image/gif',
+  'image/avif',
   'video/mp4',
   'video/webm',
   'video/quicktime',
@@ -56,6 +91,7 @@ export const ALLOWED_EXTENSIONS = new Set([
   '.png',
   '.webp',
   '.gif',
+  '.avif',
   '.mp4',
   '.webm',
   '.mov',
@@ -67,7 +103,7 @@ export const ALLOWED_EXTENSIONS = new Set([
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB limit
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB max
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname || '').toLowerCase();
     const mime = (file.mimetype || '').toLowerCase();
@@ -111,7 +147,7 @@ export function isPrivateOrReservedHost(hostname: string): boolean {
   if (ipv4Match) {
     const [_, o1, o2] = ipv4Match.map(Number);
     if (o1 === 127) return true; // Loopback
-    if (o1 === 10) return true;  // 10.0.0.0/8
+    if (o1 === 10) return true; // 10.0.0.0/8
     if (o1 === 172 && o2 >= 16 && o2 <= 31) return true; // 172.16.0.0/12
     if (o1 === 192 && o2 === 168) return true; // 192.168.0.0/16
     if (o1 === 169 && o2 === 254) return true; // Link-local / Cloud metadata (AWS, GCP, Azure)
@@ -127,6 +163,11 @@ router.post('/', uploadFileLimiter, upload.single('file'), async (req: Request, 
     if (!req.file) throw new AppError('No file uploaded', 400);
 
     const folder = sanitizeFolder(req.body.folder);
+    enforceFolderFileSizeLimit(req.file, folder);
+
+    // Deep magic-bytes validation (§7: "Do not trust client-provided MIME types or file extensions")
+    ImageProcessorService.detectMimeFromBuffer(req.file.buffer);
+
     const result = await storageService.uploadFile(req.file, folder);
 
     ResponseUtil.created(res, result, 'File uploaded successfully');
@@ -142,6 +183,12 @@ router.post('/multiple', uploadFileLimiter, upload.array('files', 10), async (re
     if (!files || files.length === 0) throw new AppError('No files uploaded', 400);
 
     const folder = sanitizeFolder(req.body.folder);
+
+    for (const f of files) {
+      enforceFolderFileSizeLimit(f, folder);
+      ImageProcessorService.detectMimeFromBuffer(f.buffer);
+    }
+
     const results = await Promise.all(
       files.map((f) => storageService.uploadFile(f, folder))
     );
@@ -152,7 +199,7 @@ router.post('/multiple', uploadFileLimiter, upload.array('files', 10), async (re
   }
 });
 
-// POST /api/v1/upload/by-url (SSRF-hardened)
+// POST /api/v1/upload/by-url (SSRF-hardened & magic-bytes inspected)
 router.post('/by-url', uploadByUrlLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { url } = req.body;
@@ -212,24 +259,19 @@ router.post('/by-url', uploadByUrlLimiter, async (req: Request, res: Response, n
         const arrayBuffer = await response.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
 
-        if (buffer.length > 25 * 1024 * 1024) {
-          throw new AppError('حجم الملف المسترد يتجاوز الحد الأقصى (25 ميجابايت).', 400, 'FILE_TOO_LARGE');
+        const maxSize = FOLDER_MAX_SIZES[folder] || 10 * 1024 * 1024;
+        if (buffer.length > maxSize) {
+          throw new AppError(`حجم الملف المسترد يتجاوز الحد الأقصى (${Math.round(maxSize / (1024 * 1024))} ميجابايت).`, 400, 'FILE_TOO_LARGE');
         }
 
-        let ext = '.jpg';
-        if (rawContentType.includes('png')) ext = '.png';
-        else if (rawContentType.includes('webp')) ext = '.webp';
-        else if (rawContentType.includes('gif')) ext = '.gif';
-        else if (rawContentType.includes('pdf')) ext = '.pdf';
-        else if (rawContentType.includes('mp4')) ext = '.mp4';
-        else if (rawContentType.includes('webm')) ext = '.webm';
-        else if (rawContentType.includes('quicktime')) ext = '.mov';
+        // Verify buffer magic bytes
+        const detected = ImageProcessorService.detectMimeFromBuffer(buffer);
 
         const mockFile: Express.Multer.File = {
           fieldname: 'file',
-          originalname: `download-${Date.now()}${ext}`,
+          originalname: `download-${Date.now()}${detected.ext}`,
           encoding: '7bit',
-          mimetype: rawContentType,
+          mimetype: detected.mime,
           buffer,
           size: buffer.length,
           destination: '',

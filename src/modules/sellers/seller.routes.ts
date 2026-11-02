@@ -33,6 +33,8 @@ import { SellerFinancialRiskService } from '../commission/seller-financial-risk.
 import { RefundService } from '../refunds/services/refund.service';
 import { notificationDispatcher } from '../notifications/services/notification-dispatcher';
 import { NotificationEventFactory } from '../notifications/events/domain-events';
+import { AdminNotificationRouterService } from '../notifications/services/admin-notification-router.service';
+import { NotificationCategory, NotificationPriority } from '../notifications/notification.types';
 import { interGovernorateTrackingService } from '../../services/delivery/inter-governorate-tracking.service';
 import { WishlistAlertsJob } from '../../services/jobs/wishlist-alerts.job';
 
@@ -525,11 +527,49 @@ router.patch('/verification', async (req: Request, res: Response, next: NextFunc
         status: SellerStatus.PENDING_VERIFICATION,
         rejectionReason: null,
       },
+      include: { stores: true, user: true },
     });
 
     SocketService.get()?.emitGlobal('admin:seller_registered', { sellerId: seller.id });
     SocketService.get()?.emitGlobal('seller:verification_submitted', { sellerId: seller.id });
+    SocketService.get()?.emitGlobal('seller:verification_updated', { sellerId: seller.id, status: SellerStatus.PENDING_VERIFICATION });
     SocketService.get()?.emitGlobal('admin:seller_updated', { sellerId: seller.id, status: SellerStatus.PENDING_VERIFICATION });
+
+    // 1. Dispatch confirmation push notification to the seller
+    try {
+      const storeName = updated.stores?.[0]?.name || 'متجرك';
+      const sellerEvent = NotificationEventFactory.storeVerificationEvent({
+        eventType: 'STORE_VERIFICATION_SUBMITTED',
+        recipientId: seller.userId,
+        sellerId: seller.id,
+        storeId: updated.stores?.[0]?.id,
+        storeName,
+        deepLink: 'souqnaa://seller/verification',
+      });
+      await notificationDispatcher.dispatch(sellerEvent);
+    } catch (notifErr) {
+      console.error('[SellerRoutes] Failed to dispatch seller verification submission push notification:', notifErr);
+    }
+
+    // 2. Alert Admins with sellers:approve permission
+    try {
+      const storeName = updated.stores?.[0]?.name || 'متجر جديد';
+      const sellerFullName = updated.user ? `${updated.user.firstName || ''} ${updated.user.lastName || ''}`.trim() : 'التاجر';
+      await AdminNotificationRouterService.get().routeAndDispatch({
+        eventType: 'ADMIN_SELLER_VERIFICATION_SUBMITTED',
+        category: NotificationCategory.SELLER,
+        priority: NotificationPriority.HIGH,
+        titleAr: 'طلب توثيق متجر جديد 📋',
+        titleEn: 'New Store Verification Submitted 📋',
+        messageAr: `قدم التاجر ${sellerFullName} وثائق توثيق المتجر "${storeName}" للمراجعة والاعتماد.`,
+        messageEn: `Seller ${sellerFullName} submitted verification documents for "${storeName}".`,
+        referenceId: seller.id,
+        requiredPermission: 'sellers:approve',
+        data: { sellerId: seller.id, storeName, sellerName: sellerFullName, route: '/admin/sellers' },
+      });
+    } catch (adminAlertErr) {
+      console.error('[SellerRoutes] Failed to route admin alert for store verification submission:', adminAlertErr);
+    }
 
     ResponseUtil.success(res, updated, 'تم إرسال مستندات التوثيق بنجاح للمراجعة والتدقيق');
   } catch (error) {
@@ -693,8 +733,46 @@ router.post('/me/onboarding', async (req: Request, res: Response, next: NextFunc
 
     SocketService.get()?.emitGlobal('admin:seller_registered', { sellerId: seller.id, storeName: store?.name });
     SocketService.get()?.emitGlobal('seller:verification_submitted', { sellerId: seller.id });
+    SocketService.get()?.emitGlobal('seller:verification_updated', { sellerId: seller.id, status: SellerStatus.PENDING_VERIFICATION });
     SocketService.get()?.emitGlobal('admin:store_created', { storeId: store?.id, sellerId: seller.id });
     SocketService.get()?.emitGlobal('admin:seller_updated', { sellerId: seller.id, status: SellerStatus.PENDING_VERIFICATION });
+
+    // 1. Dispatch confirmation push notification to the seller
+    try {
+      const storeName = store?.name || 'متجرك';
+      const sellerEvent = NotificationEventFactory.storeVerificationEvent({
+        eventType: 'STORE_VERIFICATION_SUBMITTED',
+        recipientId: seller.userId,
+        sellerId: seller.id,
+        storeId: store?.id,
+        storeName,
+        deepLink: 'souqnaa://seller/verification',
+      });
+      await notificationDispatcher.dispatch(sellerEvent);
+    } catch (notifErr) {
+      console.error('[SellerRoutes] Failed to dispatch onboarding verification push notification:', notifErr);
+    }
+
+    // 2. Alert Admins with sellers:approve permission
+    try {
+      const storeName = store?.name || 'متجر جديد';
+      const sellerUser = await prisma.user.findUnique({ where: { id: seller.userId } });
+      const sellerFullName = sellerUser ? `${sellerUser.firstName || ''} ${sellerUser.lastName || ''}`.trim() : 'التاجر';
+      await AdminNotificationRouterService.get().routeAndDispatch({
+        eventType: 'ADMIN_SELLER_VERIFICATION_SUBMITTED',
+        category: NotificationCategory.SELLER,
+        priority: NotificationPriority.HIGH,
+        titleAr: 'طلب توثيق متجر جديد 📋',
+        titleEn: 'New Store Verification Submitted 📋',
+        messageAr: `أكمل المتجر "${storeName}" (${sellerFullName}) إعداد الحساب وقدم وثائق التوثيق للمراجعة.`,
+        messageEn: `Store "${storeName}" (${sellerFullName}) completed onboarding and submitted verification documents.`,
+        referenceId: seller.id,
+        requiredPermission: 'sellers:approve',
+        data: { sellerId: seller.id, storeName, sellerName: sellerFullName, route: '/admin/sellers' },
+      });
+    } catch (adminAlertErr) {
+      console.error('[SellerRoutes] Failed to route admin alert for onboarding submission:', adminAlertErr);
+    }
 
     ResponseUtil.success(res, {
       seller: updatedSeller,

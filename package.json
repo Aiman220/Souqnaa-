@@ -20,7 +20,8 @@
     "test:infra": "ts-node tests/cloudflare-upstash-infrastructure.test.ts",
     "bootstrap:admin": "ts-node scripts/bootstrap-admin.ts",
     "test:performance": "ts-node tests/seller-performance.test.ts && ts-node tests/seller-performance-security.test.ts",
-    "test": "npm run security:gate"
+    "test": "npm run security:gate",
+    "test:images": "ts-node tests/image-delivery-optimization.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.750.0",

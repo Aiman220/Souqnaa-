@@ -33,6 +33,8 @@ export interface RoutePricingBreakdown {
   deliveryMethodCharge: number;
   expressCharge: number;
   isExpress: boolean;
+  expressSupported?: boolean;
+  expressSurcharge?: number;
   remoteAreaCharge: number;
   specialHandlingCharge: number;
   rawTotalFee: number;
@@ -470,6 +472,8 @@ export class InterGovernorateRouteService {
       shippingProviderId: route.approvedProviderId ?? undefined,
       shippingProviderName: route.approvedProviderName ?? undefined,
       allowedDeliveryMethods: allowedMethodsList,
+      expressSupported: Boolean(route.expressSupported),
+      expressSurcharge: route.expressSurcharge ?? 500,
     };
   }
 

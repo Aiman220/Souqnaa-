@@ -1,3 +1,5 @@
+import { storageService } from '../services/storage/storage.service';
+
 /**
  * Utility to format Prisma Product entities into customer/client-ready DTOs.
  * Bridges Prisma schema (which uses nameAr/nameEn, inventory.quantity, and ProductImage relation)
@@ -6,17 +8,17 @@
 export function formatProductForClient(product: any, campaignPresentation?: any): any {
   if (!product) return null;
 
-  // Flatten images to string array of URLs
+  // Flatten images to string array of normalized URLs
   let images: string[] = [];
   if (Array.isArray(product.images)) {
     images = product.images
       .map((img: any) => {
-        if (typeof img === 'string') return img;
-        return img?.url || img?.path || '';
+        const raw = typeof img === 'string' ? img : (img?.url || img?.path || '');
+        return storageService.normalizeUrl(raw);
       })
       .filter((url: string) => url.length > 0);
   } else if (product.imageUrl) {
-    images = [product.imageUrl];
+    images = [storageService.normalizeUrl(product.imageUrl)];
   }
 
   // Format variants
@@ -69,8 +71,8 @@ export function formatProductForClient(product: any, campaignPresentation?: any)
       sellerId: store.sellerId || product.storeId || store.id || sellerId,
       name: store.name || store.nameAr || 'متجر سوقناا',
       slug: store.slug || store.id || 'souqnaa-store',
-      logo: store.logo || store.avatar || null,
-      banner: store.banner || store.cover || null,
+      logo: store.logo || store.avatar ? storageService.normalizeUrl(store.logo || store.avatar) : null,
+      banner: store.banner || store.cover ? storageService.normalizeUrl(store.banner || store.cover) : null,
       rating: typeof store.rating === 'number' ? store.rating : 0,
       reviewCount: typeof store.reviewCount === 'number' ? store.reviewCount : 0,
       productCount,

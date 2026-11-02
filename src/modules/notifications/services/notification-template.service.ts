@@ -425,6 +425,57 @@ export class NotificationTemplateService {
       deepLinkPattern: 'souqnaa://seller/refunds/{{refundId}}',
     },
 
+    // ── Store & Verification (Seller) ─────────────────────────────────────────
+    STORE_VERIFICATION_APPROVED: {
+      titleAr: 'تم توثيق متجرك بنجاح! 🎉',
+      titleEn: 'Store Verification Approved! 🎉',
+      bodyAr: 'تهانينا! تمت الموافقة على توثيق متجرك {{storeName}} بنجاح، يمكنك الآن استقبال الطلبات والبدء في البيع.',
+      bodyEn: 'Congratulations! Your store {{storeName}} verification has been approved. You are ready to start selling.',
+      deepLinkPattern: 'souqnaa://seller/verification',
+    },
+    STORE_VERIFICATION_REJECTED: {
+      titleAr: 'تعذر اعتماد توثيق المتجر ⚠️',
+      titleEn: 'Store Verification Rejected ⚠️',
+      bodyAr: 'تم رفض طلب توثيق متجرك {{storeName}}. السبب: {{reason}}',
+      bodyEn: 'Your store {{storeName}} verification was rejected. Reason: {{reason}}',
+      deepLinkPattern: 'souqnaa://seller/verification',
+    },
+    STORE_VERIFICATION_SUBMITTED: {
+      titleAr: 'تم استلام طلب التوثيق 📋',
+      titleEn: 'Verification Request Received 📋',
+      bodyAr: 'تم استلام وثائق توثيق متجرك {{storeName}} بنجاح، وهي قيد المراجعة والتدقيق من قبل فريق الإدارة.',
+      bodyEn: 'Your store {{storeName}} verification documents were received and are under review.',
+      deepLinkPattern: 'souqnaa://seller/verification',
+    },
+    STORE_SUSPENDED: {
+      titleAr: 'تم إيقاف حساب المتجر مؤقتاً ⚠️',
+      titleEn: 'Store Account Suspended ⚠️',
+      bodyAr: 'تم تعليق حساب متجرك {{storeName}} مؤقتاً من قبل الإدارة. السبب: {{reason}}',
+      bodyEn: 'Your store {{storeName}} account has been suspended. Reason: {{reason}}',
+      deepLinkPattern: 'souqnaa://seller/settings',
+    },
+    STORE_ACTIVATED: {
+      titleAr: 'تم تفعيل المتجر بنجاح 🟢',
+      titleEn: 'Store Reactivated Successfully 🟢',
+      bodyAr: 'تمت إعادة تفعيل حساب متجرك {{storeName}}، وهو الآن متاح ونشط للزبائن في السوق.',
+      bodyEn: 'Your store {{storeName}} has been reactivated and is now visible to customers.',
+      deepLinkPattern: 'souqnaa://seller/store',
+    },
+    STORE_BADGE_GRANTED: {
+      titleAr: 'تم منح متجرك شارة التوثيق والتميز ★',
+      titleEn: 'Store Verification Badge Granted ★',
+      bodyAr: 'تهانينا! حصل متجرك {{storeName}} على شارة التوثيق والتميز الرسمية من منصة سوقنا.',
+      bodyEn: 'Congratulations! Your store {{storeName}} has been granted the verified badge.',
+      deepLinkPattern: 'souqnaa://seller/store',
+    },
+    STORE_BADGE_REVOKED: {
+      titleAr: 'تحديث بشأن شارة توثيق المتجر',
+      titleEn: 'Store Verification Badge Removed',
+      bodyAr: 'تمت إزالة شارة التوثيق عن متجرك {{storeName}}. للمزيد من التفاصيل تواصل مع إدارة سوقنا.',
+      bodyEn: 'The verified badge was removed from your store {{storeName}}. Contact support for info.',
+      deepLinkPattern: 'souqnaa://seller/store',
+    },
+
     // ── Security & System ───────────────────────────────────────────────────
     NEW_LOGIN: {
       titleAr: 'تسجيل دخول جديد لحسابك 🔐',
@@ -533,6 +584,7 @@ export class NotificationTemplateService {
    */
   private inferCategory(code: string): NotificationCategory {
     if (code.startsWith('CART_ABANDONMENT_') || code.startsWith('CART_REMINDER')) return NotificationCategory.CART_ABANDONMENT;
+    if (code.startsWith('STORE_') || code.startsWith('SELLER_VERIF')) return NotificationCategory.SELLER;
     if (code.startsWith('ORDER_') || code.startsWith('SELLER_ORDER') || code.startsWith('SELLER_NEW_ORDER')) return NotificationCategory.ORDER;
     if (code.startsWith('PAYMENT_')) return NotificationCategory.PAYMENT;
     if (code.startsWith('REFUND_') || code.startsWith('SELLER_REFUND_') || code.startsWith('DISPUTE_')) return NotificationCategory.REFUND;

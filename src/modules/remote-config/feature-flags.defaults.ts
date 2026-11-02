@@ -751,7 +751,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagSeedDefinition[] = [
   },
   {
     key: 'inter_governorate_delivery',
-    enabled: false, // Default disabled until approved and configured by admin
+    enabled: true, // Enabled for approved routes
     displayNameAr: 'الشحن والتوصيل بين المحافظات اليمنية',
     displayNameEn: 'Inter-Governorate Delivery & Smart Routing',
     descriptionAr: 'تفعيل نظام الشحن الذكي ونقل البضائع والطرود بين المحافظات اليمنية المعتمدة وفق المسارات المعتمدة',
@@ -765,7 +765,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagSeedDefinition[] = [
   },
   {
     key: 'inter_governorate_distance_pricing',
-    enabled: false, // Default disabled until activated
+    enabled: true, // Enabled for approved routes
     displayNameAr: 'التسعير القائم على المسافة البرية الفعلية بين المحافظات',
     displayNameEn: 'Inter-Governorate Road Distance-Based Pricing',
     descriptionAr: 'احتساب رسوم الشحن بناء على مسافة الطريق الفعلية بالكيلومتر عبر محرك الملاحة البري',
@@ -777,7 +777,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagSeedDefinition[] = [
   },
   {
     key: 'inter_governorate_weight_pricing',
-    enabled: false, // Default disabled until activated
+    enabled: true, // Enabled for approved routes
     displayNameAr: 'تسعير الوزن الفعلي والوزن الحجمي للطرود بين المحافظات',
     displayNameEn: 'Inter-Governorate Weight & Volumetric Pricing',
     descriptionAr: 'احتساب رسوم إضافية للوزن الزائد والوزن الحجمي للطرود والمنتجات الكبيرة',
@@ -789,7 +789,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagSeedDefinition[] = [
   },
   {
     key: 'inter_governorate_express',
-    enabled: false, // Default disabled until activated
+    enabled: true, // Enabled for approved routes
     displayNameAr: 'الشحن السريع بين المحافظات (Express)',
     displayNameEn: 'Inter-Governorate Express Delivery',
     descriptionAr: 'تفعيل التوصيل السريع والمستعجل بين المحافظات للمسارات المؤهلة',
@@ -801,7 +801,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagSeedDefinition[] = [
   },
   {
     key: 'inter_governorate_pickup_points',
-    enabled: false, // Default disabled until activated
+    enabled: true, // Enabled for approved routes
     displayNameAr: 'نقاط الاستلام المعتمدة للشحن بين المحافظات',
     displayNameEn: 'Designated Inter-Governorate Pickup Points',
     descriptionAr: 'تمكين العملاء من استلام شحناتهم من مراكز ونقاط الاستلام الإقليمية المعتمدة',

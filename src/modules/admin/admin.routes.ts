@@ -639,6 +639,7 @@ router.post('/sellers/:id/approve', async (req: Request, res: Response, next: Ne
           verifiedAt: new Date(),
           verificationNotes: notes || null,
         },
+        include: { user: true, stores: true },
       });
       await tx.store.updateMany({
         where: { sellerId: id },
@@ -649,7 +650,27 @@ router.post('/sellers/:id/approve', async (req: Request, res: Response, next: Ne
 
     await logAdminAction(req.user?.userId, 'SELLER_APPROVED', 'sellers', { id, notes }, req);
     SocketService.get()?.emitGlobal('admin:seller_updated', { id, status: SellerStatus.ACTIVE, notes });
+    SocketService.get()?.emitGlobal('seller:verification_updated', { sellerId: id, status: SellerStatus.ACTIVE, notes });
     SocketService.get()?.emitGlobal('admin:store_updated', { sellerId: id });
+
+    // Send push notification to seller
+    try {
+      const storeName = seller.stores?.[0]?.name || 'متجرك';
+      const event = NotificationEventFactory.storeVerificationEvent({
+        eventType: 'STORE_VERIFICATION_APPROVED',
+        recipientId: seller.userId,
+        sellerId: seller.id,
+        storeId: seller.stores?.[0]?.id,
+        storeName,
+        sellerName: seller.user ? `${seller.user.firstName || ''} ${seller.user.lastName || ''}`.trim() : undefined,
+        notes: notes || undefined,
+        deepLink: 'souqnaa://seller/verification',
+      });
+      await notificationDispatcher.dispatch(event);
+    } catch (notifErr) {
+      console.error('[AdminRoutes] Failed to dispatch store verification approval push notification:', notifErr);
+    }
+
     ResponseUtil.success(res, seller, 'تم اعتماد وتفعيل حساب التاجر بنجاح');
   } catch (error) {
     next(error);
@@ -668,10 +689,31 @@ router.post('/sellers/:id/reject', async (req: Request, res: Response, next: Nex
         status: SellerStatus.REJECTED,
         rejectionReason: reason,
       },
+      include: { user: true, stores: true },
     });
 
     await logAdminAction(req.user?.userId, 'SELLER_REJECTED', 'sellers', { id, reason }, req);
     SocketService.get()?.emitGlobal('admin:seller_updated', { id, status: SellerStatus.REJECTED, reason });
+    SocketService.get()?.emitGlobal('seller:verification_updated', { sellerId: id, status: SellerStatus.REJECTED, reason });
+
+    // Send push notification to seller
+    try {
+      const storeName = seller.stores?.[0]?.name || 'متجرك';
+      const event = NotificationEventFactory.storeVerificationEvent({
+        eventType: 'STORE_VERIFICATION_REJECTED',
+        recipientId: seller.userId,
+        sellerId: seller.id,
+        storeId: seller.stores?.[0]?.id,
+        storeName,
+        sellerName: seller.user ? `${seller.user.firstName || ''} ${seller.user.lastName || ''}`.trim() : undefined,
+        reason,
+        deepLink: 'souqnaa://seller/verification',
+      });
+      await notificationDispatcher.dispatch(event);
+    } catch (notifErr) {
+      console.error('[AdminRoutes] Failed to dispatch store verification rejection push notification:', notifErr);
+    }
+
     ResponseUtil.success(res, seller, 'تم رفض طلب التاجر');
   } catch (error) {
     next(error);
@@ -687,6 +729,7 @@ router.post('/sellers/:id/suspend', async (req: Request, res: Response, next: Ne
       const s = await tx.seller.update({
         where: { id },
         data: { status: SellerStatus.SUSPENDED },
+        include: { user: true, stores: true },
       });
       await tx.store.updateMany({
         where: { sellerId: id },
@@ -697,7 +740,26 @@ router.post('/sellers/:id/suspend', async (req: Request, res: Response, next: Ne
 
     await logAdminAction(req.user?.userId, 'SELLER_SUSPENDED', 'sellers', { id, reason }, req);
     SocketService.get()?.emitGlobal('admin:seller_updated', { id, status: SellerStatus.SUSPENDED, reason });
+    SocketService.get()?.emitGlobal('seller:verification_updated', { sellerId: id, status: SellerStatus.SUSPENDED, reason });
     SocketService.get()?.emitGlobal('admin:store_updated', { sellerId: id });
+
+    // Send push notification to seller
+    try {
+      const storeName = seller.stores?.[0]?.name || 'متجرك';
+      const event = NotificationEventFactory.storeVerificationEvent({
+        eventType: 'STORE_SUSPENDED',
+        recipientId: seller.userId,
+        sellerId: seller.id,
+        storeId: seller.stores?.[0]?.id,
+        storeName,
+        reason: reason || undefined,
+        deepLink: 'souqnaa://seller/settings',
+      });
+      await notificationDispatcher.dispatch(event);
+    } catch (notifErr) {
+      console.error('[AdminRoutes] Failed to dispatch seller suspend push notification:', notifErr);
+    }
+
     ResponseUtil.success(res, seller, 'تم إيقاف حساب التاجر ومتاجره');
   } catch (error) {
     next(error);
@@ -863,6 +925,7 @@ router.post('/sellers/:id/activate', async (req: Request, res: Response, next: N
       const s = await tx.seller.update({
         where: { id },
         data: { status: SellerStatus.ACTIVE },
+        include: { user: true, stores: true },
       });
       await tx.store.updateMany({
         where: { sellerId: id },
@@ -872,6 +935,26 @@ router.post('/sellers/:id/activate', async (req: Request, res: Response, next: N
     });
 
     await logAdminAction(req.user?.userId, 'SELLER_ACTIVATED', 'sellers', { id }, req);
+    SocketService.get()?.emitGlobal('admin:seller_updated', { id, status: SellerStatus.ACTIVE });
+    SocketService.get()?.emitGlobal('seller:verification_updated', { sellerId: id, status: SellerStatus.ACTIVE });
+    SocketService.get()?.emitGlobal('admin:store_updated', { sellerId: id });
+
+    // Send push notification to seller
+    try {
+      const storeName = seller.stores?.[0]?.name || 'متجرك';
+      const event = NotificationEventFactory.storeVerificationEvent({
+        eventType: 'STORE_ACTIVATED',
+        recipientId: seller.userId,
+        sellerId: seller.id,
+        storeId: seller.stores?.[0]?.id,
+        storeName,
+        deepLink: 'souqnaa://seller/store',
+      });
+      await notificationDispatcher.dispatch(event);
+    } catch (notifErr) {
+      console.error('[AdminRoutes] Failed to dispatch seller reactivate push notification:', notifErr);
+    }
+
     ResponseUtil.success(res, seller, 'تم إعادة تفعيل حساب التاجر');
   } catch (error) {
     next(error);
@@ -950,7 +1033,10 @@ router.get('/stores/:id', async (req: Request, res: Response, next: NextFunction
 router.post('/stores/:id/feature', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
-    const store = await prisma.store.findUnique({ where: { id } });
+    const store = await prisma.store.findUnique({
+      where: { id },
+      include: { seller: { include: { user: true } } },
+    });
     if (!store) throw new AppError('المتجر غير موجود', 404);
 
     const updated = await prisma.store.update({
@@ -959,6 +1045,25 @@ router.post('/stores/:id/feature', async (req: Request, res: Response, next: Nex
     });
 
     await logAdminAction(req.user?.userId, 'STORE_FEATURE_TOGGLED', 'stores', { id, isVerified: updated.isVerified }, req);
+    SocketService.get()?.emitGlobal('admin:store_updated', { storeId: id, sellerId: store.sellerId, isVerified: updated.isVerified });
+
+    // Send push notification to seller
+    try {
+      if (store.seller?.userId) {
+        const event = NotificationEventFactory.storeVerificationEvent({
+          eventType: updated.isVerified ? 'STORE_BADGE_GRANTED' : 'STORE_BADGE_REVOKED',
+          recipientId: store.seller.userId,
+          sellerId: store.sellerId,
+          storeId: store.id,
+          storeName: store.name,
+          deepLink: 'souqnaa://seller/store',
+        });
+        await notificationDispatcher.dispatch(event);
+      }
+    } catch (notifErr) {
+      console.error('[AdminRoutes] Failed to dispatch store badge toggle push notification:', notifErr);
+    }
+
     ResponseUtil.success(res, updated, updated.isVerified ? 'تم منح شارة التوثيق والتميز للمتجر ★' : 'تمت إزالة شارة التوثيق والتميز عن المتجر');
   } catch (error) {
     next(error);
@@ -970,12 +1075,38 @@ router.patch('/stores/:id/status', async (req: Request, res: Response, next: Nex
     const id = String(req.params.id);
     const { isActive, reason } = req.body;
 
+    const store = await prisma.store.findUnique({
+      where: { id },
+      include: { seller: { include: { user: true } } },
+    });
+    if (!store) throw new AppError('المتجر غير موجود', 404);
+
     const updated = await prisma.store.update({
       where: { id },
       data: { isActive: Boolean(isActive) },
     });
 
     await logAdminAction(req.user?.userId, isActive ? 'STORE_ACTIVATED' : 'STORE_SUSPENDED', 'stores', { id, reason }, req);
+    SocketService.get()?.emitGlobal('admin:store_updated', { storeId: id, sellerId: store.sellerId, isActive: updated.isActive });
+
+    // Send push notification to seller
+    try {
+      if (store.seller?.userId) {
+        const event = NotificationEventFactory.storeVerificationEvent({
+          eventType: updated.isActive ? 'STORE_ACTIVATED' : 'STORE_SUSPENDED',
+          recipientId: store.seller.userId,
+          sellerId: store.sellerId,
+          storeId: store.id,
+          storeName: store.name,
+          reason: reason || undefined,
+          deepLink: updated.isActive ? 'souqnaa://seller/store' : 'souqnaa://seller/settings',
+        });
+        await notificationDispatcher.dispatch(event);
+      }
+    } catch (notifErr) {
+      console.error('[AdminRoutes] Failed to dispatch store status toggle push notification:', notifErr);
+    }
+
     ResponseUtil.success(res, updated, isActive ? 'تم تفعيل المتجر ونشره في السوق' : 'تم إيقاف المتجر وحجب منتجاته');
   } catch (error) {
     next(error);
