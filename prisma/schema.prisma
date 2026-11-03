@@ -1515,6 +1515,7 @@ model CartItem {
 
   @@index([cartId])
   @@index([productId])
+  @@index([cartId, productId, variantId])
   @@index([flashSaleItemId])
   @@index([flashSaleReservationId])
 }

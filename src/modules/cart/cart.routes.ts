@@ -60,6 +60,23 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     const storeMap: Record<string, { store: any; items: any[]; subtotal: number }> = {};
     const now = new Date();
 
+    // Batch resolve any active flash sale reservations to eliminate N+1 queries
+    const flashSaleReservationIds = cart.items
+      .filter((i) => i.isFlashSale && i.flashSaleReservationId)
+      .map((i) => i.flashSaleReservationId!)
+      .filter(Boolean);
+
+    const reservationMap = new Map<string, any>();
+    if (flashSaleReservationIds.length > 0) {
+      const reservations = await prisma.flashSaleReservation.findMany({
+        where: { id: { in: flashSaleReservationIds } },
+        include: { flashSaleItem: true },
+      });
+      for (const r of reservations) {
+        reservationMap.set(r.id, r);
+      }
+    }
+
     let subtotal = 0;
     for (const item of cart.items) {
       const storeId = item.product.storeId;
@@ -67,12 +84,9 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       let isFlashSaleActive = false;
       let reservationExpired = false;
 
-      // Flash Sale revalidation
+      // Flash Sale revalidation from batch cache
       if (item.isFlashSale && item.flashSaleReservationId) {
-        const resRecord = await prisma.flashSaleReservation.findUnique({
-          where: { id: item.flashSaleReservationId },
-          include: { flashSaleItem: true },
-        });
+        const resRecord = reservationMap.get(item.flashSaleReservationId);
 
         if (
           resRecord &&
@@ -84,15 +98,15 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
           isFlashSaleActive = true;
         } else {
           reservationExpired = true;
-          // Clean up expired flash sale reference from cart item
-          await prisma.cartItem.update({
+          // Clean up expired flash sale reference asynchronously without blocking
+          prisma.cartItem.update({
             where: { id: item.id },
             data: {
               isFlashSale: false,
               flashSaleReservationId: null,
               flashSaleItemId: null,
             },
-          });
+          }).catch(console.error);
         }
       }
 
@@ -146,34 +160,38 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       };
     });
 
-    const taxResult = await TaxEngine.calculateCartTax({
-      items: taxCalculationItems,
-      customerId: req.user!.userId,
-    });
-
-    // Authoritative multi-vendor COD availability
     const sellerIds = Array.from(new Set(stores.map((s: any) => s.store.sellerId).filter(Boolean)));
-    const codEval = await SellerFinancialRiskService.evaluateCodEligibility({
-      sellerIds,
-      customerId: req.user!.userId,
-    });
+
+    // Run tax calculation, COD risk evaluation, and feature flag resolution concurrently
+    const [taxResult, codEval, isCityDiscoveryActive] = await Promise.all([
+      TaxEngine.calculateCartTax({
+        items: taxCalculationItems,
+        customerId: req.user!.userId,
+      }),
+      SellerFinancialRiskService.evaluateCodEligibility({
+        sellerIds,
+        customerId: req.user!.userId,
+      }),
+      RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
+        userId: req.user!.userId,
+      }),
+    ]);
 
     let destination: any = null;
     let allStoresDeliverable = true;
-    const isCityDiscoveryActive = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
-      userId: req.user!.userId,
-    });
 
     if (isCityDiscoveryActive) {
       destination = await deliveryServiceabilityService.resolveCustomerDestination(req);
-      if (destination) {
-        for (const s of stores) {
-          const evalRes = await deliveryServiceabilityService.evaluateStoreServiceability(s.store, destination);
-          (s as any).isDeliverable = evalRes.isDeliverable;
-          (s as any).deliveryReason = evalRes.reason;
-          (s as any).deliveryReasonAr = evalRes.reasonAr;
-          if (!evalRes.isDeliverable) allStoresDeliverable = false;
-        }
+      if (destination && stores.length > 0) {
+        await Promise.all(
+          stores.map(async (s: any) => {
+            const evalRes = await deliveryServiceabilityService.evaluateStoreServiceability(s.store, destination);
+            s.isDeliverable = evalRes.isDeliverable;
+            s.deliveryReason = evalRes.reason;
+            s.deliveryReasonAr = evalRes.reasonAr;
+            if (!evalRes.isDeliverable) allStoresDeliverable = false;
+          })
+        );
       }
     }
 
@@ -214,13 +232,29 @@ router.post('/items', async (req: Request, res: Response, next: NextFunction) =>
 
     const reqQty = parseInt(String(quantity), 10) || 1;
 
-    // Validate product and stock
+    // Validate product and stock with selective fields (avoids heavy full row and text overhead)
     const product = await prisma.product.findUnique({
       where: { id: productId },
-      include: { variants: true, inventory: true },
+      select: {
+        id: true,
+        price: true,
+        storeId: true,
+        isActive: true,
+        inventory: {
+          select: { quantity: true, reserved: true },
+        },
+        variants: variantId
+          ? {
+              where: { id: variantId },
+              select: { id: true, price: true, stockQuantity: true },
+            }
+          : {
+              select: { id: true, price: true, stockQuantity: true },
+            },
+      },
     });
-    if (!product) {
-      throw new AppError('المنتج غير موجود', 404);
+    if (!product || !product.isActive) {
+      throw new AppError('المنتج غير موجود أو غير متاح حالياً', 404);
     }
 
     const variant = variantId ? product.variants.find(v => v.id === variantId) : null;
@@ -232,10 +266,13 @@ router.post('/items', async (req: Request, res: Response, next: NextFunction) =>
       throw new AppError('عذراً، هذا المنتج نفد من المخزون', 400);
     }
 
-    let cart = await prisma.cart.findUnique({ where: { userId: req.user!.userId } });
-    if (!cart) {
-      cart = await prisma.cart.create({ data: { userId: req.user!.userId } });
-    }
+    // Fast cart lookup or creation with minimal projection
+    const cart = await prisma.cart.upsert({
+      where: { userId: req.user!.userId },
+      create: { userId: req.user!.userId },
+      update: {},
+      select: { id: true },
+    });
 
     let validFlashSale = false;
     let unitPriceFlashSale: number | null = null;
@@ -330,6 +367,7 @@ router.post('/items', async (req: Request, res: Response, next: NextFunction) =>
         productId,
         variantId: variantId || null,
       },
+      select: { id: true, quantity: true },
     });
 
     const targetQuantity = existing ? existing.quantity + reqQty : reqQty;
@@ -366,10 +404,26 @@ router.post('/items', async (req: Request, res: Response, next: NextFunction) =>
       });
     }
 
-    // Notify Cart Abandonment Engine of cart update
+    // Fast aggregate for updated itemCount without requiring expensive full multi-vendor recalculation
+    const cartAggregate = await prisma.cartItem.aggregate({
+      where: { cartId: cart.id },
+      _sum: { quantity: true },
+    });
+
+    const totalItemCount = cartAggregate._sum.quantity ?? targetQuantity;
+
+    // Notify Cart Abandonment Engine of cart update asynchronously
     CartAbandonmentJob.onCartUpdated(cart.id, req.user!.userId).catch(console.error);
 
-    ResponseUtil.success(res, item, 'Item added to cart');
+    ResponseUtil.success(
+      res,
+      {
+        item,
+        cartId: cart.id,
+        itemCount: totalItemCount,
+      },
+      'Item added to cart'
+    );
   } catch (error) {
     next(error);
   }
@@ -401,7 +455,23 @@ router.put('/items/:id', async (req: Request, res: Response, next: NextFunction)
 
     const cartItem = await prisma.cartItem.findUnique({
       where: { id },
-      include: { product: { include: { inventory: true } }, variant: true },
+      select: {
+        id: true,
+        cartId: true,
+        variantId: true,
+        product: {
+          select: {
+            id: true,
+            inventory: { select: { quantity: true, reserved: true } },
+          },
+        },
+        variant: {
+          select: {
+            id: true,
+            stockQuantity: true,
+          },
+        },
+      },
     });
 
     if (!cartItem) {
@@ -424,10 +494,23 @@ router.put('/items/:id', async (req: Request, res: Response, next: NextFunction)
       data: { quantity: qty },
     });
 
-    // Notify Cart Abandonment Engine of cart update
+    const cartAggregate = await prisma.cartItem.aggregate({
+      where: { cartId: cartItem.cartId },
+      _sum: { quantity: true },
+    });
+
+    // Notify Cart Abandonment Engine of cart update asynchronously
     CartAbandonmentJob.onCartUpdated(cartItem.cartId, req.user!.userId).catch(console.error);
 
-    ResponseUtil.success(res, item, 'Cart updated');
+    ResponseUtil.success(
+      res,
+      {
+        item,
+        cartId: cartItem.cartId,
+        itemCount: cartAggregate._sum.quantity ?? qty,
+      },
+      'Cart updated'
+    );
   } catch (error) {
     next(error);
   }

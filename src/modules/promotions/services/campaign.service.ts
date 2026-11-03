@@ -904,8 +904,8 @@ class CampaignService {
     const isLive = campaign.status === 'ACTIVE' && now >= campaign.startAt && now <= campaign.endAt;
     const isUpcoming = campaign.status === 'SCHEDULED' || (campaign.status === 'ACTIVE' && now < campaign.startAt);
 
-    // 1. Claimable Vouchers for this campaign
-    let vouchers = await prisma.voucher.findMany({
+    // 1. Claimable Vouchers for this campaign (only real created vouchers)
+    const vouchers = await prisma.voucher.findMany({
       where: {
         status: 'ACTIVE',
         isClaimable: true,
@@ -913,73 +913,6 @@ class CampaignService {
       take: 8,
       orderBy: { discountValue: 'desc' },
     });
-
-    // If no vouchers exist in DB yet, create default platform vouchers on the fly
-    if (vouchers.length === 0) {
-      try {
-        const defaultVouchers = [
-          {
-            code: 'MEGA50',
-            normalizedCode: 'MEGA50',
-            name: 'قسيمة خصم 50 ريال للحملة الكبرى',
-            description: 'خصم فوري 50 ريال على أي طلب بقيمة 200 ريال أو أكثر ضمن مهرجان الحملات',
-            discountType: 'FIXED' as const,
-            discountValue: 50,
-            minimumOrderAmount: 200,
-            currency: 'YER',
-            isClaimable: true,
-            startAt: new Date(now.getTime() - 86400000),
-            endAt: new Date(now.getTime() + 30 * 86400000),
-            status: 'ACTIVE' as const,
-          },
-          {
-            code: 'MEGA20',
-            normalizedCode: 'MEGA20',
-            name: 'خصم 20% لكافة المتاجر المشاركة',
-            description: 'خصم 20% بحد أقصى 10,000 ريال يمني على كافة منتجات الحملة الكبرى',
-            discountType: 'PERCENTAGE' as const,
-            discountValue: 20,
-            maximumDiscount: 10000,
-            minimumOrderAmount: 500,
-            currency: 'YER',
-            isClaimable: true,
-            startAt: new Date(now.getTime() - 86400000),
-            endAt: new Date(now.getTime() + 30 * 86400000),
-            status: 'ACTIVE' as const,
-          },
-          {
-            code: 'FREESHIP',
-            normalizedCode: 'FREESHIP',
-            name: 'قسيمة شحن مجاني للمهرجان',
-            description: 'شحن مجاني على كافة الطلبات المؤهلة طوال فترة الحملة التسويقية',
-            voucherType: 'FREE_SHIPPING' as const,
-            discountType: 'FIXED' as const,
-            discountValue: 0,
-            freeShipping: true,
-            minimumOrderAmount: 300,
-            currency: 'YER',
-            isClaimable: true,
-            startAt: new Date(now.getTime() - 86400000),
-            endAt: new Date(now.getTime() + 30 * 86400000),
-            status: 'ACTIVE' as const,
-          },
-        ];
-
-        for (const dv of defaultVouchers) {
-          await prisma.voucher.upsert({
-            where: { normalizedCode: dv.normalizedCode },
-            update: { status: 'ACTIVE', isClaimable: true, endAt: dv.endAt },
-            create: dv,
-          });
-        }
-
-        vouchers = await prisma.voucher.findMany({
-          where: { status: 'ACTIVE', isClaimable: true },
-          take: 8,
-          orderBy: { discountValue: 'desc' },
-        });
-      } catch (_) {}
-    }
 
     // 2. Flash Sale sessions running during this campaign window
     const flashSales = await prisma.flashSaleCampaign.findMany({
