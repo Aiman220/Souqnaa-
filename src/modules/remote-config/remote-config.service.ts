@@ -751,6 +751,34 @@ export class RemoteConfigService {
       metadata = typeof updated.metadata === 'string' ? JSON.parse(updated.metadata) : updated.metadata;
     } catch (_) {}
 
+    // Synchronize options inside inter_governorate_delivery metadata if this is a sub-option
+    if (
+      ['inter_governorate_standard', 'inter_governorate_express', 'inter_governorate_pickup_points', 'inter_governorate_courier'].includes(key) &&
+      updates.enabled !== undefined
+    ) {
+      try {
+        const master = await prisma.featureFlag.findUnique({ where: { key: 'inter_governorate_delivery' } });
+        if (master) {
+          let masterMeta: any = {};
+          try {
+            masterMeta = typeof master.metadata === 'string' ? JSON.parse(master.metadata) : master.metadata;
+          } catch (_) {}
+          if (masterMeta && masterMeta.options && Array.isArray(masterMeta.options)) {
+            masterMeta.options = masterMeta.options.map((opt: any) => {
+              if (opt.key === key || opt.code === key) {
+                return { ...opt, enabled: updates.enabled };
+              }
+              return opt;
+            });
+            await prisma.featureFlag.update({
+              where: { key: 'inter_governorate_delivery' },
+              data: { metadata: JSON.stringify(masterMeta) },
+            });
+          }
+        }
+      } catch (_) {}
+    }
+
     return {
       ...updated,
       platforms,

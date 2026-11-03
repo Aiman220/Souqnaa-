@@ -341,8 +341,15 @@ remoteConfigAdminRoutes.post(
 
       const existing = await remoteConfigService.getFlagByKey(key);
 
-      // Enforce confirmation check on sensitive features when turning OFF
-      if (existing.isSensitive && enabled === false && confirmed !== true) {
+      const isSubOption = [
+        'inter_governorate_standard',
+        'inter_governorate_express',
+        'inter_governorate_pickup_points',
+        'inter_governorate_courier',
+      ].includes(key);
+
+      // Enforce confirmation check on sensitive features when turning OFF (sub-options bypass)
+      if (!isSubOption && existing.isSensitive && enabled === false && confirmed !== true) {
         throw new AppError(
           `هذه الميزة [${existing.displayNameAr}] مصنفة كـ حساسة للغاية (High Impact). يجب تأكيد التعطيل صراحة مع إرفاق سبب الإجراء.`,
           400,
