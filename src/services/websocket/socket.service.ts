@@ -8,6 +8,7 @@ import { sendChatNotification, markChatNotificationsAsRead } from '../../modules
 import { config } from '../../config';
 import { redis } from '../../database/redis';
 import { SupportAgentStatus, SupportConversationStatus } from '@prisma/client';
+import { backendTelemetry } from '../telemetry/backend-telemetry.service';
 
 export class SocketService {
   private static instance: SocketService;
@@ -133,6 +134,21 @@ export class SocketService {
 
   static get(): SocketService {
     return SocketService.instance;
+  }
+
+  public async close(): Promise<void> {
+    if (this.io) {
+      try {
+        await new Promise<void>((resolve) => {
+          this.io.close(() => {
+            console.log('[Socket.IO] Server closed and connections drained.');
+            resolve();
+          });
+        });
+      } catch (err: any) {
+        console.warn('[Socket.IO] Error during close:', err?.message);
+      }
+    }
   }
 
   isUserOnline(userId: string): boolean {
@@ -388,12 +404,14 @@ export class SocketService {
       const isGuest = userId.startsWith('guest_');
       console.log(`[Socket.IO] ${isGuest ? 'Guest' : 'User'} connected: ${userId}, socket: ${socket.id}`);
 
+      // Cancel pending offline transition if user reconnected within grace period
+      const pendingTimer = this.pendingDisconnectTimers.get(userId);
+      backendTelemetry.recordSocketConnection(!!pendingTimer);
+
       if (socket.data.authError) {
         socket.emit('auth:error', { message: socket.data.authError });
       }
 
-      // Cancel pending offline transition if user reconnected within grace period
-      const pendingTimer = this.pendingDisconnectTimers.get(userId);
       if (pendingTimer) {
         clearTimeout(pendingTimer);
         this.pendingDisconnectTimers.delete(userId);
@@ -1537,6 +1555,7 @@ export class SocketService {
 
       // Disconnect handling with multi-socket support and configurable grace period
       socket.on('disconnect', () => {
+        backendTelemetry.recordSocketDisconnection();
         const sockets = this.userSockets.get(userId) || [];
         const filtered = sockets.filter((id) => id !== socket.id);
         if (filtered.length > 0) {

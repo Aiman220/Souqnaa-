@@ -2627,7 +2627,8 @@ router.post('/me/orders/:id/handover', async (req: Request, res: Response, next:
   try {
     const seller = await getSeller(req.user!.userId);
     const resolvedId = await resolveSellerOrderId(seller.id, String(req.params.id));
-    const { handoverNotes, carrierName, hubName } = req.body;
+    const { carrierName, hubName } = req.body;
+    const handoverNotes = req.body.handoverNotes || req.body.notes;
 
     const sellerOrder = await prisma.sellerOrder.findUnique({
       where: { id: resolvedId },
@@ -2643,17 +2644,21 @@ router.post('/me/orders/:id/handover', async (req: Request, res: Response, next:
 
     const trackingNumber = sellerOrder.trackingNumber || sellerOrder.deliveryOrder?.trackingNumber;
     if (trackingNumber) {
-      await interGovernorateTrackingService.recordCheckpoint({
-        trackingNumber,
-        status: 'PICKED_UP',
-        locationName: hubName || 'مستودع التاجر',
-        descriptionAr: `تم تسليم الشحنة رسمياً إلى مندوب شركة الشحن (${carrierName || sellerOrder.carrierName || 'الناقل المعتمد'})`,
-        descriptionEn: `Parcel officially handed over to approved carrier`,
-        actorType: 'SELLER',
-        actorId: req.user!.userId,
-        actorName: req.user!.email,
-        notes: handoverNotes,
-      });
+      try {
+        await interGovernorateTrackingService.recordCheckpoint({
+          trackingNumber,
+          status: 'PICKED_UP',
+          locationName: hubName || 'مستودع التاجر',
+          descriptionAr: `تم تسليم الشحنة رسمياً إلى مندوب شركة الشحن (${carrierName || sellerOrder.carrierName || 'الناقل المعتمد'})`,
+          descriptionEn: `Parcel officially handed over to approved carrier`,
+          actorType: 'SELLER',
+          actorId: req.user!.userId,
+          actorName: req.user!.email,
+          notes: handoverNotes,
+        });
+      } catch (checkpointErr) {
+        console.warn('[Handover Checkpoint Warning - Non-blocking]', checkpointErr);
+      }
     }
 
     const result = await OrderStateMachine.transitionSellerOrder({
@@ -4618,30 +4623,8 @@ router.get('/me/orders/:id', async (req: Request, res: Response, next: NextFunct
   try {
     const seller = await getSeller(req.user!.userId);
     const id = String(req.params.id);
-
-    const sellerOrder = await prisma.sellerOrder.findFirst({
-      where: { id, sellerId: seller.id },
-      include: {
-        order: {
-          include: {
-            user: { select: { firstName: true, lastName: true, phone: true, email: true } },
-            addressSnapshot: true,
-            deliveryMethod: true,
-            deliveryTimeSlot: true,
-            slotBooking: { include: { timeSlot: true } },
-            payment: true,
-          },
-        },
-        items: {
-          include: {
-            product: { select: { nameAr: true, nameEn: true, images: { take: 1, orderBy: { sortOrder: 'asc' } } } },
-            variant: { select: { nameAr: true, nameEn: true } },
-          },
-        },
-        deliveryMethod: true,
-        deliveryQuoteSnapshot: true,
-      },
-    });
+    const resolvedId = await resolveSellerOrderId(seller.id, id);
+    const sellerOrder = await getFullSellerOrder(resolvedId);
 
     if (!sellerOrder) throw new AppError('الطلب غير موجود', 404);
 

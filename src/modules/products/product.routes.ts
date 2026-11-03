@@ -139,9 +139,24 @@ router.get('/', storefrontLimiter, optionalAuth, async (req: Request, res: Respo
       include: {
         store: { select: { id: true, name: true, logo: true, isVerified: true } },
         category: { select: { id: true, nameAr: true, nameEn: true, slug: true } },
-        images: { orderBy: { sortOrder: 'asc' } },
-        variants: true,
-        inventory: { select: { quantity: true } },
+        images: {
+          orderBy: { sortOrder: 'asc' },
+          select: { id: true, url: true, isPrimary: true, sortOrder: true },
+        },
+        variants: {
+          select: {
+            id: true,
+            productId: true,
+            sku: true,
+            price: true,
+            compareAtPrice: true,
+            stockQuantity: true,
+            nameAr: true,
+            nameEn: true,
+            image: true,
+          },
+        },
+        inventory: { select: { quantity: true, reserved: true } },
       },
     };
 

@@ -39,6 +39,12 @@ export interface PrintDocumentData {
   orderStatusBg?: string;
   deliveryMethodAr: string;
   deliveryMethodEn: string;
+  deliveryMethodBadgeAr?: string;
+  deliveryMethodDescriptionAr?: string;
+  deliveryPricingNoteAr?: string;
+  interGovernorateRouteKey?: string;
+  carrierName?: string;
+  trackingNumber?: string;
   deliveryScheduleType?: string;
   souqnaLogoDataUri: string;
   store: {
@@ -219,8 +225,10 @@ export class SellerOrderPrintService {
       ? (parentOrder.displayOrderNumber.startsWith('#') ? parentOrder.displayOrderNumber : `#${parentOrder.displayOrderNumber}`)
       : `#${mainOrderNumber}`;
 
+    const timezone = config.marketplace?.timezone || 'Asia/Aden';
     const orderDate = new Date(parentOrder.createdAt || sellerOrder.createdAt || Date.now());
     const orderDateFormattedAr = orderDate.toLocaleDateString('ar-YE', {
+      timeZone: timezone,
       year: 'numeric',
       month: 'long',
       day: 'numeric',
@@ -228,6 +236,7 @@ export class SellerOrderPrintService {
       minute: '2-digit',
     });
     const orderDateFormattedEn = orderDate.toLocaleDateString('en-GB', {
+      timeZone: timezone,
       year: 'numeric',
       month: 'short',
       day: 'numeric',
@@ -301,45 +310,186 @@ export class SellerOrderPrintService {
       ''
     ).toUpperCase();
 
+    const isInterGov = Boolean(
+      sellerOrder.isInterGovernorate ||
+      parentOrder.isInterGovernorate ||
+      sellerOrder.deliveryQuoteSnapshot?.isInterGovernorate ||
+      parentOrder.deliveryQuoteSnapshot?.isInterGovernorate ||
+      sellerOrder.deliveryMethodCode?.startsWith('inter_') ||
+      delivMethod?.code?.startsWith('inter_') ||
+      sellerOrder.deliveryMethodCode === 'intercity_transport' ||
+      delivMethod?.code === 'intercity_transport' ||
+      sellerOrder.deliveryMethodCode === 'pickup_point' ||
+      delivMethod?.code === 'pickup_point' ||
+      sellerOrder.deliveryMethodCode === 'third_party_courier' ||
+      delivMethod?.code === 'third_party_courier'
+    );
+
+    const methodCode = String(
+      sellerOrder.deliveryMethodCode ||
+      delivMethod?.code ||
+      parentOrder.shippingMethod ||
+      sellerOrder.shippingMethod ||
+      ''
+    ).toLowerCase().trim();
+
+    const methodName = String(
+      delivMethod?.nameAr ||
+      delivMethod?.name ||
+      sellerOrder.deliveryMethodName ||
+      parentOrder.shippingMethod ||
+      ''
+    ).trim();
+
+    const isExpress = Boolean(
+      rawScheduleType === 'EXPRESS' ||
+      sellerOrder.isExpressDelivery ||
+      methodCode === 'express' ||
+      methodCode === 'inter_governorate_express'
+    );
+
+    const isInterGovernorateShipment = Boolean(
+      isInterGov ||
+      methodCode.startsWith('inter_') ||
+      methodCode === 'intercity_transport' ||
+      methodCode === 'pickup_point' ||
+      methodCode === 'third_party_courier' ||
+      methodName.includes('المحافظات') ||
+      methodName.includes('Inter-Governorate')
+    );
+
     let deliveryMethodAr = '';
     let deliveryMethodEn = '';
+    let deliveryMethodBadgeAr = '';
+    let deliveryMethodDescriptionAr = '';
+    let deliveryPricingNoteAr = '';
 
-    if (delivMethod?.nameAr || delivMethod?.nameEn) {
-      deliveryMethodAr = delivMethod.nameAr || delivMethod.nameEn || '';
-      deliveryMethodEn = delivMethod.nameEn || delivMethod.nameAr || '';
-    } else if (rawScheduleType === 'EXPRESS') {
-      deliveryMethodAr = 'توصيل سريع — إكسبرس';
-      deliveryMethodEn = 'Express Delivery';
-    } else if (rawScheduleType === 'SCHEDULED') {
+    // 1. Inter-Governorate Methods
+    if (isInterGovernorateShipment) {
+      if (
+        methodCode === 'inter_governorate_express' ||
+        (isExpress && !methodCode.includes('standard') && !methodCode.includes('pickup') && !methodCode.includes('courier')) ||
+        methodName.includes('Express') ||
+        methodName.includes('⚡')
+      ) {
+        deliveryMethodAr = 'الشحن السريع الفوري بين المحافظات (Express ⚡)';
+        deliveryMethodEn = 'Express Inter-Governorate Delivery';
+        deliveryMethodBadgeAr = 'أسرع وصول ⚡';
+        deliveryMethodDescriptionAr = 'أولوية شحن فائقة، وصول مستعجل خلال 12-24 ساعة، مع تطبيق رسم الشحن السريع المعتمد من الخادم.';
+        deliveryPricingNoteAr = 'تشمل رسم الشحن السريع المعتمد رسمياً من الخادم (expressSurcharge).';
+      } else if (methodCode === 'pickup_point' || methodName.includes('نقطة توزيع') || methodName.includes('Pickup Point')) {
+        deliveryMethodAr = 'الاستلام من نقطة توزيع معتمدة (Pickup Point 📍)';
+        deliveryMethodEn = 'Designated Pickup Point';
+        deliveryMethodBadgeAr = 'وفر تكلفة التوصيل 🏷️';
+        deliveryMethodDescriptionAr = 'إمكانية الاستلام الذاتي من أقرب مركز لوجستي بالمحافظة مع خصم الاستلام.';
+        deliveryPricingNoteAr = 'رسوم مخفضة مع تطبيق خصم الاستلام الذاتي.';
+      } else if (methodCode === 'third_party_courier' || methodName.includes('شركات الشحن') || methodName.includes('Third-Party')) {
+        deliveryMethodAr = 'شركات الشحن والنقل السريع (Third-Party Courier 🚚)';
+        deliveryMethodEn = 'Third-Party Courier';
+        deliveryMethodBadgeAr = 'توصيل للعنوان 📦';
+        deliveryMethodDescriptionAr = 'شحن مباشر حتى باب العنوان عبر شركات النقل والطرود.';
+        deliveryPricingNoteAr = 'تسعيرة التوصيل النهائي إلى باب العنوان المعتمدة.';
+      } else {
+        deliveryMethodAr = 'الشحن البري القياسي بين المحافظات (Standard Inter-Governorate)';
+        deliveryMethodEn = 'Standard Inter-Governorate Delivery';
+        deliveryMethodBadgeAr = 'شحن قياسي 🚛';
+        deliveryMethodDescriptionAr = 'المسار المعتمد، الناقل المعتمد، المسافة البرية الدقيقة بالكيلومتر، والوصول خلال 24-48 ساعة.';
+        deliveryPricingNoteAr = 'محسوبة بدقة من الخادم (رسم المسار + تعرفة الكيلومترات البرية).';
+      }
+    }
+    // 2. Intra-City Scheduled Delivery
+    else if (rawScheduleType === 'SCHEDULED' || methodCode === 'scheduled' || methodName.includes('مجدول')) {
       const slot = parentOrder.deliveryTimeSlot || parentOrder.slotBooking?.timeSlot;
       const slotText = slot?.nameAr || (slot?.startTime && slot?.endTime ? `${slot.startTime} - ${slot.endTime}` : '');
-      deliveryMethodAr = slotText ? `توصيل مجدول (${slotText})` : 'توصيل مجدول';
+      deliveryMethodAr = slotText ? `التوصيل المجدول (${slotText})` : 'التوصيل المجدول (Scheduled Delivery 📅)';
       deliveryMethodEn = 'Scheduled Delivery';
-    } else if (rawScheduleType === 'ASAP') {
-      deliveryMethodAr = 'توصيل قياسي';
-      deliveryMethodEn = 'Standard Delivery';
-    } else if (parentOrder.shippingMethod || sellerOrder.shippingMethod) {
-      const sm = String(parentOrder.shippingMethod || sellerOrder.shippingMethod).toLowerCase();
-      if (sm === 'express') {
-        deliveryMethodAr = 'توصيل سريع — إكسبرس';
-        deliveryMethodEn = 'Express Delivery';
-      } else if (sm === 'pickup') {
-        deliveryMethodAr = 'استلام من المتجر';
-        deliveryMethodEn = 'Store Pickup';
-      } else if (sm === 'same_day') {
-        deliveryMethodAr = 'توصيل في نفس اليوم';
-        deliveryMethodEn = 'Same Day Delivery';
-      } else if (sm === 'standard') {
-        deliveryMethodAr = 'توصيل قياسي';
-        deliveryMethodEn = 'Standard Delivery';
-      } else {
-        deliveryMethodAr = parentOrder.shippingMethod || sellerOrder.shippingMethod;
-        deliveryMethodEn = deliveryMethodAr;
-      }
-    } else {
-      deliveryMethodAr = 'توصيل قياسي';
-      deliveryMethodEn = 'Standard Delivery';
+      deliveryMethodBadgeAr = 'موعد محجوز ⏰';
+      deliveryMethodDescriptionAr = 'توصيل مجدول في الموعد المحجوز مسبقاً من قبل العميل.';
+      deliveryPricingNoteAr = 'تسعيرة التوصيل المجدول المعتمدة من الخادم حسب الفترة.';
     }
+    // 3. Intra-City Express Delivery
+    else if (isExpress || methodCode === 'express' || methodName.includes('فوري') || methodName.includes('إكسبرس')) {
+      deliveryMethodAr = 'التوصيل السريع الفوري (Express Delivery ⚡)';
+      deliveryMethodEn = 'Express Immediate Delivery';
+      deliveryMethodBadgeAr = 'أسرع توصيل ⚡';
+      deliveryMethodDescriptionAr = 'أولوية شحن فائقة وتسليم فوري ومباشر للعميل في أسرع وقت.';
+      deliveryPricingNoteAr = 'تسعيرة التوصيل السريع الفوري المعتمدة من الخادم.';
+    }
+    // 4. Same-Day Delivery
+    else if (methodCode === 'same_day' || methodName.includes('نفس اليوم')) {
+      deliveryMethodAr = 'التوصيل في نفس اليوم (Same-Day Delivery 🚀)';
+      deliveryMethodEn = 'Same Day Delivery';
+      deliveryMethodBadgeAr = 'نفس اليوم 🚀';
+      deliveryMethodDescriptionAr = 'توصيل في نفس يوم الطلب خلال ساعات عمل المتجر.';
+      deliveryPricingNoteAr = 'تسعيرة التوصيل في نفس اليوم المعتمدة.';
+    }
+    // 5. Store Pickup
+    else if (methodCode === 'pickup' || methodCode === 'store_pickup' || methodName.includes('استلام من المتجر')) {
+      deliveryMethodAr = 'الاستلام من المتجر (Store Pickup 🏬)';
+      deliveryMethodEn = 'Store Pickup';
+      deliveryMethodBadgeAr = 'استلام ذاتي 🏬';
+      deliveryMethodDescriptionAr = 'استلام العميل للطلب مباشرة من موقع المتجر.';
+      deliveryPricingNoteAr = 'بدون رسوم توصيل (مجاناً).';
+    }
+    // 6. Seller-Managed Delivery
+    else if (methodCode === 'seller_managed' || methodName.includes('إدارة البائع')) {
+      deliveryMethodAr = 'توصيل بإدارة المتجر (Seller-Managed Delivery 🛵)';
+      deliveryMethodEn = 'Seller-Managed Delivery';
+      deliveryMethodBadgeAr = 'إدارة المتجر 🛵';
+      deliveryMethodDescriptionAr = 'توصيل مخصص يتولى إدارته وتسليمه المتجر مباشرة للعميل.';
+      deliveryPricingNoteAr = 'رسوم التوصيل المحددة من المتجر.';
+    }
+    // 7. Marketplace-Managed Shipping
+    else if (methodCode === 'marketplace_managed' || methodName.includes('إدارة سوقنا')) {
+      deliveryMethodAr = 'شحن بإدارة منصة سوقناا (Marketplace Shipping 🚛)';
+      deliveryMethodEn = 'Marketplace-Managed Shipping';
+      deliveryMethodBadgeAr = 'إدارة سوقناا 🚛';
+      deliveryMethodDescriptionAr = 'شحن لوجستي رسمي متكامل بإدارة شبكة مناديب سوقناا المعتمدين.';
+      deliveryPricingNoteAr = 'تسعيرة المنصة اللوجستية المعتمدة.';
+    }
+    // 8. Hub-to-Hub Transport
+    else if (methodCode === 'hub_to_hub' || methodName.includes('المحطات')) {
+      deliveryMethodAr = 'شحن بين المحطات والمراكز اللوجستية (Hub-to-Hub Transport 🏢)';
+      deliveryMethodEn = 'Hub-to-Hub Transport';
+      deliveryMethodBadgeAr = 'بين المحطات 🏢';
+      deliveryMethodDescriptionAr = 'نقل لوجستي بين المراكز الرئيسية والمحطات التابعة للمنصة.';
+      deliveryPricingNoteAr = 'تسعيرة النقل اللوجستي المعتمدة بين المحطات.';
+    }
+    // 9. Custom explicit method name
+    else if (methodName.length > 0 && methodName !== 'غير محدد' && methodName !== 'null') {
+      deliveryMethodAr = methodName;
+      deliveryMethodEn = delivMethod?.nameEn || methodName;
+      deliveryMethodBadgeAr = 'توصيل قياسي 🛵';
+      deliveryMethodDescriptionAr = 'توصيل مباشر وفق المسافة البرية ووقت التجهيز.';
+      deliveryPricingNoteAr = 'محسوبة بدقة من الخادم وفق المسافة البرية.';
+    }
+    // 10. Default Standard / ASAP Delivery
+    else {
+      deliveryMethodAr = 'التوصيل القياسي (Standard / ASAP 🛵)';
+      deliveryMethodEn = 'Standard Delivery';
+      deliveryMethodBadgeAr = 'توصيل قياسي 🛵';
+      deliveryMethodDescriptionAr = 'توصيل مباشر داخل نطاق المدينة وفق المسافة البرية الدقيقة.';
+      deliveryPricingNoteAr = 'محسوبة بدقة من الخادم وفق المسافة البرية بالكيلومتر.';
+    }
+
+    const interGovernorateRouteKey = String(
+      sellerOrder.interGovernorateRouteKey ||
+      sellerOrder.deliveryQuoteSnapshot?.routeKey ||
+      parentOrder.deliveryQuoteSnapshot?.routeKey ||
+      ''
+    );
+    const carrierName = String(
+      sellerOrder.carrierName ||
+      sellerOrder.deliveryOrder?.carrierName ||
+      sellerOrder.deliveryQuoteSnapshot?.shippingProvider ||
+      ''
+    );
+    const trackingNumber = String(
+      sellerOrder.trackingNumber ||
+      sellerOrder.deliveryOrder?.trackingNumber ||
+      parentOrder.trackingNumber ||
+      ''
+    );
 
     // Safe customer fulfillment info
     const rawCustomerName = addr.recipientName || parentOrder.user?.firstName
@@ -449,6 +599,7 @@ export class SellerOrderPrintService {
         ? new Date(settlementTimestamp)
         : (sellerOrder.deliveredAt ? new Date(sellerOrder.deliveredAt) : orderDate);
       walletReleaseDate = paidDate.toLocaleDateString('ar-YE', {
+        timeZone: timezone,
         year: 'numeric',
         month: 'long',
         day: 'numeric',
@@ -459,6 +610,7 @@ export class SellerOrderPrintService {
       const releaseDays = 3;
       const estimatedRelease = new Date(deliveredTime + releaseDays * 24 * 60 * 60 * 1000);
       walletReleaseDate = estimatedRelease.toLocaleDateString('ar-YE', {
+        timeZone: timezone,
         year: 'numeric',
         month: 'long',
         day: 'numeric',
@@ -474,6 +626,7 @@ export class SellerOrderPrintService {
       const releaseDays = 3;
       const estimatedRelease = new Date(orderDate.getTime() + releaseDays * 24 * 60 * 60 * 1000);
       walletReleaseDate = estimatedRelease.toLocaleDateString('ar-YE', {
+        timeZone: timezone,
         year: 'numeric',
         month: 'long',
         day: 'numeric',
@@ -526,6 +679,12 @@ export class SellerOrderPrintService {
       orderStatusBg: orderStatus.bg,
       deliveryMethodAr,
       deliveryMethodEn,
+      deliveryMethodBadgeAr: deliveryMethodBadgeAr || undefined,
+      deliveryMethodDescriptionAr: deliveryMethodDescriptionAr || undefined,
+      deliveryPricingNoteAr: deliveryPricingNoteAr || undefined,
+      interGovernorateRouteKey: interGovernorateRouteKey || undefined,
+      carrierName: carrierName || undefined,
+      trackingNumber: trackingNumber || undefined,
       deliveryScheduleType: rawScheduleType || undefined,
       souqnaLogoDataUri,
       store: {
@@ -1243,6 +1402,12 @@ export class SellerOrderPrintService {
         <div class="meta-row"><span class="lbl">تاريخ ووقت الشراء:</span><span class="val">${d.orderDateFormattedAr}</span></div>
         <div class="meta-row"><span class="lbl">حالة معالجة الطلب:</span><span class="val" style="color:${d.orderStatusColor}; font-weight:800;">${d.orderStatusAr}</span></div>
         <div class="meta-row"><span class="lbl">طريقة التوصيل والشحن:</span><span class="val" style="font-weight:800;">${d.deliveryMethodAr}</span></div>
+        ${d.deliveryMethodBadgeAr ? `<div class="meta-row"><span class="lbl">شارة الشحن:</span><span class="val" style="font-weight:700; color:#0f766e; background:#ccfbf1; padding:1px 6px; border-radius:4px; display:inline-block;">${d.deliveryMethodBadgeAr}</span></div>` : ''}
+        ${d.deliveryMethodDescriptionAr ? `<div class="meta-row"><span class="lbl">وصف الشحن:</span><span class="val" style="font-size:11px; color:#166534;">${d.deliveryMethodDescriptionAr}</span></div>` : ''}
+        ${d.deliveryPricingNoteAr ? `<div class="meta-row"><span class="lbl">التسعيرة:</span><span class="val" style="font-size:11px; color:#0284c7; font-weight:600;">${d.deliveryPricingNoteAr}</span></div>` : ''}
+        ${d.interGovernorateRouteKey ? `<div class="meta-row"><span class="lbl">المسار المعتمد:</span><span class="val" style="font-weight:700; color:#0f766e;">${d.interGovernorateRouteKey}</span></div>` : ''}
+        ${d.carrierName ? `<div class="meta-row"><span class="lbl">الناقل اللوجستي:</span><span class="val">${d.carrierName}</span></div>` : ''}
+        ${d.trackingNumber ? `<div class="meta-row"><span class="lbl">رقم التتبع:</span><span class="val" dir="ltr" style="font-family:monospace; font-weight:800; color:#ea580c;">${d.trackingNumber}</span></div>` : ''}
         <div class="meta-row"><span class="lbl">طريقة الدفع المختارة:</span><span class="val">${d.paymentMethodAr}</span></div>
       </div>
 

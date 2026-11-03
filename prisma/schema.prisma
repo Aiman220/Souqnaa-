@@ -1400,6 +1400,8 @@ model Product {
   @@index([categoryId, isActive, createdAt(sort: Desc)])
   @@index([storeId, isActive, createdAt(sort: Desc)])
   @@index([isActive, isFeatured, soldCount(sort: Desc)])
+  @@index([isActive, price])
+  @@index([isActive, rating(sort: Desc)])
 }
 
 model ProductVariant {
@@ -1603,6 +1605,7 @@ model Order {
   @@index([deliveryMethodId])
   @@index([deliveredAt])
   @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, status, createdAt(sort: Desc)])
   @@index([status, createdAt(sort: Desc)])
   @@index([createdAt(sort: Desc)])
 }
@@ -1671,6 +1674,7 @@ model SellerOrder {
   @@index([deliveredAt])
   @@index([sellerId, createdAt(sort: Desc)])
   @@index([sellerId, status])
+  @@index([sellerId, status, createdAt(sort: Desc)])
   @@index([status, createdAt(sort: Desc)])
 }
 

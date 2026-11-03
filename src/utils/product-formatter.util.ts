@@ -154,14 +154,23 @@ export function formatProductsForClient(products: any[], campaignPresentationMap
   }).filter(Boolean);
 }
 
+let _cachedCampaignBadgeService: any = null;
+async function getCampaignBadgeService(): Promise<any> {
+  if (!_cachedCampaignBadgeService) {
+    const mod = await import('../modules/promotions/services/campaign-badge.service');
+    _cachedCampaignBadgeService = mod.campaignBadgeService;
+  }
+  return _cachedCampaignBadgeService;
+}
+
 /**
  * High-performance batch product formatter that resolves active campaign presentation badges.
  */
 export async function formatProductsWithCampaigns(products: any[], locale = 'ar'): Promise<any[]> {
   if (!Array.isArray(products) || products.length === 0) return [];
   try {
-    const { campaignBadgeService } = await import('../modules/promotions/services/campaign-badge.service');
-    const presentationMap = await campaignBadgeService.batchResolveCampaignPresentations(products, locale);
+    const badgeService = await getCampaignBadgeService();
+    const presentationMap = await badgeService.batchResolveCampaignPresentations(products, locale);
     return formatProductsForClient(products, presentationMap);
   } catch (err) {
     console.error('[formatProductsWithCampaigns] Failed to resolve badges, falling back without badges:', err);
@@ -175,8 +184,8 @@ export async function formatProductsWithCampaigns(products: any[], locale = 'ar'
 export async function formatProductWithCampaign(product: any, locale = 'ar'): Promise<any> {
   if (!product) return null;
   try {
-    const { campaignBadgeService } = await import('../modules/promotions/services/campaign-badge.service');
-    const presentationMap = await campaignBadgeService.batchResolveCampaignPresentations([product], locale);
+    const badgeService = await getCampaignBadgeService();
+    const presentationMap = await badgeService.batchResolveCampaignPresentations([product], locale);
     const pres = presentationMap.get(product.id) || null;
     return formatProductForClient(product, pres);
   } catch (err) {

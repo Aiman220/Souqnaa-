@@ -158,7 +158,7 @@ export class InterGovernorateTrackingService {
       metadata,
     } = input;
 
-    const deliveryOrder = await prisma.deliveryOrder.findUnique({
+    let deliveryOrder = await prisma.deliveryOrder.findUnique({
       where: { trackingNumber },
       include: {
         sellerOrder: {
@@ -173,6 +173,42 @@ export class InterGovernorateTrackingService {
         },
       },
     });
+
+    if (!deliveryOrder) {
+      // Robust fallback: Find or auto-provision delivery order for matching seller order
+      const soMatch = await prisma.sellerOrder.findFirst({
+        where: {
+          OR: [
+            { trackingNumber },
+            { id: trackingNumber },
+          ],
+        },
+        include: {
+          order: { include: { user: true } },
+          seller: { include: { user: true } },
+        },
+      });
+
+      if (soMatch) {
+        deliveryOrder = await prisma.deliveryOrder.create({
+          data: {
+            sellerOrderId: soMatch.id,
+            trackingNumber: soMatch.trackingNumber || trackingNumber,
+            carrierName: soMatch.carrierName || 'الناقل المعتمد',
+            status: status === 'PICKED_UP' ? 'PICKED_UP' : 'ORDER_CONFIRMED',
+            deliveryMethodCode: (soMatch as any).deliveryMethodCode || 'standard',
+          },
+          include: {
+            sellerOrder: {
+              include: {
+                order: { include: { user: true } },
+                seller: { include: { user: true } },
+              },
+            },
+          },
+        });
+      }
+    }
 
     if (!deliveryOrder) {
       throw new AppError('رقم التتبع غير موجود في النظام', 404, 'TRACKING_NOT_FOUND');
@@ -316,7 +352,7 @@ export class InterGovernorateTrackingService {
    * Public or authorized tracking query: returns full timeline and current status.
    */
   public async getTrackingTimeline(trackingNumber: string): Promise<any> {
-    const deliveryOrder = await prisma.deliveryOrder.findUnique({
+    let deliveryOrder = await prisma.deliveryOrder.findUnique({
       where: { trackingNumber },
       include: {
         sellerOrder: {
@@ -338,6 +374,37 @@ export class InterGovernorateTrackingService {
         },
       },
     });
+
+    if (!deliveryOrder) {
+      deliveryOrder = await prisma.deliveryOrder.findFirst({
+        where: {
+          OR: [
+            { trackingNumber },
+            { sellerOrderId: trackingNumber },
+            { sellerOrder: { trackingNumber } },
+          ],
+        },
+        include: {
+          sellerOrder: {
+            include: {
+              order: {
+                include: {
+                  deliveryAddress: {
+                    include: { city: true },
+                  },
+                },
+              },
+              seller: {
+                include: {
+                  stores: true,
+                },
+              },
+              deliveryQuoteSnapshot: true,
+            },
+          },
+        },
+      });
+    }
 
     if (!deliveryOrder) {
       throw new AppError('رقم التتبع غير موجود', 404, 'TRACKING_NOT_FOUND');

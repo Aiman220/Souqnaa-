@@ -92,6 +92,12 @@ class CloudflareR2StorageService implements IStorageService {
       return rawPublicUrl.replace(/\/+$/, '');
     }
 
+    // Direct Cloudflare CDN delivery domain if configured for environment (§5)
+    const envAssetsDomain = (config.domains as any)?.[config.env]?.assets;
+    if (envAssetsDomain && !envAssetsDomain.includes('r2.cloudflarestorage.com')) {
+      return envAssetsDomain.replace(/\/+$/, '');
+    }
+
     const serverBase =
       process.env.RENDER_EXTERNAL_URL ||
       process.env.BACKEND_PUBLIC_URL ||

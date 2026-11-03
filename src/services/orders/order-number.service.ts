@@ -1,5 +1,6 @@
 import { prisma } from '../../database/prisma';
 import { Prisma } from '@prisma/client';
+import { config } from '../../config';
 
 export interface OrderNumberResult {
   orderSequence: number;
@@ -117,11 +118,26 @@ export class OrderNumberService {
    * e.g. SQ-2026-0925-000123
    */
   public static formatPublicOrderNumber(sequence: number, date: Date = new Date()): string {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const seqStr = String(sequence).padStart(6, '0');
-    return `SQ-${year}-${month}${day}-${seqStr}`;
+    const timezone = config.marketplace?.timezone || 'Asia/Aden';
+    try {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(date).split('-');
+      const year = parts[0];
+      const month = parts[1];
+      const day = parts[2];
+      const seqStr = String(sequence).padStart(6, '0');
+      return `SQ-${year}-${month}${day}-${seqStr}`;
+    } catch (_) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const seqStr = String(sequence).padStart(6, '0');
+      return `SQ-${year}-${month}${day}-${seqStr}`;
+    }
   }
 
   /**

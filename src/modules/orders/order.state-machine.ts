@@ -266,6 +266,15 @@ export class OrderStateMachine {
     const currentStatus = sellerOrder.status as string;
     const targetStatusStr = targetStatus as string;
 
+    if (currentStatus === targetStatusStr) {
+      // Idempotent: Already in target status, return current order state gracefully
+      return {
+        sellerOrder,
+        parentStatus: sellerOrder.order?.status || currentStatus,
+        soldCountUpdates: [],
+      };
+    }
+
     if (!this.isValidTransition(currentStatus, targetStatusStr)) {
       throw new AppError(
         `لا يمكن تحويل حالة الطلب من [${currentStatus}] إلى [${targetStatusStr}]`,
@@ -1034,6 +1043,14 @@ export class OrderStateMachine {
 
     const currentStatus = order.status as string;
     const targetStatusStr = targetStatus as string;
+
+    if (currentStatus === targetStatusStr) {
+      // Idempotent: Already in target status, return current order state gracefully
+      return {
+        updatedOrder: order,
+        soldCountUpdates: [],
+      };
+    }
 
     if (!this.isValidTransition(currentStatus, targetStatusStr)) {
       throw new AppError(

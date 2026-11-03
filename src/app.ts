@@ -10,6 +10,8 @@ import { config } from './config';
 import { errorHandler } from './middleware/error.middleware';
 import { globalLimiter } from './middleware/rate-limiter.middleware';
 import { requestIdMiddleware } from './middleware/request-id.middleware';
+import { performanceLoggerMiddleware } from './middleware/performance-logger.middleware';
+import { backendTelemetry } from './services/telemetry/backend-telemetry.service';
 import { maintenanceMiddleware, getMaintenanceConfig, setMaintenanceConfig } from './middleware/maintenance.middleware';
 import { appVersionGate } from './middleware/app-version.middleware';
 import { trafficProtectionService } from './services/traffic-protection.service';
@@ -236,6 +238,7 @@ export const createApp = (): Application => {
   app.use(cors(corsOptions));
   app.options('*', cors(corsOptions));
   app.use(requestIdMiddleware);
+  app.use(performanceLoggerMiddleware);
   app.use(
     compression({
       threshold: 1024,
@@ -469,6 +472,17 @@ export const createApp = (): Application => {
   };
   app.get('/ready', readinessHandler);
   app.get(`${config.apiPrefix}/ready`, readinessHandler);
+
+  // Authoritative Telemetry & Performance Observability Endpoint (§1, §9)
+  const telemetryHandler = (_req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-store, private');
+    res.json({
+      success: true,
+      data: backendTelemetry.getSnapshot(),
+    });
+  };
+  app.get('/telemetry/metrics', telemetryHandler);
+  app.get(`${config.apiPrefix}/telemetry/metrics`, telemetryHandler);
 
   // Maintenance Configuration Route (§22, §64)
   app.get(`${config.apiPrefix}/config/maintenance`, (req: Request, res: Response) => {

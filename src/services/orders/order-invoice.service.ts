@@ -1,4 +1,5 @@
 import { smtpEmailProvider } from '../../modules/notifications/providers/email.provider';
+import { config } from '../../config';
 
 export interface InvoiceData {
   title: string;
@@ -99,7 +100,7 @@ export class OrderInvoiceService {
         taxName: order.taxSnapshots?.[0]?.taxName || 'ضريبة القيمة المضافة (VAT)',
         taxRate: order.taxSnapshots?.[0]?.taxRate ? order.taxSnapshots[0].taxRate * 100 : undefined,
         total: order.total || 0,
-        currency: order.currency || 'ر.س',
+        currency: order.currency || config.marketplace?.currency || 'ر.ي',
       },
     };
   }
@@ -108,7 +109,9 @@ export class OrderInvoiceService {
    * Generates high-quality, print-ready, responsive HTML digital receipt.
    */
   public static renderHtmlReceipt(data: InvoiceData): string {
-    const formattedDate = new Date(data.createdAt).toLocaleDateString('ar-SA', {
+    const timezone = config.marketplace?.timezone || 'Asia/Aden';
+    const formattedDate = new Date(data.createdAt).toLocaleDateString('ar-YE', {
+      timeZone: timezone,
       year: 'numeric',
       month: 'long',
       day: 'numeric',

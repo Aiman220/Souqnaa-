@@ -98,7 +98,10 @@ export const STANDARD_DELIVERY_METHODS = [
   },
   {
     code: 'third_party_courier',
-    nameAr: 'شركة توصيل وسيطة',
+    nameAr: 'شركات الشحن والنقل السريع (Third-Party Courier 🚚)',
+    descriptionAr: 'شحن مباشر حتى باب العنوان عبر شركات النقل والطرود.',
+    badgeAr: 'توصيل للعنوان 📦',
+    pricingNoteAr: 'تسعيرة التوصيل النهائي إلى باب العنوان المعتمدة.',
     nameEn: 'Third-Party Courier',
     defaultSurcharge: 200,
   },
@@ -110,13 +113,28 @@ export const STANDARD_DELIVERY_METHODS = [
   },
   {
     code: 'intercity_transport',
-    nameAr: 'شحن ونقل بين المحافظات',
-    nameEn: 'Intercity Transport',
+    nameAr: 'الشحن البري القياسي بين المحافظات (Standard Inter-Governorate)',
+    descriptionAr: 'المسار المعتمد، الناقل المعتمد، المسافة البرية الدقيقة بالكيلومتر، والوصول خلال 24-48 ساعة.',
+    badgeAr: 'شحن قياسي 🚛',
+    pricingNoteAr: 'محسوبة بدقة من الخادم (رسم المسار + تعرفة الكيلومترات البرية).',
+    nameEn: 'Standard Inter-Governorate Delivery',
     defaultSurcharge: 300,
   },
   {
+    code: 'inter_governorate_express',
+    nameAr: 'الشحن السريع الفوري بين المحافظات (Express ⚡)',
+    descriptionAr: 'أولوية شحن فائقة، وصول مستعجل خلال 12-24 ساعة، مع تطبيق رسم الشحن السريع المعتمد من الخادم.',
+    badgeAr: 'أسرع وصول ⚡',
+    pricingNoteAr: 'تشمل رسم الشحن السريع المعتمد رسمياً من الخادم (expressSurcharge).',
+    nameEn: 'Express Inter-Governorate Delivery',
+    defaultSurcharge: 1000,
+  },
+  {
     code: 'pickup_point',
-    nameAr: 'استلام من نقطة محددة',
+    nameAr: 'الاستلام من نقطة توزيع معتمدة (Pickup Point 📍)',
+    descriptionAr: 'إمكانية الاستلام الذاتي من أقرب مركز لوجستي بالمحافظة مع خصم الاستلام.',
+    badgeAr: 'وفر تكلفة التوصيل 🏷️',
+    pricingNoteAr: 'رسوم مخفضة مع تطبيق خصم الاستلام الذاتي.',
     nameEn: 'Designated Pickup Point',
     defaultSurcharge: -100, // Small discount for customer pickup
   },
@@ -359,6 +377,17 @@ export class InterGovernorateRouteService {
       ? deliveryMethodCode
       : (allowedCodes[0] || 'intercity_transport');
 
+    // Remote Config active validation per method
+    if ((effectiveMethodCode === 'intercity_transport' || effectiveMethodCode === 'inter_governorate_standard') && !(await RemoteConfigService.getInstance().isFeatureActive('inter_governorate_standard').catch(() => true))) {
+      throw new AppError('الشحن البري القياسي بين المحافظات غير متاح حالياً', 400, 'STANDARD_UNAVAILABLE');
+    }
+    if (effectiveMethodCode === 'pickup_point' && !(await RemoteConfigService.getInstance().isFeatureActive('inter_governorate_pickup_points').catch(() => true))) {
+      throw new AppError('خدمة الاستلام من نقطة التوزيع غير متاحة حالياً', 400, 'PICKUP_POINT_UNAVAILABLE');
+    }
+    if (effectiveMethodCode === 'third_party_courier' && !(await RemoteConfigService.getInstance().isFeatureActive('inter_governorate_courier').catch(() => true))) {
+      throw new AppError('خدمة الشحن عبر شركات النقل والطرود غير متاحة حالياً', 400, 'COURIER_UNAVAILABLE');
+    }
+
     const methodRule = route.routeMethods?.find((rm: any) => rm.methodCode === effectiveMethodCode);
     const deliveryMethodCharge = methodRule?.methodSurcharge ?? 0;
 
@@ -423,16 +452,36 @@ export class InterGovernorateRouteService {
       }
     }
 
-    // 12. Allowed Delivery Methods List for Customer/UI selection
+    // 12. Allowed Delivery Methods List for Customer/UI selection with Feature Flag active status
+    const isStandardActive = await RemoteConfigService.getInstance().isFeatureActive('inter_governorate_standard').catch(() => true);
+    const isExpressActive = await RemoteConfigService.getInstance().isFeatureActive('inter_governorate_express').catch(() => true);
+    const isPickupActive = await RemoteConfigService.getInstance().isFeatureActive('inter_governorate_pickup_points').catch(() => true);
+    const isCourierActive = await RemoteConfigService.getInstance().isFeatureActive('inter_governorate_courier').catch(() => true);
+
     const allowedMethodsList = STANDARD_DELIVERY_METHODS.filter((m) => allowedCodes.includes(m.code)).map((m) => {
       const rm = route.routeMethods?.find((r: any) => r.methodCode === m.code);
+      let isMethodActive = true;
+      if (m.code === 'intercity_transport' || m.code === 'inter_governorate_standard') {
+        isMethodActive = isStandardActive;
+      } else if (m.code === 'inter_governorate_express') {
+        isMethodActive = isExpressActive && Boolean(route.expressSupported);
+      } else if (m.code === 'pickup_point') {
+        isMethodActive = isPickupActive;
+      } else if (m.code === 'third_party_courier') {
+        isMethodActive = isCourierActive;
+      }
+
       return {
         code: m.code,
         nameAr: rm?.methodNameAr || m.nameAr,
         nameEn: rm?.methodNameEn || m.nameEn,
+        descriptionAr: (m as any).descriptionAr,
+        badgeAr: (m as any).badgeAr,
+        pricingNoteAr: (m as any).pricingNoteAr,
         surcharge: rm?.methodSurcharge ?? m.defaultSurcharge,
         estimatedHoursMin: rm?.estimatedHoursMin ?? effectiveHoursMin,
         estimatedHoursMax: rm?.estimatedHoursMax ?? effectiveHoursMax,
+        isAvailable: isMethodActive,
       };
     });
 
