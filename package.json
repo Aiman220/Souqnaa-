@@ -1,5 +1,5 @@
 {
-  "name": "souqna-backend",
+  "name": "souqnaa-backend",
   "version": "1.0.0",
   "description": "سوقناا — Production-ready multi-vendor marketplace backend API",
   "main": "dist/server.js",
@@ -21,7 +21,8 @@
     "bootstrap:admin": "ts-node scripts/bootstrap-admin.ts",
     "test:performance": "ts-node tests/seller-performance.test.ts && ts-node tests/seller-performance-security.test.ts",
     "test": "npm run security:gate",
-    "test:images": "ts-node tests/image-delivery-optimization.test.ts"
+    "test:images": "ts-node tests/image-delivery-optimization.test.ts",
+    "test:resilience": "ts-node tests/network-resilience.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.750.0",

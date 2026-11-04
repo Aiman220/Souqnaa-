@@ -10,6 +10,7 @@ import { config } from './config';
 import { errorHandler } from './middleware/error.middleware';
 import { globalLimiter } from './middleware/rate-limiter.middleware';
 import { requestIdMiddleware } from './middleware/request-id.middleware';
+import { idempotencyMiddleware } from './middleware/idempotency.middleware';
 import { performanceLoggerMiddleware } from './middleware/performance-logger.middleware';
 import { backendTelemetry } from './services/telemetry/backend-telemetry.service';
 import { maintenanceMiddleware, getMaintenanceConfig, setMaintenanceConfig } from './middleware/maintenance.middleware';
@@ -239,6 +240,7 @@ export const createApp = (): Application => {
   app.options('*', cors(corsOptions));
   app.use(requestIdMiddleware);
   app.use(performanceLoggerMiddleware);
+  app.use(idempotencyMiddleware);
   app.use(
     compression({
       threshold: 1024,
@@ -251,7 +253,7 @@ export const createApp = (): Application => {
     })
   );
 
-  // Cache-Control headers: public static catalog routes can cache briefly; all user/order/mutation routes must not cache
+  // Cache-Control headers: public static catalog routes can cache briefly; all user/order/mutation routes must not cache (§2)
   app.use((req: Request, res: Response, next) => {
     const isApi = req.path.startsWith('/api') || req.path.startsWith(config.apiPrefix);
     if (!isApi) {
@@ -259,20 +261,48 @@ export const createApp = (): Application => {
     }
 
     const publicCacheablePaths = [
+      '/home',
       '/categories',
       '/locations',
       '/tax',
       '/config/remote',
       '/remote-config',
       '/app-lifecycle/public',
+      '/products',
+      '/promotions/customer/banners',
+      '/flash-sales/customer',
+      '/search/suggestions',
+      '/stores',
     ];
+
+    // Exclude any private, user-specific, or administrative endpoints
+    const privateSegments = [
+      '/auth',
+      '/admin',
+      '/seller',
+      '/cart',
+      '/orders',
+      '/wallet',
+      '/refunds',
+      '/chat',
+      '/disputes',
+      '/addresses',
+      '/action-center',
+      '/membership',
+      '/rewards',
+      '/storage/metrics',
+    ];
+
+    const isPrivate = privateSegments.some((seg) => req.path.includes(seg)) || Boolean(req.headers.authorization);
 
     const isPublicGet =
       req.method === 'GET' &&
+      !isPrivate &&
       publicCacheablePaths.some((p) => req.path.includes(p));
 
     if (isPublicGet) {
       res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
+      res.setHeader('Vary', 'Accept, Accept-Encoding, X-App-Platform');
     } else {
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
       res.setHeader('Pragma', 'no-cache');

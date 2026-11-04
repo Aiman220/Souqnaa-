@@ -293,6 +293,7 @@ async function runTests() {
   console.log('\n────────────────────────────────────────────────────────────');
   console.log('🎉 ALL SELLER PERFORMANCE SCORE ENGINE TESTS PASSED (9/9)');
   console.log('────────────────────────────────────────────────────────────\n');
+  process.exit(0);
 }
 
 runTests().catch((err) => {
