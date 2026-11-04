@@ -1,4 +1,5 @@
 import { prisma } from '../../database/prisma';
+import { redisService } from '../../database/redis';
 import { AppError } from '../../middleware/error.middleware';
 import { storageService } from '../../services/storage/storage.service';
 import {
@@ -339,6 +340,22 @@ export async function recomputeRatingSummary(tx: PrismaTx, productId: string): P
     where: { id: productId },
     data: { rating: averageRating, reviewCount: ratingCount },
   });
+
+  // Invalidate reviews cache asynchronously
+  invalidateReviewCache(productId).catch(() => {});
+}
+
+/**
+ * Invalidate all cached review summaries and public listing pages for a product.
+ */
+export async function invalidateReviewCache(productId: string): Promise<void> {
+  try {
+    await Promise.all([
+      redisService.del(`reviews:summary:${productId}`),
+      redisService.delPattern(`reviews:list:${productId}:*`),
+      redisService.del(`recommendations:product_page:${productId}`),
+    ]);
+  } catch (_) {}
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -695,6 +712,17 @@ export interface ListReviewsOptions {
 export async function listReviews(opts: ListReviewsOptions) {
   const limit = Math.min(opts.limit ?? 20, 50);
 
+  // Check public cache for unpaginated product review listings
+  const isPublicProductListing = Boolean(opts.productId && !opts.userId && !opts.sellerId && !opts.cursor);
+  const cacheKey = isPublicProductListing
+    ? `reviews:list:${opts.productId}:${opts.sort || 'NEWEST'}:${limit}:${opts.rating || 'all'}:${opts.verified !== undefined ? opts.verified : 'all'}:${opts.withMedia ? 'media' : 'all'}`
+    : null;
+
+  if (cacheKey) {
+    const cached = await redisService.getJson<any>(cacheKey);
+    if (cached) return cached;
+  }
+
   const where: any = {};
 
   if (opts.productId) where.productId = opts.productId;
@@ -752,13 +780,21 @@ export async function listReviews(opts: ListReviewsOptions) {
     };
   });
 
-  return { reviews: formatted, nextCursor, hasMore };
+  const result = { reviews: formatted, nextCursor, hasMore };
+  if (cacheKey) {
+    await redisService.setJson(cacheKey, result, 300); // 5 minutes cache
+  }
+  return result;
 }
 
 export async function getRatingSummary(productId: string) {
+  const cacheKey = `reviews:summary:${productId}`;
+  const cached = await redisService.getJson<any>(cacheKey);
+  if (cached) return cached;
+
   const summary = await prisma.productRatingSummary.findUnique({ where: { productId } });
   if (!summary) {
-    return {
+    const emptySummary = {
       averageRating: 0,
       ratingCount: 0,
       reviewCount: 0,
@@ -767,8 +803,10 @@ export async function getRatingSummary(productId: string) {
       photoReviewCount: 0,
       videoReviewCount: 0,
     };
+    await redisService.setJson(cacheKey, emptySummary, 600); // 10 minutes cache
+    return emptySummary;
   }
-  return {
+  const result = {
     averageRating: summary.averageRating,
     ratingCount: summary.ratingCount,
     reviewCount: summary.reviewCount,
@@ -783,6 +821,8 @@ export async function getRatingSummary(productId: string) {
     photoReviewCount: summary.photoReviewCount,
     videoReviewCount: summary.videoReviewCount,
   };
+  await redisService.setJson(cacheKey, result, 1800); // 30 minutes cache
+  return result;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

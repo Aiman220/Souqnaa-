@@ -118,7 +118,7 @@ function getPricingVersion(): string {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Simple in-memory quote cache (TTL 5 min, keyed by inputs)
+// In-memory quote & distance cache
 // ──────────────────────────────────────────────────────────────────────────────
 
 interface CacheEntry {
@@ -126,16 +126,27 @@ interface CacheEntry {
   expiresAt: number;
 }
 
+interface DistanceCacheEntry {
+  distanceKm: number;
+  durationMinutes: number;
+  expiresAt: number;
+}
+
 const _quoteCache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
+
+const _distanceCache = new Map<string, DistanceCacheEntry>();
+const DISTANCE_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour coordinate distance cache
 
 function buildCacheKey(
   sellerLat: number, sellerLng: number,
   customerLat: number, customerLng: number,
   isExpress: boolean, pricingVersion: string,
   slotFee: number = 0,
+  methodCode: string = '',
+  destAreaId: string = '',
 ): string {
-  return `${sellerLat.toFixed(5)},${sellerLng.toFixed(5)}|${customerLat.toFixed(5)},${customerLng.toFixed(5)}|express=${isExpress}|slotFee=${slotFee}|v=${pricingVersion}`;
+  return `${sellerLat.toFixed(4)},${sellerLng.toFixed(4)}|${customerLat.toFixed(4)},${customerLng.toFixed(4)}|express=${isExpress}|slotFee=${slotFee}|m=${methodCode}|dest=${destAreaId}|v=${pricingVersion}`;
 }
 
 function getCached(key: string): DeliveryQuoteResult | null {
@@ -157,27 +168,43 @@ function setCached(key: string, result: DeliveryQuoteResult): void {
 // ──────────────────────────────────────────────────────────────────────────────
 
 export class DeliveryFeeService {
+  private _zonesCache: { data: any[]; expiresAt: number } | null = null;
+
   /**
    * Calculate driving distance + duration between two coordinate pairs.
-   * Uses the configured RoutingProvider (Geoapify by default).
-   * §10: Uses driving route distance, not straight-line.
+   * Uses high-speed memory cache, bounded Geoapify routing with 1.5s timeout,
+   * and geodesic road distance fallback.
    */
   async calculateDistance(
     origin: GeoCoordinates,
     destination: GeoCoordinates,
   ): Promise<{ distanceKm: number; durationMinutes: number }> {
+    const distKey = `${origin.lat.toFixed(4)},${origin.lng.toFixed(4)}->${destination.lat.toFixed(4)},${destination.lng.toFixed(4)}`;
+    const cachedDist = _distanceCache.get(distKey);
+    if (cachedDist && Date.now() < cachedDist.expiresAt) {
+      return { distanceKm: cachedDist.distanceKm, durationMinutes: cachedDist.durationMinutes };
+    }
+
     try {
       if (geoService.isConfigured()) {
-        const route = await geoService.routing().getDrivingRoute(origin, destination);
+        // Strict 1500ms timeout for Geoapify routing so international latency never delays checkout
+        const routePromise = geoService.routing().getDrivingRoute(origin, destination);
+        const timeoutPromise = new Promise<null>((_, reject) =>
+          setTimeout(() => reject(new Error('GEO_TIMEOUT')), 1500)
+        );
+
+        const route = await Promise.race([routePromise, timeoutPromise]);
         if (route && route.distanceKm > 0) {
-          return {
+          const res = {
             distanceKm: route.distanceKm,
             durationMinutes: route.durationMinutes,
           };
+          _distanceCache.set(distKey, { ...res, expiresAt: Date.now() + DISTANCE_CACHE_TTL_MS });
+          return res;
         }
       }
-    } catch (e) {
-      console.warn('[DeliveryFeeService] Geoapify routing unavailable, falling back to geodesic road distance:', e);
+    } catch {
+      // Fallback quickly on timeout or error
     }
 
     // Geodesic driving distance with 1.25x road curvature factor
@@ -193,17 +220,14 @@ export class DeliveryFeeService {
     const distanceKm = Math.max(0.3, Math.round(directKm * 1.25 * 100) / 100);
     const durationMinutes = Math.round((distanceKm / 25) * 60) + 5;
 
-    return {
-      distanceKm,
-      durationMinutes,
-    };
+    const res = { distanceKm, durationMinutes };
+    _distanceCache.set(distKey, { ...res, expiresAt: Date.now() + DISTANCE_CACHE_TTL_MS });
+    return res;
   }
-
 
   /**
    * Determine which pricing zone a given distance falls into.
-   * Zones are loaded from DeliveryZonePricing, ordered by priority ascending.
-   * §11: Zone selection — uses configured zones, not hard-coded.
+   * Zones are loaded from DeliveryZonePricing with 60s in-memory caching.
    */
   async determineZone(distanceKm: number): Promise<{
     zoneId: string | null;
@@ -213,11 +237,15 @@ export class DeliveryFeeService {
     extraFeePerKm: number;
     currency: string;
   } | null> {
-    const zones = await prisma.deliveryZonePricing.findMany({
-      where: { isActive: true },
-      orderBy: { priority: 'asc' },
-    });
+    if (!this._zonesCache || Date.now() > this._zonesCache.expiresAt) {
+      const zones = await prisma.deliveryZonePricing.findMany({
+        where: { isActive: true },
+        orderBy: { priority: 'asc' },
+      });
+      this._zonesCache = { data: zones, expiresAt: Date.now() + 60_000 };
+    }
 
+    const zones = this._zonesCache.data;
     for (const zone of zones) {
       const minOk = distanceKm >= zone.minDistanceKm;
       const maxOk = zone.maxDistanceKm === null || distanceKm < zone.maxDistanceKm;
@@ -256,7 +284,17 @@ export class DeliveryFeeService {
     } = options;
 
     const pricingVersion = getPricingVersion();
-    const cacheKey = buildCacheKey(sellerLat, sellerLng, customerLat, customerLng, isExpress, pricingVersion, slotFee);
+    const cacheKey = buildCacheKey(
+      sellerLat,
+      sellerLng,
+      customerLat,
+      customerLng,
+      isExpress,
+      pricingVersion,
+      slotFee,
+      options.deliveryMethodCode || '',
+      options.destinationAreaId || '',
+    );
 
     // Check cache (§30)
     const cached = getCached(cacheKey);

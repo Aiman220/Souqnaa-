@@ -12,10 +12,16 @@ import { diversityRerankerService } from './diversity-reranker.service';
 import { contentSimilarityService } from './content-similarity.service';
 import { associationRulesService } from './association-rules.service';
 import { pythonBridgeService } from './python-bridge.service';
+import { featureStoreService } from './feature-store.service';
 import { recommendationConfigManager } from '../config/recommendation.config';
 import { formatProductsForClient, formatProductsWithCampaigns } from '../../../utils/product-formatter.util';
 
 export class RecommendationService {
+  private inFlightProductRecs = new Map<string, Promise<{
+    similar: any[];
+    frequentlyBoughtTogether: any[];
+    alsoViewed: any[];
+  }>>();
   /**
    * Home Recommendation Sections Generator (§4, §26, §27, §28, §39, §57, §58)
    * Progressive section loading with global deduplication across sections.
@@ -47,8 +53,8 @@ export class RecommendationService {
       (context.cartProductIds && context.cartProductIds.length > 0)
     );
 
-    // If generic guest with private signals, do not read from public cache to avoid leaking or seeing shared cache
-    if (!isGenericGuest || !hasPrivateSignals) {
+    // If generic guest with private signals or if forcing refresh, do not read from cache
+    if (!context.forceRefresh && (!isGenericGuest || !hasPrivateSignals)) {
       const cached = await redisService.getJson<RecommendationSectionDto[]>(cacheKey);
       if (cached && Array.isArray(cached) && cached.length > 0) {
         return cached;
@@ -56,7 +62,17 @@ export class RecommendationService {
     }
 
     const sections: RecommendationSectionDto[] = [];
-    const globalSeenProductIds = new Set<string>();
+
+    // Helper to ensure 100% unique products within each section
+    const uniqueById = (items: any[]) => {
+      const seen = new Set<string>();
+      return items.filter((item) => {
+        const id = item.id || item.productId;
+        if (!id || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+    };
 
     // ── 1. FOR YOU / PERSONALIZED SECTION ──────────────────────────────────
     const forYouCandidates = await candidateGeneratorService.generateCandidates(context, 100);
@@ -64,8 +80,7 @@ export class RecommendationService {
     const diversifiedForYou = diversityRerankerService.rerankAndDiversify(
       rankedForYou,
       context,
-      12,
-      globalSeenProductIds
+      12
     );
 
     // Check if real personalization was performed
@@ -75,7 +90,6 @@ export class RecommendationService {
       hasPersonalizedCandidates;
 
     if (diversifiedForYou.length > 0) {
-      diversifiedForYou.forEach((c) => globalSeenProductIds.add(c.productId));
       sections.push({
         id: 'rec_sec_for_you',
         type: RecommendationType.FOR_YOU,
@@ -94,7 +108,7 @@ export class RecommendationService {
           explanation: isPersonalized
             ? c.explanation
             : {
-                reason: 'Popular in SOUQNAA',
+                reason: 'Top Pick in SOUQNAA',
                 reasonAr: 'من المنتجات الأكثر طلباً في سوقناا',
                 sourceType: 'POPULAR_SELECTION',
               },
@@ -112,12 +126,10 @@ export class RecommendationService {
     const diversifiedTrending = diversityRerankerService.rerankAndDiversify(
       rankedTrending,
       context,
-      10,
-      globalSeenProductIds
+      10
     );
 
     if (diversifiedTrending.length > 0) {
-      diversifiedTrending.forEach((c) => globalSeenProductIds.add(c.productId));
       sections.push({
         id: 'rec_sec_trending',
         type: RecommendationType.TRENDING,
@@ -129,7 +141,11 @@ export class RecommendationService {
         items: diversifiedTrending.map((c) => ({
           product: c.product,
           score: c.finalScore,
-          explanation: c.explanation,
+          explanation: c.explanation || {
+            reason: 'Trending fast this week',
+            reasonAr: 'من المنتجات الأكثر رواجاً هذا الأسبوع',
+            sourceType: 'TRENDING',
+          },
           algorithm: 'trending_burst_decay',
         })),
         hasMore: true,
@@ -143,12 +159,10 @@ export class RecommendationService {
     const diversifiedPopular = diversityRerankerService.rerankAndDiversify(
       rankedPopular,
       context,
-      10,
-      globalSeenProductIds
+      10
     );
 
     if (diversifiedPopular.length > 0) {
-      diversifiedPopular.forEach((c) => globalSeenProductIds.add(c.productId));
       sections.push({
         id: 'rec_sec_popular',
         type: RecommendationType.POPULAR,
@@ -160,7 +174,11 @@ export class RecommendationService {
         items: diversifiedPopular.map((c) => ({
           product: c.product,
           score: c.finalScore,
-          explanation: c.explanation,
+          explanation: c.explanation || {
+            reason: 'Top rated and best selling',
+            reasonAr: 'الأعلى تقييماً والأكثر طلباً',
+            sourceType: 'POPULAR',
+          },
           algorithm: 'bayesian_popularity',
         })),
         hasMore: true,
@@ -169,32 +187,107 @@ export class RecommendationService {
     }
 
     // ── 4. BECAUSE YOU VIEWED... ──────────────────────────────────────────
-    if (context.recentViewedIds && context.recentViewedIds.length > 0) {
-      const lastViewedId = context.recentViewedIds[0];
+    // Determine the reference product ID:
+    let refProductId = context.recentViewedIds?.[0];
+    if (!refProductId && (context.userId || context.sessionId)) {
+      const recentEvt = await prisma.recommendationEvent.findFirst({
+        where: {
+          OR: [
+            ...(context.userId ? [{ userId: context.userId }] : []),
+            ...(context.sessionId ? [{ sessionId: context.sessionId }] : []),
+          ],
+          eventType: 'PRODUCT_VIEW',
+        },
+        orderBy: { timestamp: 'desc' },
+        select: { productId: true },
+      });
+      if (recentEvt?.productId) {
+        refProductId = recentEvt.productId;
+      }
+    }
+    // If still null, check user profile
+    if (!refProductId) {
+      const profile = await featureStoreService.buildUserProfile(context.userId, context.sessionId);
+      if (profile?.recentProductIds) {
+        try {
+          const ids = JSON.parse(profile.recentProductIds);
+          if (Array.isArray(ids) && ids.length > 0) refProductId = ids[0];
+        } catch (_) {}
+      }
+    }
+    // Fallback if brand new guest with zero history: pick #1 trending product as reference
+    let isBecauseViewedPersonalized = true;
+    if (!refProductId && trendingCands.length > 0) {
+      refProductId = trendingCands[0].productId;
+      isBecauseViewedPersonalized = false;
+    }
+
+    if (refProductId) {
       const sourceProduct = await prisma.product.findUnique({
-        where: { id: lastViewedId },
-        select: { nameEn: true, nameAr: true },
+        where: { id: refProductId },
+        select: { id: true, nameEn: true, nameAr: true, categoryId: true, storeId: true },
       });
 
-      const similarToLast = await contentSimilarityService.getSimilarProducts(lastViewedId, 8);
-      const filteredSimilar = similarToLast.filter((p) => !globalSeenProductIds.has(p.id));
+      if (sourceProduct) {
+        let similarProducts = await contentSimilarityService.getSimilarProducts(refProductId, 10);
+        // Exclude the source product itself
+        similarProducts = similarProducts.filter((p) => p.id !== refProductId);
 
-      if (filteredSimilar.length > 0) {
-        filteredSimilar.forEach((p) => globalSeenProductIds.add(p.id));
-        const itemName = sourceProduct?.nameEn || 'Recent Product';
-        const itemNameAr = sourceProduct?.nameAr || 'منتج شاهدته';
+        // If fewer than 4 items, backfill from the same category
+        if (similarProducts.length < 4 && sourceProduct.categoryId) {
+          const existingIds = new Set(similarProducts.map((p) => p.id));
+          existingIds.add(refProductId);
+          const categoryBackfill = await prisma.product.findMany({
+            where: {
+              categoryId: sourceProduct.categoryId,
+              id: { notIn: Array.from(existingIds) },
+              isActive: true,
+              isSuspended: false,
+              inventory: { quantity: { gt: 0 } },
+            },
+            include: {
+              store: true,
+              category: true,
+              images: true,
+              inventory: true,
+              ratingSummary: true,
+            },
+            orderBy: { soldCount: 'desc' },
+            take: 10 - similarProducts.length,
+          });
+          similarProducts.push(...categoryBackfill);
+        }
 
-        sections.push({
-          id: 'rec_sec_because_viewed',
-          type: RecommendationType.BECAUSE_YOU_VIEWED,
-          title: `Because You Viewed "${itemName}"`,
-          titleAr: `لأنك شاهدت "${itemNameAr}"`,
-          subtitle: 'Similar styles and complementary items',
-          subtitleAr: 'خيارات بديلة ومطابقة في نفس الفئة',
-          products: filteredSimilar,
-          hasMore: false,
-          algorithm: 'content_cosine_similarity',
-        });
+        if (similarProducts.length > 0) {
+          const itemName = sourceProduct.nameEn || 'Recent Product';
+          const itemNameAr = sourceProduct.nameAr || 'منتج مميز';
+
+          sections.push({
+            id: 'rec_sec_because_viewed',
+            type: RecommendationType.BECAUSE_YOU_VIEWED,
+            title: isBecauseViewedPersonalized
+              ? `Because You Viewed "${itemName}"`
+              : `Because Shoppers Love "${itemName}"`,
+            titleAr: isBecauseViewedPersonalized
+              ? `لأنك شاهدت "${itemNameAr}"`
+              : `لأن المتسوقين يفضلون "${itemNameAr}"`,
+            subtitle: 'Similar styles and complementary items',
+            subtitleAr: 'خيارات بديلة ومطابقة في نفس الفئة',
+            products: uniqueById(similarProducts),
+            items: similarProducts.map((p) => ({
+              product: p,
+              score: p.similarityScore || 0.8,
+              explanation: {
+                reason: `Similar to ${itemName}`,
+                reasonAr: `منتج مشابه لـ "${itemNameAr}"`,
+                sourceType: 'CONTENT_SIMILARITY',
+              },
+              algorithm: 'content_cosine_similarity',
+            })),
+            hasMore: false,
+            algorithm: 'content_cosine_similarity',
+          });
+        }
       }
     }
 
@@ -204,7 +297,6 @@ export class RecommendationService {
         isActive: true,
         isSuspended: false,
         inventory: { quantity: { gt: 0 } },
-        id: { notIn: Array.from(globalSeenProductIds) },
       },
       include: {
         store: true,
@@ -218,7 +310,6 @@ export class RecommendationService {
     });
 
     if (newArrivals.length > 0) {
-      newArrivals.forEach((p) => globalSeenProductIds.add(p.id));
       sections.push({
         id: 'rec_sec_new_arrivals',
         type: RecommendationType.NEW_ARRIVALS,
@@ -226,92 +317,175 @@ export class RecommendationService {
         titleAr: 'وصل حديثاً',
         subtitle: 'Fresh arrivals from certified sellers',
         subtitleAr: 'أحدث التشكيلات والمنتجات المضافة حديثاً',
-        products: newArrivals,
+        products: uniqueById(newArrivals),
+        items: newArrivals.map((p) => ({
+          product: p,
+          score: 1.0,
+          explanation: {
+            reason: 'Newly listed product',
+            reasonAr: 'وصل حديثاً إلى سوقناا',
+            sourceType: 'NEW_ARRIVALS',
+          },
+          algorithm: 'chronological_freshness',
+        })),
         hasMore: true,
         algorithm: 'chronological_freshness',
       });
     }
 
     // ── 6. SIMILAR PRODUCTS SECTION (Home) ───────────────────────────────────
-    const similarProducts = await prisma.product.findMany({
-      where: {
-        isActive: true,
-        isSuspended: false,
-        inventory: { quantity: { gt: 0 } },
-        id: { notIn: Array.from(globalSeenProductIds) },
-      },
-      include: {
-        store: true,
-        category: true,
-        images: true,
-        inventory: true,
-        ratingSummary: true,
-      },
-      orderBy: { rating: 'desc' },
-      take: 10,
-    });
-
-    if (similarProducts.length > 0) {
-      similarProducts.forEach((p) => globalSeenProductIds.add(p.id));
-      sections.push({
-        id: 'rec_sec_similar_products',
-        type: RecommendationType.SIMILAR_PRODUCTS,
-        title: 'Similar Products',
-        titleAr: 'منتجات مشابهة قد تعجبك',
-        subtitle: 'Alternatives and matching styles curated for you',
-        subtitleAr: 'تشكيلة مميزة من المنتجات المشابهة لبحثك واهتماماتك',
-        products: similarProducts,
-        hasMore: true,
-        algorithm: 'content_category_matching',
+    // Focal point: 2nd viewed item, or category focal, or top rated
+    let similarFocalId = context.recentViewedIds?.[1] || context.recentViewedIds?.[0];
+    if (!similarFocalId || similarFocalId === refProductId) {
+      // Pick a top product from a different category or store
+      const altProduct = await prisma.product.findFirst({
+        where: {
+          isActive: true,
+          isSuspended: false,
+          inventory: { quantity: { gt: 0 } },
+          ...(refProductId ? { id: { not: refProductId } } : {}),
+        },
+        orderBy: [{ rating: 'desc' }, { soldCount: 'desc' }],
+        select: { id: true, categoryId: true },
       });
+      if (altProduct) similarFocalId = altProduct.id;
+    }
+
+    if (similarFocalId) {
+      let matchingSimilar = await contentSimilarityService.getSimilarProducts(similarFocalId, 10);
+      matchingSimilar = matchingSimilar.filter((p) => p.id !== similarFocalId);
+
+      if (matchingSimilar.length < 4) {
+        const simRef = await prisma.product.findUnique({
+          where: { id: similarFocalId },
+          select: { categoryId: true },
+        });
+        if (simRef?.categoryId) {
+          const catItems = await prisma.product.findMany({
+            where: {
+              categoryId: simRef.categoryId,
+              id: { not: similarFocalId },
+              isActive: true,
+              isSuspended: false,
+              inventory: { quantity: { gt: 0 } },
+            },
+            include: {
+              store: true,
+              category: true,
+              images: true,
+              inventory: true,
+              ratingSummary: true,
+            },
+            orderBy: { rating: 'desc' },
+            take: 10 - matchingSimilar.length,
+          });
+          matchingSimilar.push(...catItems);
+        }
+      }
+
+      if (matchingSimilar.length > 0) {
+        sections.push({
+          id: 'rec_sec_similar_products',
+          type: RecommendationType.SIMILAR_PRODUCTS,
+          title: 'Similar Products You May Like',
+          titleAr: 'منتجات مشابهة قد تعجبك',
+          subtitle: 'Alternatives and matching styles curated for you',
+          subtitleAr: 'تشكيلة مميزة من المنتجات المشابهة لبحثك واهتماماتك',
+          products: uniqueById(matchingSimilar),
+          items: matchingSimilar.map((p) => ({
+            product: p,
+            score: p.similarityScore || 0.75,
+            explanation: {
+              reason: 'Matches your style and preferences',
+              reasonAr: 'خيارات مطابقة ومميزة تناسب ذوقك',
+              sourceType: 'SIMILAR_STYLES',
+            },
+            algorithm: 'content_category_matching',
+          })),
+          hasMore: true,
+          algorithm: 'content_category_matching',
+        });
+      }
     }
 
     // ── 7. FREQUENTLY BOUGHT TOGETHER SECTION (Home) ─────────────────────────
-    const fbtProducts = await prisma.product.findMany({
-      where: {
-        isActive: true,
-        isSuspended: false,
-        inventory: { quantity: { gt: 0 } },
-        id: { notIn: Array.from(globalSeenProductIds) },
-      },
-      include: {
-        store: true,
-        category: true,
-        images: true,
-        inventory: true,
-        ratingSummary: true,
-      },
-      orderBy: { soldCount: 'desc' },
-      take: 10,
-    });
+    let fbtFocalId =
+      context.cartProductIds?.[0] ||
+      context.recentViewedIds?.[0] ||
+      diversifiedPopular[0]?.productId ||
+      refProductId;
 
-    if (fbtProducts.length > 0) {
-      fbtProducts.forEach((p) => globalSeenProductIds.add(p.id));
-      sections.push({
-        id: 'rec_sec_frequently_bought',
-        type: RecommendationType.FREQUENTLY_BOUGHT_TOGETHER,
-        title: 'Frequently Bought Together',
-        titleAr: 'غالباً ما يتم شراؤها معاً',
-        subtitle: 'Top companion product combinations',
-        subtitleAr: 'حزم ومجموعات متوافقة يفضل المتسوقون شراءها معاً',
-        products: fbtProducts,
-        hasMore: true,
-        algorithm: 'frequent_itemsets_apriori',
-      });
+    if (fbtFocalId) {
+      let fbtList = await associationRulesService.getFrequentlyBoughtTogether(fbtFocalId, 10);
+      fbtList = fbtList.filter((p) => p.id !== fbtFocalId);
+
+      if (fbtList.length < 4) {
+        const focalProduct = await prisma.product.findUnique({
+          where: { id: fbtFocalId },
+          select: { storeId: true, categoryId: true },
+        });
+        const existingFbtIds = new Set(fbtList.map((p) => p.id));
+        existingFbtIds.add(fbtFocalId);
+
+        const complementaryBackfill = await prisma.product.findMany({
+          where: {
+            OR: [
+              ...(focalProduct?.storeId ? [{ storeId: focalProduct.storeId }] : []),
+              ...(focalProduct?.categoryId ? [{ categoryId: focalProduct.categoryId }] : []),
+            ],
+            id: { notIn: Array.from(existingFbtIds) },
+            isActive: true,
+            isSuspended: false,
+            inventory: { quantity: { gt: 0 } },
+          },
+          include: {
+            store: true,
+            category: true,
+            images: true,
+            inventory: true,
+            ratingSummary: true,
+          },
+          orderBy: { soldCount: 'desc' },
+          take: 10 - fbtList.length,
+        });
+        fbtList.push(...complementaryBackfill);
+      }
+
+      if (fbtList.length > 0) {
+        sections.push({
+          id: 'rec_sec_frequently_bought',
+          type: RecommendationType.FREQUENTLY_BOUGHT_TOGETHER,
+          title: 'Frequently Bought Together',
+          titleAr: 'غالباً ما يتم شراؤها معاً',
+          subtitle: 'Top companion product combinations',
+          subtitleAr: 'حزم ومجموعات متوافقة يفضل المتسوقون شراءها معاً',
+          products: uniqueById(fbtList),
+          items: fbtList.map((p) => ({
+            product: p,
+            score: p.fbtScore || 0.85,
+            explanation: {
+              reason: 'Frequently paired by shoppers',
+              reasonAr: 'حزم ومجموعات متوافقة يفضل المتسوقون شراءها معاً',
+              sourceType: 'FREQUENTLY_BOUGHT_TOGETHER',
+            },
+            algorithm: 'frequent_itemsets_apriori',
+          })),
+          hasMore: true,
+          algorithm: 'frequent_itemsets_apriori',
+        });
+      }
     }
 
     // ── 8. BASED ON CART SECTION ──────────────────────────────────────────
     if (context.cartProductIds && context.cartProductIds.length > 0) {
       const cartComplementary: any[] = [];
+      const cartSet = new Set(context.cartProductIds);
       for (const cpid of context.cartProductIds.slice(0, 3)) {
         const fbt = await associationRulesService.getFrequentlyBoughtTogether(cpid, 4);
         cartComplementary.push(...fbt);
       }
-      const filteredCartRecs = cartComplementary.filter(
-        (p) => !globalSeenProductIds.has(p.id) && !context.cartProductIds!.includes(p.id)
-      );
+      const filteredCartRecs = cartComplementary.filter((p) => !cartSet.has(p.id));
       if (filteredCartRecs.length > 0) {
-        filteredCartRecs.forEach((p) => globalSeenProductIds.add(p.id));
         sections.push({
           id: 'rec_sec_based_on_cart',
           type: RecommendationType.BASED_ON_CART,
@@ -319,7 +493,17 @@ export class RecommendationService {
           titleAr: 'مكملات مميزة لسلة تسوقك',
           subtitle: 'Items customers often add with your selections',
           subtitleAr: 'منتجات يُفضل المتسوقون إضافتها مع محتويات سلتك',
-          products: filteredCartRecs.slice(0, 10),
+          products: uniqueById(filteredCartRecs).slice(0, 10),
+          items: filteredCartRecs.map((p) => ({
+            product: p,
+            score: p.fbtScore || 0.85,
+            explanation: {
+              reason: 'Pairs well with your cart',
+              reasonAr: 'مكمل رائع لمحتويات سلتك',
+              sourceType: 'CART_COMPLEMENTARY',
+            },
+            algorithm: 'cart_complementary_fbt',
+          })),
           hasMore: false,
           algorithm: 'cart_complementary_fbt',
         });
@@ -389,6 +573,7 @@ export class RecommendationService {
   /**
    * Product Details Recommendations (§29, §83)
    * Returns: similar, frequentlyBoughtTogether, alsoViewed
+   * Deduplicates concurrent in-flight executions and caches assembled payload in Redis.
    */
   async getProductRecommendations(
     productId: string,
@@ -405,102 +590,126 @@ export class RecommendationService {
     const cached = await redisService.getJson<any>(cacheKey);
     if (cached) return cached;
 
-    if (serviceableStoreIds !== undefined && serviceableStoreIds.length === 0) {
-      return { similar: [], frequentlyBoughtTogether: [], alsoViewed: [] };
+    // Deduplicate in-flight requests for the same product to eliminate duplicate heavy calculations
+    if (this.inFlightProductRecs.has(cacheKey)) {
+      return this.inFlightProductRecs.get(cacheKey)!;
     }
 
-    const storeIdSet = serviceableStoreIds ? new Set(serviceableStoreIds) : null;
+    const task = (async () => {
+      try {
+        if (serviceableStoreIds !== undefined && serviceableStoreIds.length === 0) {
+          return { similar: [], frequentlyBoughtTogether: [], alsoViewed: [] };
+        }
 
-    let [similar, frequentlyBoughtTogether] = await Promise.all([
-      contentSimilarityService.getSimilarProducts(productId, 12),
-      associationRulesService.getFrequentlyBoughtTogether(productId, 6),
-    ]);
+        const storeIdSet = serviceableStoreIds ? new Set(serviceableStoreIds) : null;
 
-    if (storeIdSet) {
-      similar = similar.filter((p: any) => storeIdSet.has(p.storeId || p.store?.id));
-      frequentlyBoughtTogether = frequentlyBoughtTogether.filter((p: any) => storeIdSet.has(p.storeId || p.store?.id));
-    }
+        let [similar, frequentlyBoughtTogether] = await Promise.all([
+          contentSimilarityService.getSimilarProducts(productId, 12),
+          associationRulesService.getFrequentlyBoughtTogether(productId, 6),
+        ]);
 
-    // Also Viewed: other items in same category
-    const target = await prisma.product.findUnique({
-      where: { id: productId },
-      select: { categoryId: true },
-    });
+        if (storeIdSet) {
+          similar = similar.filter((p: any) => storeIdSet.has(p.storeId || p.store?.id));
+          frequentlyBoughtTogether = frequentlyBoughtTogether.filter((p: any) => storeIdSet.has(p.storeId || p.store?.id));
+        }
 
-    let alsoViewed: any[] = [];
-    if (target?.categoryId) {
-      const alsoWhere: any = {
-        categoryId: target.categoryId,
-        id: { not: productId },
-        isActive: true,
-        isSuspended: false,
-      };
-      if (storeIdSet) {
-        alsoWhere.storeId = { in: Array.from(storeIdSet) };
+        // Also Viewed: other items in same category
+        const target = await prisma.product.findUnique({
+          where: { id: productId },
+          select: { categoryId: true },
+        });
+
+        let alsoViewed: any[] = [];
+        if (target?.categoryId) {
+          const alsoWhere: any = {
+            categoryId: target.categoryId,
+            id: { not: productId },
+            isActive: true,
+            isSuspended: false,
+          };
+          if (storeIdSet) {
+            alsoWhere.storeId = { in: Array.from(storeIdSet) };
+          }
+          alsoViewed = await prisma.product.findMany({
+            where: alsoWhere,
+            include: {
+              store: true,
+              category: true,
+              images: true,
+              inventory: true,
+              ratingSummary: true,
+            },
+            orderBy: { soldCount: 'desc' },
+            take: 10,
+          });
+        }
+
+        // Fallback: If similar products calculation yielded empty, use alsoViewed or popular category products
+        let finalSimilar = similar && similar.length > 0 ? similar : alsoViewed;
+        if (!finalSimilar || finalSimilar.length === 0) {
+          const fallbackWhere: any = {
+            id: { not: productId },
+            isActive: true,
+            isSuspended: false,
+          };
+          if (storeIdSet) {
+            fallbackWhere.storeId = { in: Array.from(storeIdSet) };
+          }
+          finalSimilar = await prisma.product.findMany({
+            where: fallbackWhere,
+            include: {
+              store: true,
+              category: true,
+              images: true,
+              inventory: true,
+              ratingSummary: true,
+            },
+            orderBy: { soldCount: 'desc' },
+            take: 10,
+          });
+        }
+
+        let finalFbt = frequentlyBoughtTogether && frequentlyBoughtTogether.length > 0
+          ? frequentlyBoughtTogether
+          : finalSimilar.slice(0, 4);
+
+        const targetAlsoViewed = alsoViewed.length > 0 ? alsoViewed : finalSimilar;
+
+        // Batch resolve active campaign badges across unique candidate products in one pass
+        const uniqueProductMap = new Map<string, any>();
+        for (const p of [...finalSimilar, ...finalFbt, ...targetAlsoViewed]) {
+          if (p?.id && !uniqueProductMap.has(p.id)) {
+            uniqueProductMap.set(p.id, p);
+          }
+        }
+        const formattedUnique = await formatProductsWithCampaigns(Array.from(uniqueProductMap.values()));
+        const lookup = new Map<string, any>(formattedUnique.map((p: any) => [p.id, p]));
+
+        let formattedSimilar = finalSimilar.map((p) => lookup.get(p.id) || p);
+        let formattedFbt = finalFbt.map((p) => lookup.get(p.id) || p);
+        let formattedAlsoViewed = targetAlsoViewed.map((p) => lookup.get(p.id) || p);
+
+        if (storeIdSet) {
+          formattedSimilar = formattedSimilar.filter((p: any) => storeIdSet.has(p.storeId || p.store?.id));
+          formattedFbt = formattedFbt.filter((p: any) => storeIdSet.has(p.storeId || p.store?.id));
+          formattedAlsoViewed = formattedAlsoViewed.filter((p: any) => storeIdSet.has(p.storeId || p.store?.id));
+        }
+
+        const payload = {
+          similar: formattedSimilar,
+          frequentlyBoughtTogether: formattedFbt,
+          alsoViewed: formattedAlsoViewed,
+        };
+
+        await redisService.setJson(cacheKey, payload, 3600); // 1 hour cache
+        return payload;
+      } finally {
+        this.inFlightProductRecs.delete(cacheKey);
       }
-      alsoViewed = await prisma.product.findMany({
-        where: alsoWhere,
-        include: {
-          store: true,
-          category: true,
-          images: true,
-          inventory: true,
-          ratingSummary: true,
-        },
-        orderBy: { soldCount: 'desc' },
-        take: 10,
-      });
-    }
+    })();
 
-    // Fallback: If similar products calculation yielded empty, use alsoViewed or popular category products
-    let finalSimilar = similar && similar.length > 0 ? similar : alsoViewed;
-    if (!finalSimilar || finalSimilar.length === 0) {
-      const fallbackWhere: any = {
-        id: { not: productId },
-        isActive: true,
-        isSuspended: false,
-      };
-      if (storeIdSet) {
-        fallbackWhere.storeId = { in: Array.from(storeIdSet) };
-      }
-      finalSimilar = await prisma.product.findMany({
-        where: fallbackWhere,
-        include: {
-          store: true,
-          category: true,
-          images: true,
-          inventory: true,
-          ratingSummary: true,
-        },
-        orderBy: { soldCount: 'desc' },
-        take: 10,
-      });
-    }
-
-    let finalFbt = frequentlyBoughtTogether && frequentlyBoughtTogether.length > 0
-      ? frequentlyBoughtTogether
-      : finalSimilar.slice(0, 4);
-
-    let [formattedSimilar, formattedFbt, formattedAlsoViewed] = await Promise.all([
-      formatProductsWithCampaigns(finalSimilar),
-      formatProductsWithCampaigns(finalFbt),
-      formatProductsWithCampaigns(alsoViewed.length > 0 ? alsoViewed : finalSimilar),
-    ]);
-
-    if (storeIdSet) {
-      formattedSimilar = formattedSimilar.filter((p: any) => storeIdSet.has(p.storeId || p.store?.id));
-      formattedFbt = formattedFbt.filter((p: any) => storeIdSet.has(p.storeId || p.store?.id));
-      formattedAlsoViewed = formattedAlsoViewed.filter((p: any) => storeIdSet.has(p.storeId || p.store?.id));
-    }
-
-    const payload = {
-      similar: formattedSimilar,
-      frequentlyBoughtTogether: formattedFbt,
-      alsoViewed: formattedAlsoViewed,
-    };
-
-    await redisService.setJson(cacheKey, payload, 3600); // 1 hour cache
-    return payload;
+    this.inFlightProductRecs.set(cacheKey, task);
+    return task;
   }
 
   /**

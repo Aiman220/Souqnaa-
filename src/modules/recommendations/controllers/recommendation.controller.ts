@@ -19,6 +19,9 @@ export class RecommendationController {
 
       const limit = parseInt((req.query.limit as string) || '10', 10);
       const cursor = (req.query.cursor as string) || undefined;
+      const forceRefresh =
+        req.query.forceRefresh === 'true' ||
+        req.query.nocache === 'true';
 
       let recentViewedIds: string[] = [];
       if (req.query.recentViewedIds) {
@@ -63,6 +66,7 @@ export class RecommendationController {
         serviceableStoreIds,
         platform: (req.headers['x-platform'] as string) || 'flutter_customer',
         appVersion: (req.headers['x-app-version'] as string) || '1.0.0',
+        forceRefresh,
       };
 
       const sections = await recommendationService.getHomeSections(context);

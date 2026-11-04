@@ -283,7 +283,39 @@ export class DeliveryQuoteService {
       }
     }
 
-    // 2. For each seller, get store coordinates + evaluate availability + calculate quote
+    // 2. Batch fetch stores and coordinates to eliminate N+1 database queries
+    const storeIds = Array.from(new Set(sellerOrders.map((so) => so.storeId).filter(Boolean)));
+    const sellerIds = Array.from(new Set(sellerOrders.map((so) => so.sellerId).filter(Boolean)));
+
+    const stores = await prisma.store.findMany({
+      where: {
+        OR: [
+          ...(storeIds.length > 0 ? [{ id: { in: storeIds } }] : []),
+          ...(sellerIds.length > 0 ? [{ sellerId: { in: sellerIds } }] : []),
+        ],
+      },
+      select: {
+        id: true,
+        sellerId: true,
+        name: true,
+        latitude: true,
+        longitude: true,
+        isOpen: true,
+        openingTime: true,
+        closingTime: true,
+        acceptsExpress: true,
+        acceptsScheduled: true,
+        busyMode: true,
+        closedReason: true,
+      },
+    });
+
+    const storeMap = new Map<string, any>();
+    for (const s of stores) {
+      storeMap.set(s.id, s);
+      if (s.sellerId) storeMap.set(s.sellerId, s);
+    }
+
     const storesStatusList: StoreAvailabilityStatus[] = [];
 
     const sellerQuotePromises = sellerOrders.map(async (soInput) => {
@@ -299,10 +331,7 @@ export class DeliveryQuoteService {
         isRemoteArea,
         isSpecialHandling,
       } = soInput;
-      let store = storeId ? await prisma.store.findUnique({ where: { id: storeId } }) : null;
-      if (!store && sellerId) {
-        store = await prisma.store.findFirst({ where: { sellerId } });
-      }
+      const store = (storeId ? storeMap.get(storeId) : null) || (sellerId ? storeMap.get(sellerId) : null);
 
       if (store) {
         const status = evaluateStoreAvailability(store);
@@ -311,14 +340,6 @@ export class DeliveryQuoteService {
 
       let storeLat = store?.latitude;
       let storeLng = store?.longitude;
-
-      if ((!storeLat || !storeLng) && store) {
-        const storeAddr = await prisma.address.findFirst({ where: { storeId: store.id } });
-        if (storeAddr?.latitude && storeAddr?.longitude) {
-          storeLat = storeAddr.latitude;
-          storeLng = storeAddr.longitude;
-        }
-      }
 
       // Default to city center coordinates if not configured
       storeLat = storeLat ?? 15.3500;

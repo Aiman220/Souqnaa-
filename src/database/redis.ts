@@ -133,6 +133,44 @@ class RedisService {
     }
   }
 
+  /**
+   * Invalidate all keys matching a glob-style pattern (e.g. 'reviews:product:123:*').
+   * Clears matching keys from L1 memory and uses Redis SCAN stream for L2.
+   */
+  async delPattern(pattern: string): Promise<void> {
+    // 1. Invalidate matching L1 memory keys
+    const regexPattern = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
+    for (const key of this.memoryCache.keys()) {
+      if (regexPattern.test(key)) {
+        this.memoryCache.delete(key);
+      }
+    }
+    for (const key of this.memorySets.keys()) {
+      if (regexPattern.test(key)) {
+        this.memorySets.delete(key);
+      }
+    }
+    for (const key of this.memoryCounters.keys()) {
+      if (regexPattern.test(key)) {
+        this.memoryCounters.delete(key);
+      }
+    }
+
+    // 2. Invalidate matching L2 Redis keys via non-blocking SCAN
+    if (this.isConnected && this.client) {
+      try {
+        const stream = this.client.scanStream({ match: pattern, count: 100 });
+        stream.on('data', async (keys: string[]) => {
+          if (keys && keys.length > 0) {
+            const pipeline = this.client!.pipeline();
+            keys.forEach((k) => pipeline.del(k));
+            await pipeline.exec().catch(() => {});
+          }
+        });
+      } catch (_) {}
+    }
+  }
+
   async getJson<T>(key: string): Promise<T | null> {
     const raw = await this.get(key);
     if (!raw) return null;

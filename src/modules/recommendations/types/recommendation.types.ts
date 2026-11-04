@@ -72,6 +72,7 @@ export interface RecommendationContext {
   cursor?: string;
   cityId?: string;
   serviceableStoreIds?: string[];
+  forceRefresh?: boolean;
 }
 
 export interface CandidateProduct {

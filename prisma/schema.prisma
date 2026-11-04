@@ -1398,6 +1398,7 @@ model Product {
   @@index([isActive, soldCount(sort: Desc)])
   @@index([isActive, createdAt(sort: Desc)])
   @@index([categoryId, isActive, createdAt(sort: Desc)])
+  @@index([categoryId, isActive, soldCount(sort: Desc)])
   @@index([storeId, isActive, createdAt(sort: Desc)])
   @@index([isActive, isFeatured, soldCount(sort: Desc)])
   @@index([isActive, price])
@@ -2614,6 +2615,8 @@ model ProductReview {
 
   @@unique([userId, orderItemId])  // One review per purchase
   @@index([productId, status, createdAt])
+  @@index([productId, status, helpfulCount(sort: Desc)])
+  @@index([productId, status, rating(sort: Desc)])
   @@index([productId, rating, status])
   @@index([userId, createdAt])
   @@index([sellerId, createdAt])
