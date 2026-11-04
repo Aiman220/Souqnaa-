@@ -74,7 +74,49 @@ export class RecommendationService {
       });
     };
 
-    // ── 1. FOR YOU / PERSONALIZED SECTION ──────────────────────────────────
+    // ── 1. NEW ARRIVALS SECTION (وصل حديثاً — First Section) ───────────────
+    const newArrivals = await prisma.product.findMany({
+      where: {
+        isActive: true,
+        isSuspended: false,
+        inventory: { quantity: { gt: 0 } },
+      },
+      include: {
+        store: true,
+        category: true,
+        images: true,
+        inventory: true,
+        ratingSummary: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    });
+
+    if (newArrivals.length > 0) {
+      sections.push({
+        id: 'rec_sec_new_arrivals',
+        type: RecommendationType.NEW_ARRIVALS,
+        title: 'New Arrivals',
+        titleAr: 'وصل حديثاً',
+        subtitle: 'Fresh arrivals from certified sellers',
+        subtitleAr: 'أحدث التشكيلات والمنتجات المضافة حديثاً',
+        products: uniqueById(newArrivals),
+        items: newArrivals.map((p) => ({
+          product: p,
+          score: 1.0,
+          explanation: {
+            reason: 'Newly listed product',
+            reasonAr: 'وصل حديثاً إلى سوقناا',
+            sourceType: 'NEW_ARRIVALS',
+          },
+          algorithm: 'chronological_freshness',
+        })),
+        hasMore: true,
+        algorithm: 'chronological_freshness',
+      });
+    }
+
+    // ── 2. FOR YOU / PERSONALIZED SECTION ──────────────────────────────────
     const forYouCandidates = await candidateGeneratorService.generateCandidates(context, 100);
     const rankedForYou = await recommendationRankerV2.rankCandidates(forYouCandidates, context);
     const diversifiedForYou = diversityRerankerService.rerankAndDiversify(
@@ -289,48 +331,6 @@ export class RecommendationService {
           });
         }
       }
-    }
-
-    // ── 5. NEW ARRIVALS ───────────────────────────────────────────────────
-    const newArrivals = await prisma.product.findMany({
-      where: {
-        isActive: true,
-        isSuspended: false,
-        inventory: { quantity: { gt: 0 } },
-      },
-      include: {
-        store: true,
-        category: true,
-        images: true,
-        inventory: true,
-        ratingSummary: true,
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 10,
-    });
-
-    if (newArrivals.length > 0) {
-      sections.push({
-        id: 'rec_sec_new_arrivals',
-        type: RecommendationType.NEW_ARRIVALS,
-        title: 'New Arrivals',
-        titleAr: 'وصل حديثاً',
-        subtitle: 'Fresh arrivals from certified sellers',
-        subtitleAr: 'أحدث التشكيلات والمنتجات المضافة حديثاً',
-        products: uniqueById(newArrivals),
-        items: newArrivals.map((p) => ({
-          product: p,
-          score: 1.0,
-          explanation: {
-            reason: 'Newly listed product',
-            reasonAr: 'وصل حديثاً إلى سوقناا',
-            sourceType: 'NEW_ARRIVALS',
-          },
-          algorithm: 'chronological_freshness',
-        })),
-        hasMore: true,
-        algorithm: 'chronological_freshness',
-      });
     }
 
     // ── 6. SIMILAR PRODUCTS SECTION (Home) ───────────────────────────────────
