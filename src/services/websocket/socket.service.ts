@@ -636,7 +636,7 @@ export class SocketService {
             socket.join(`conversation:${supConv.id}`);
             socket.join(`conversation:${supConv.conversationId}`);
 
-            // 1. Direct unread badge clearance upon opening chat room
+            // 1. Direct unread badge clearance upon opening support chat room
             const isAgent = userRole === 'ADMIN' || (await prisma.supportAgent.findUnique({ where: { adminUserId: userId } })) !== null;
             const isSeller = userRole === 'SELLER';
             const updateField = isAgent
@@ -655,32 +655,8 @@ export class SocketService {
               data: { lastReadAt: new Date() },
             });
 
-            await prisma.message.updateMany({
-              where: {
-                conversationId: supConv.conversationId,
-                senderId: { not: userId },
-                isRead: false,
-              },
-              data: { isRead: true },
-            });
-
-            const readData = {
-              conversationId: supConv.id,
-              baseConversationId: supConv.conversationId,
-              readByUserId: userId,
-              readAt: new Date().toISOString(),
-            };
-            this.emitToConversation(supConv.conversationId, 'support:messages:read', readData);
-            if (supConv.id !== supConv.conversationId) {
-              this.emitToConversation(supConv.id, 'support:messages:read', readData);
-            }
-            this.emitToConversation(supConv.conversationId, 'message:read', readData);
-            if (supConv.id !== supConv.conversationId) {
-              this.emitToConversation(supConv.id, 'message:read', readData);
-            }
-
-            this.emitToUser(userId, 'support:conversation:read', { conversationId: supConv.id });
-            this.emitGlobal('support:queue:updated', { action: 'read', conversationId: supConv.id });
+            // Room join must NOT mark messages read or emit premature blue ticks.
+            // Read receipts are strictly triggered by explicit recipient read activity (message:seen or /read).
 
             // 2. Real join when supporter enters the chat room
             if (isAgent && (supConv.status === SupportConversationStatus.QUEUED || !supConv.assignedAgentId)) {
@@ -810,47 +786,9 @@ export class SocketService {
               this.conversationMetaCache.set(supConv.conversationId, cachedMeta);
             }
 
-            // Update last read timestamp for this member
-            await prisma.conversationMember.updateMany({
-              where: { conversationId: baseConvId, userId },
-              data: { lastReadAt: new Date() },
-            });
-
-            // Mark any unread messages sent by others in this conversation as read
-            const unreadUpdated = await prisma.message.updateMany({
-              where: {
-                conversationId: baseConvId,
-                senderId: { not: userId },
-                isRead: false,
-              },
-              data: { isRead: true },
-            });
-
-            if (unreadUpdated.count > 0 || supConv) {
-              const readData = {
-                conversationId: baseConvId,
-                altConversationId: supConv ? supConv.id : undefined,
-                baseConversationId: supConv ? supConv.conversationId : baseConvId,
-                readByUserId: userId,
-                userId,
-                readAt: new Date().toISOString(),
-              };
-              this.emitToConversation(baseConvId, 'messages:read', readData);
-              this.emitToConversation(baseConvId, 'message:read', readData);
-              this.emitToConversation(baseConvId, 'support:messages:read', readData);
-              if (supConv && supConv.id !== baseConvId) {
-                this.emitToConversation(supConv.id, 'messages:read', readData);
-                this.emitToConversation(supConv.id, 'message:read', readData);
-                this.emitToConversation(supConv.id, 'support:messages:read', readData);
-              }
-              for (const member of conv.members) {
-                if (member.userId !== userId) {
-                  this.emitToUser(member.userId, 'messages:read', readData);
-                  this.emitToUser(member.userId, 'message:read', readData);
-                  this.emitToUser(member.userId, 'support:messages:read', readData);
-                }
-              }
-            }
+            // Room join caches meta and joins socket room for broadcasts.
+            // Room subscription must NEVER mark messages read or emit premature blue ticks.
+            // Authoritative read receipts are emitted strictly upon recipient viewing via message:seen or /read.
 
             for (const member of conv.members) {
               if (member.userId !== userId) {
@@ -1250,6 +1188,21 @@ export class SocketService {
 
           const convIds = Array.from(new Set([inputId, baseConvId, ...(altConvId ? [altConvId] : [])]));
 
+          // AUTHORIZATION CHECK: User must be a member of the conversation, or authorized support requester/agent
+          const isMember = await prisma.conversationMember.findFirst({
+            where: { conversationId: { in: convIds }, userId },
+          });
+          const userRole = socket.data.user?.role;
+          const isSupportAuth = supConv && (
+            supConv.requesterId === userId ||
+            supConv.assignedAgent?.adminUserId === userId ||
+            userRole === 'ADMIN'
+          );
+          if (!isMember && !isSupportAuth && userRole !== 'ADMIN') {
+            console.warn(`[Socket.IO] Unauthorized message:seen attempt from user ${userId} for conversation ${inputId}`);
+            return;
+          }
+
           await prisma.conversationMember.updateMany({
             where: { conversationId: { in: convIds }, userId },
             data: { lastReadAt: new Date() },
@@ -1456,11 +1409,6 @@ export class SocketService {
 
           const roomIdsToCheck = Array.from(new Set([conversationId, ...(supConvForCheck ? [supConvForCheck.id, supConvForCheck.conversationId] : [])]));
 
-          // Check if the other member is already viewing the conversation room (support or regular)
-          const isRecipientViewing = allMembers.some(
-            (m) => m.userId !== userId && roomIdsToCheck.some((rid) => this.isUserInConversation(m.userId, rid))
-          );
-
           const created = await prisma.$transaction(async (tx) => {
             const msg = await tx.message.create({
               data: {
@@ -1471,7 +1419,7 @@ export class SocketService {
                 attachmentUrl: attachmentUrl || null,
                 metadata: metadataStr,
                 clientMessageId: clientMessageId || null,
-                isRead: isRecipientViewing,
+                isRead: false,
               },
               include: {
                 sender: { select: { id: true, firstName: true, lastName: true, avatar: true } },
@@ -1489,8 +1437,8 @@ export class SocketService {
             return msg;
           });
 
-          const isDelivered = isRecipientViewing;
-          const deliveryStatus = isRecipientViewing ? 'read' : 'sent';
+          // Newly sent messages start with 'sent' status (1 gray check).
+          // Delivery (2 gray checks) and Read (2 blue checks) are only confirmed by recipient events.
           const norm = {
             id: String(created.id),
             conversationId: String(created.conversationId),
@@ -1504,39 +1452,17 @@ export class SocketService {
             fileUrl: created.type === 'file' ? created.attachmentUrl : null,
             fileName: created.type === 'file' ? created.text : null,
             fileSize: null,
-            isRead: Boolean(created.isRead),
-            isDelivered,
-            deliveryStatus,
-            deliveredAt: isRecipientViewing ? new Date().toISOString() : null,
-            readAt: isRecipientViewing ? new Date().toISOString() : null,
+            isRead: false,
+            isDelivered: false,
+            deliveryStatus: 'sent',
+            deliveredAt: null,
+            readAt: null,
             reactions: {},
             sender: created.sender || null,
           };
 
           // Broadcast to conversation room (single canonical event 'message:new')
           this.io.to(`conversation:${conversationId}`).emit('message:new', norm);
-
-          if (isRecipientViewing) {
-            const otherMember = allMembers.find((m) => m.userId !== userId);
-            const readPayload = {
-              conversationId,
-              baseConversationId: supConvForCheck ? supConvForCheck.conversationId : conversationId,
-              altConversationId: supConvForCheck ? supConvForCheck.id : null,
-              messageId: String(created.id),
-              readByUserId: otherMember?.userId || '',
-              userId,
-              readAt: new Date().toISOString(),
-            };
-            this.emitToUser(userId, 'messages:read', readPayload);
-            this.emitToUser(userId, 'message:read', readPayload);
-            this.emitToUser(userId, 'support:messages:read', readPayload);
-
-            for (const rid of roomIdsToCheck) {
-              this.emitToConversation(rid, 'messages:read', readPayload);
-              this.emitToConversation(rid, 'message:read', readPayload);
-              this.emitToConversation(rid, 'support:messages:read', readPayload);
-            }
-          }
 
           try {
             const supConv = await prisma.supportConversation.findFirst({

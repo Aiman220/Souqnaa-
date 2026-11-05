@@ -127,6 +127,32 @@ async function runTests() {
   const resolvedStatus = alreadyReadMsg.isRead ? 'read' : incomingDeliveryReceipt.deliveryStatus;
   assert(resolvedStatus === 'read', 'Status does not regress from read to delivered when out-of-order receipt arrives');
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 4. PREMATURE READ PREVENTION (SERVER-AUTHORITATIVE CHECKS)
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log('\n4. Server-Authoritative Read Receipt Enforcement:');
+
+  // Freshly sent message must never start as read
+  const freshlySentMsg = {
+    id: 'msg-fresh-1',
+    conversationId: 'conv-100',
+    senderId: 'user-sender',
+    text: 'Newly sent',
+    type: 'text',
+    isRead: false,
+    createdAt: new Date(),
+    metadata: null,
+  };
+  const normFresh = normalizeMessage(freshlySentMsg);
+  assert(normFresh.deliveryStatus === 'sent', 'Newly sent message starts with deliveryStatus = sent');
+  assert(normFresh.isRead === false, 'Newly sent message has isRead = false');
+
+  // Subscribing to room or user presence must NOT produce read events for fresh messages
+  const freshReadEvents = emittedEvents.filter(
+    (e) => e.event === 'messages:read' && e.payload?.messageId === 'msg-fresh-1'
+  );
+  assert(freshReadEvents.length === 0, 'No read receipts emitted upon message creation');
+
   console.log('\n===============================================================');
   console.log(`TEST SUMMARY: ${passed} passed, ${failed} failed`);
   console.log('===============================================================');

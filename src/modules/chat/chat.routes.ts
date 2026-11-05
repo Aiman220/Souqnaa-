@@ -733,21 +733,8 @@ router.get('/:id/messages', async (req: Request, res: Response, next: NextFuncti
       orderBy: { createdAt: 'desc' },
     });
 
-    // Mark messages as read by updating lastReadAt
-    await prisma.conversationMember.update({
-      where: { conversationId_userId: { conversationId, userId } },
-      data: { lastReadAt: new Date() },
-    });
-
-    // Also update isRead flag on messages sent by others
-    await prisma.message.updateMany({
-      where: {
-        conversationId,
-        senderId: { not: userId },
-        isRead: false,
-      },
-      data: { isRead: true },
-    });
+    // Querying message history must be a pure read operation.
+    // Read status mutations are strictly handled by POST /conversations/:id/read or socket message:seen.
 
     const chronoSorted = messages.reverse();
     const normalized = chronoSorted.map(normalizeMessage);
