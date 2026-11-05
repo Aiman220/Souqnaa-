@@ -1247,12 +1247,12 @@ router.post('/:id/read', async (req: Request, res: Response, next: NextFunction)
       if (socketSvc) {
         const readPayload = {
           conversationId,
+          readByUserId: userId,
           userId,
           readAt: now.toISOString(),
           deliveryStatus: 'read',
         };
-        socketSvc.emitToConversation(conversationId, 'messages:read', readPayload);
-        socketSvc.emitToConversation(conversationId, 'message:read', readPayload);
+        // Emit exclusively to other members (senders), not the reader themselves
         const members = await prisma.conversationMember.findMany({
           where: { conversationId, userId: { not: userId } },
           select: { userId: true },

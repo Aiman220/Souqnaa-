@@ -1262,12 +1262,8 @@ export class SocketService {
             deliveryStatus: 'read',
           };
 
-          for (const cid of convIds) {
-            this.emitToConversation(cid, 'messages:read', readPayload);
-            this.emitToConversation(cid, 'message:read', readPayload);
-            this.emitToConversation(cid, 'support:messages:read', readPayload);
-          }
-
+          // Read receipts are delivered exclusively to the sender(s) whose messages were read.
+          // Never emit back to the reader themselves or conversation room broadcast.
           const members = await prisma.conversationMember.findMany({
             where: { conversationId: { in: convIds }, userId: { not: userId } },
             select: { userId: true },
