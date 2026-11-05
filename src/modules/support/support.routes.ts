@@ -305,9 +305,8 @@ router.post('/conversations/:id/read', async (req: Request, res: Response, next:
     const updateData: any = {};
     if (isAgent) {
       updateData.unreadAgentCount = 0;
-    } else if (userRole === UserRoleType.SELLER) {
-      updateData.unreadSellerCount = 0;
     } else {
+      updateData.unreadSellerCount = 0;
       updateData.unreadCustomerCount = 0;
     }
 

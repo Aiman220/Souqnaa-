@@ -97,6 +97,7 @@ export function normalizeMessage(m: any) {
     fileName: (isFile || isVideo) ? (m.text || (isVideo ? 'video.mp4' : 'file')) : null,
     fileSize: null,
     isRead: Boolean(m.isRead),
+    deliveryStatus: m.deliveryStatus || (Boolean(m.isRead) ? 'read' : 'sent'),
     readAt: null,
     deletedAt: m.deletedAt ? (m.deletedAt instanceof Date ? m.deletedAt.toISOString() : String(m.deletedAt)) : null,
     reactions: (parsedMetadata && typeof parsedMetadata === 'object' && parsedMetadata.reactions && typeof parsedMetadata.reactions === 'object')
@@ -970,18 +971,26 @@ router.post('/:id/messages', chatMessageLimiter, async (req: Request, res: Respo
       return created;
     });
 
-    const normalized = normalizeMessage(message);
+    const socketSvc = SocketService.get();
+    const allMembers = await prisma.conversationMember.findMany({
+      where: { conversationId },
+      select: { userId: true },
+    });
+    const otherMembers = allMembers.filter((m) => m.userId !== userId);
+    const isRecipientViewing = socketSvc ? otherMembers.some((m) => socketSvc.isUserInConversation(m.userId, conversationId)) : false;
+    const isRecipientOnline = socketSvc ? otherMembers.some((m) => socketSvc.isUserOnline(m.userId)) : false;
+    const initialDeliveryStatus = isRecipientViewing ? 'read' : (isRecipientOnline ? 'delivered' : 'sent');
+
+    const normalized = {
+      ...normalizeMessage(message),
+      deliveryStatus: initialDeliveryStatus,
+    };
 
     // Broadcast via WebSocket to the conversation room and to each member
     try {
-      const socketSvc = SocketService.get();
       if (socketSvc) {
         socketSvc.emitToConversation(conversationId, 'message:new', normalized);
         socketSvc.emitToConversation(conversationId, 'new:message', normalized);
-        const allMembers = await prisma.conversationMember.findMany({
-          where: { conversationId },
-          select: { userId: true },
-        });
         for (const m of allMembers) {
           socketSvc.emitToUser(m.userId, 'message:new', normalized);
           socketSvc.emitToUser(m.userId, 'new:message', normalized);

@@ -1293,6 +1293,8 @@ export class AuthController {
         } catch (_) {}
       }
 
+      await redis.set(`user:settings:${userId}`, JSON.stringify(userSettings), 600).catch(() => {});
+
       ResponseUtil.success(res, userSettings, 'تم استرجاع إعدادات وتفضيلات المستخدم بنجاح');
     } catch (error) {
       next(error);
@@ -1348,6 +1350,8 @@ export class AuthController {
           group: 'customer_settings',
         },
       });
+
+      await redis.set(`user:settings:${userId}`, JSON.stringify(merged), 600).catch(() => {});
 
       ResponseUtil.success(res, merged, 'تم حفظ إعدادات وتفضيلات المستخدم بنجاح');
     } catch (error) {

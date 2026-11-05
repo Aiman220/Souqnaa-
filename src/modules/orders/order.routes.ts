@@ -1775,6 +1775,23 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
       }
     } catch (_) {}
 
+    try {
+      const userSettingsRec = await prisma.systemSetting.findUnique({
+        where: { key: `user_settings_${req.user!.userId}` },
+      });
+      let userSettings: any = {};
+      if (userSettingsRec?.value) {
+        try {
+          userSettings = JSON.parse(userSettingsRec.value);
+        } catch (_) {}
+      }
+      const shouldSendInvoiceEmail = userSettings.orderInvoiceEmail !== false;
+      const customerEmail = req.user?.email || (fullOrder as any)?.user?.email;
+      if (shouldSendInvoiceEmail && customerEmail && fullOrder) {
+        OrderInvoiceService.sendInvoiceEmail(fullOrder, customerEmail, 'ar').catch(() => {});
+      }
+    } catch (_) {}
+
     ResponseUtil.created(res, fullOrder, 'تم إنشاء الطلب بنجاح');
   } catch (error) {
     if (universalReservationId) {
