@@ -82,6 +82,13 @@ export function normalizeMessage(m: any) {
       ? m.createdAt
       : new Date().toISOString();
 
+  const isDelivered = Boolean(
+    m.isRead ||
+    (parsedMetadata && (parsedMetadata.isDelivered || parsedMetadata.deliveredAt))
+  );
+  const deliveryStatus = m.isRead ? 'read' : isDelivered ? 'delivered' : 'sent';
+  const deliveredAt = parsedMetadata?.deliveredAt || (isDelivered ? createdAtStr : null);
+
   return {
     id: String(m.id),
     conversationId: String(m.conversationId),
@@ -97,8 +104,10 @@ export function normalizeMessage(m: any) {
     fileName: (isFile || isVideo) ? (m.text || (isVideo ? 'video.mp4' : 'file')) : null,
     fileSize: null,
     isRead: Boolean(m.isRead),
-    deliveryStatus: m.deliveryStatus || (Boolean(m.isRead) ? 'read' : 'sent'),
-    readAt: null,
+    isDelivered,
+    deliveryStatus,
+    deliveredAt,
+    readAt: m.isRead ? (m.readAt || m.updatedAt?.toISOString?.() || createdAtStr) : null,
     deletedAt: m.deletedAt ? (m.deletedAt instanceof Date ? m.deletedAt.toISOString() : String(m.deletedAt)) : null,
     reactions: (parsedMetadata && typeof parsedMetadata === 'object' && parsedMetadata.reactions && typeof parsedMetadata.reactions === 'object')
       ? parsedMetadata.reactions
@@ -971,26 +980,18 @@ router.post('/:id/messages', chatMessageLimiter, async (req: Request, res: Respo
       return created;
     });
 
-    const socketSvc = SocketService.get();
-    const allMembers = await prisma.conversationMember.findMany({
-      where: { conversationId },
-      select: { userId: true },
-    });
-    const otherMembers = allMembers.filter((m) => m.userId !== userId);
-    const isRecipientViewing = socketSvc ? otherMembers.some((m) => socketSvc.isUserInConversation(m.userId, conversationId)) : false;
-    const isRecipientOnline = socketSvc ? otherMembers.some((m) => socketSvc.isUserOnline(m.userId)) : false;
-    const initialDeliveryStatus = isRecipientViewing ? 'read' : (isRecipientOnline ? 'delivered' : 'sent');
-
-    const normalized = {
-      ...normalizeMessage(message),
-      deliveryStatus: initialDeliveryStatus,
-    };
+    const normalized = normalizeMessage(message);
 
     // Broadcast via WebSocket to the conversation room and to each member
     try {
+      const socketSvc = SocketService.get();
       if (socketSvc) {
         socketSvc.emitToConversation(conversationId, 'message:new', normalized);
         socketSvc.emitToConversation(conversationId, 'new:message', normalized);
+        const allMembers = await prisma.conversationMember.findMany({
+          where: { conversationId },
+          select: { userId: true },
+        });
         for (const m of allMembers) {
           socketSvc.emitToUser(m.userId, 'message:new', normalized);
           socketSvc.emitToUser(m.userId, 'new:message', normalized);
@@ -1132,6 +1133,75 @@ router.post('/:id/messages/upload', chatUploadLimiter, upload.single('file'), as
   }
 });
 
+// ─── POST /api/v1/conversations/:id/delivered ───────────────────────────────
+router.post('/:id/delivered', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const conversationId = String(req.params.id);
+    const userId = req.user!.userId;
+    const messageId = req.body?.messageId ? String(req.body.messageId) : undefined;
+
+    const member = await prisma.conversationMember.findUnique({
+      where: { conversationId_userId: { conversationId, userId } },
+    });
+    if (!member) {
+      return ResponseUtil.error(res, 'Conversation not found', 404);
+    }
+
+    const whereClause: any = {
+      conversationId,
+      senderId: { not: userId },
+      isRead: false,
+    };
+    if (messageId) {
+      whereClause.id = messageId;
+    }
+
+    const targetMessages = await prisma.message.findMany({
+      where: whereClause,
+      take: 100,
+    });
+
+    const now = new Date();
+    const nowIso = now.toISOString();
+
+    for (const msg of targetMessages) {
+      let meta: any = {};
+      if (msg.metadata) {
+        try {
+          meta = typeof msg.metadata === 'string' ? JSON.parse(msg.metadata) : msg.metadata;
+        } catch (_) {}
+      }
+      if (!meta.isDelivered) {
+        meta.isDelivered = true;
+        meta.deliveredAt = nowIso;
+        await prisma.message.update({
+          where: { id: msg.id },
+          data: { metadata: JSON.stringify(meta) },
+        });
+
+        const deliveryPayload = {
+          conversationId,
+          messageId: msg.id,
+          deliveredToUserId: userId,
+          deliveredAt: nowIso,
+          deliveryStatus: 'delivered',
+        };
+
+        const socketSvc = SocketService.get();
+        if (socketSvc) {
+          socketSvc.emitToUser(msg.senderId, 'message:delivered', deliveryPayload);
+          socketSvc.emitToUser(msg.senderId, 'messages:delivered', deliveryPayload);
+          socketSvc.emitToConversation(conversationId, 'message:delivered', deliveryPayload);
+        }
+      }
+    }
+
+    ResponseUtil.success(res, { success: true, deliveredAt: nowIso });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ─── POST /api/v1/conversations/:id/read ────────────────────────────────────
 router.post('/:id/read', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -1150,6 +1220,26 @@ router.post('/:id/read', async (req: Request, res: Response, next: NextFunction)
       where: { conversationId_userId: { conversationId, userId } },
       data: { lastReadAt: now },
     });
+
+    // Check user's privacy preference for read receipts
+    let userReadReceipts = true;
+    const userPrefRecord = await prisma.systemSetting.findUnique({
+      where: { key: `user_settings_${userId}` },
+    });
+    if (userPrefRecord?.value) {
+      try {
+        const parsed = JSON.parse(userPrefRecord.value);
+        if (parsed.readReceipts === false) userReadReceipts = false;
+      } catch (_) {}
+    }
+
+    if (!userReadReceipts) {
+      // Respect privacy: mark notifications as read locally, but do not update message.isRead or emit blue ticks
+      markChatNotificationsAsRead(conversationId, userId).catch((err) =>
+        console.error('[Notification Read Error]:', err)
+      );
+      return ResponseUtil.success(res, { success: true, readReceiptsDisabled: true, readAt: now.toISOString() });
+    }
 
     await prisma.message.updateMany({
       where: {
@@ -1172,6 +1262,7 @@ router.post('/:id/read', async (req: Request, res: Response, next: NextFunction)
           conversationId,
           userId,
           readAt: now.toISOString(),
+          deliveryStatus: 'read',
         };
         socketSvc.emitToConversation(conversationId, 'messages:read', readPayload);
         socketSvc.emitToConversation(conversationId, 'message:read', readPayload);

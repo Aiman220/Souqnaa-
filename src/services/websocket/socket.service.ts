@@ -193,38 +193,9 @@ export class SocketService {
     }
   }
 
-  public async getUserSettings(userId: string): Promise<Record<string, any>> {
-    try {
-      const cached = await redis.get(`user:settings:${userId}`);
-      if (cached) {
-        return JSON.parse(cached);
-      }
-      const record = await prisma.systemSetting.findUnique({
-        where: { key: `user_settings_${userId}` },
-      });
-      if (record?.value) {
-        const parsed = JSON.parse(record.value);
-        await redis.set(`user:settings:${userId}`, record.value, 600).catch(() => {});
-        return parsed;
-      }
-    } catch (_) {}
-    return {
-      onlineStatus: true,
-      readReceipts: true,
-      chatSoundEnabled: true,
-      notifySound: true,
-    };
-  }
-
   public async handleUserOnline(userId: string): Promise<void> {
     if (!userId || userId.startsWith('guest_')) return;
     try {
-      // Respect user's privacy setting for online presence
-      const userSettings = await this.getUserSettings(userId);
-      if (userSettings.onlineStatus === false) {
-        return;
-      }
-
       const now = new Date();
 
       // If user is a support agent / admin, update support presence in DB & Redis and broadcast
@@ -294,17 +265,6 @@ export class SocketService {
         }
         this.io.to(`conversation:${cm.conversationId}`).emit('user:online', { ...presencePayload, conversationId: cm.conversationId });
         this.io.to(`conversation:${cm.conversationId}`).emit('user:presence', { ...presencePayload, conversationId: cm.conversationId });
-
-        // Notify that any pending sent messages to this user have reached their device (double ticks / delivered)
-        const deliveredPayload = {
-          conversationId: cm.conversationId,
-          deliveredToUserId: userId,
-          deliveredAt: new Date().toISOString(),
-        };
-        this.io.to(`user:${cm.userId}`).emit('messages:delivered', deliveredPayload);
-        this.io.to(`user:${cm.userId}`).emit('message:delivered', deliveredPayload);
-        this.io.to(`conversation:${cm.conversationId}`).emit('messages:delivered', deliveredPayload);
-        this.io.to(`conversation:${cm.conversationId}`).emit('message:delivered', deliveredPayload);
       }
     } catch (err) {
       console.error(`[Socket.IO] handleUserOnline error for ${userId}:`, err);
@@ -994,15 +954,14 @@ export class SocketService {
           return;
         }
 
-        const targetSettings = await this.getUserSettings(targetUserId);
-        const isTargetOnline = targetSettings.onlineStatus === false ? false : this.isUserOnline(targetUserId);
-        const lastSeen = targetSettings.onlineStatus === false ? null : await this.getLastSeen(targetUserId);
+        const isOnline = this.isUserOnline(targetUserId);
+        const lastSeen = await this.getLastSeen(targetUserId);
         const presencePayload = {
           userId: targetUserId,
-          isOnline: isTargetOnline,
+          isOnline,
           lastSeen: lastSeen ? (lastSeen instanceof Date ? lastSeen.toISOString() : String(lastSeen)) : null,
         };
-        socket.emit(isTargetOnline ? 'user:online' : 'user:offline', presencePayload);
+        socket.emit(isOnline ? 'user:online' : 'user:offline', presencePayload);
         socket.emit('user:presence', presencePayload);
         if (ack) ack({ success: true, presence: presencePayload });
       });
@@ -1213,8 +1172,67 @@ export class SocketService {
         socket.leave('room:support_queue');
       });
 
+      // Delivery receipts from recipient's authenticated device
+      socket.on('message:delivered', async (data: any) => {
+        try {
+          const inputId = typeof data === 'string' ? null : (data?.conversationId || data?.id)?.toString().trim();
+          const messageId = typeof data === 'string' ? data.trim() : data?.messageId?.toString().trim();
+          if (!inputId && !messageId) return;
+
+          const whereClause: any = {
+            senderId: { not: userId },
+            isRead: false,
+          };
+          if (messageId) {
+            whereClause.id = messageId;
+          } else if (inputId) {
+            whereClause.conversationId = inputId;
+          }
+
+          const targetMessages = await prisma.message.findMany({
+            where: whereClause,
+            take: 100,
+          });
+
+          const now = new Date();
+          const nowIso = now.toISOString();
+
+          for (const msg of targetMessages) {
+            if (msg.isRead) continue;
+            let meta: any = {};
+            if (msg.metadata) {
+              try {
+                meta = typeof msg.metadata === 'string' ? JSON.parse(msg.metadata) : msg.metadata;
+              } catch (_) {}
+            }
+            if (!meta.isDelivered) {
+              meta.isDelivered = true;
+              meta.deliveredAt = nowIso;
+              await prisma.message.update({
+                where: { id: msg.id },
+                data: { metadata: JSON.stringify(meta) },
+              });
+            }
+
+            const deliveryPayload = {
+              conversationId: msg.conversationId,
+              messageId: msg.id,
+              deliveredToUserId: userId,
+              deliveredAt: nowIso,
+              deliveryStatus: 'delivered',
+            };
+
+            this.emitToUser(msg.senderId, 'message:delivered', deliveryPayload);
+            this.emitToUser(msg.senderId, 'messages:delivered', deliveryPayload);
+            this.emitToConversation(msg.conversationId, 'message:delivered', deliveryPayload);
+          }
+        } catch (err) {
+          console.error('[Socket.IO] Error handling message:delivered:', err);
+        }
+      });
+
       // Messages seen / read receipts
-      const handleMessageSeen = async (data: any) => {
+      socket.on('message:seen', async (data: any) => {
         const inputId = typeof data === 'string' ? data.trim() : (data?.conversationId || data?.id)?.toString().trim();
         if (!inputId) return;
 
@@ -1237,11 +1255,23 @@ export class SocketService {
             data: { lastReadAt: new Date() },
           });
 
-          // Check if user disabled Read Receipts
-          const userSettings = await this.getUserSettings(userId);
-          if (userSettings.readReceipts === false) {
-            // Read receipts disabled by user preference:
-            // Do not mark message as read for the sender and do not emit read events to peers
+          // Check user's privacy preference for read receipts
+          let userReadReceipts = true;
+          const userPrefRecord = await prisma.systemSetting.findUnique({
+            where: { key: `user_settings_${userId}` },
+          });
+          if (userPrefRecord?.value) {
+            try {
+              const parsed = JSON.parse(userPrefRecord.value);
+              if (parsed.readReceipts === false) userReadReceipts = false;
+            } catch (_) {}
+          }
+
+          if (!userReadReceipts) {
+            // Privacy setting enforced: do not update message.isRead or emit blue ticks
+            markChatNotificationsAsRead(baseConvId, userId).catch((err) =>
+              console.error('[Notification Read Error]:', err)
+            );
             return;
           }
 
@@ -1257,9 +1287,12 @@ export class SocketService {
           if (supConv) {
             const userRole = socket.data.user?.role;
             const isAgent = userRole === 'ADMIN' || (supConv.assignedAgent?.adminUserId === userId);
+            const isSeller = userRole === 'SELLER';
             const updateField = isAgent
               ? { unreadAgentCount: 0 }
-              : { unreadSellerCount: 0, unreadCustomerCount: 0 };
+              : isSeller
+              ? { unreadSellerCount: 0 }
+              : { unreadCustomerCount: 0 };
             await prisma.supportConversation.update({
               where: { id: supConv.id },
               data: updateField,
@@ -1273,6 +1306,7 @@ export class SocketService {
             readByUserId: userId,
             userId,
             readAt: new Date().toISOString(),
+            deliveryStatus: 'read',
           };
 
           for (const cid of convIds) {
@@ -1296,10 +1330,7 @@ export class SocketService {
             console.error('[Notification Read Error]:', err)
           );
         } catch (_) {}
-      };
-
-      socket.on('message:seen', handleMessageSeen);
-      socket.on('support:message:seen', handleMessageSeen);
+      });
 
       // Send message via WebSocket
       socket.on('message:send', async (payload: any, ack?: (res: any) => void) => {
@@ -1334,13 +1365,15 @@ export class SocketService {
               },
             });
             if (existing) {
+              const existingMeta = existing.metadata ? (typeof existing.metadata === 'string' ? JSON.parse(existing.metadata) : existing.metadata) : null;
+              const isDelivered = Boolean(existing.isRead || (existingMeta && (existingMeta.isDelivered || existingMeta.deliveredAt)));
               const norm = {
                 id: String(existing.id),
                 conversationId: String(existing.conversationId),
                 senderId: String(existing.senderId),
                 content: existing.text || '',
                 type: existing.type || 'text',
-                metadata: existing.metadata ? (typeof existing.metadata === 'string' ? JSON.parse(existing.metadata) : existing.metadata) : null,
+                metadata: existingMeta,
                 clientMessageId: existing.clientMessageId || null,
                 createdAt: existing.createdAt.toISOString(),
                 imageUrl: existing.type === 'image' ? existing.attachmentUrl : null,
@@ -1348,6 +1381,9 @@ export class SocketService {
                 fileName: existing.type === 'file' ? existing.text : null,
                 fileSize: null,
                 isRead: Boolean(existing.isRead),
+                isDelivered,
+                deliveryStatus: existing.isRead ? 'read' : (isDelivered ? 'delivered' : 'sent'),
+                deliveredAt: existingMeta?.deliveredAt || null,
                 readAt: null,
                 reactions: {},
                 sender: existing.sender || null,
@@ -1421,12 +1457,9 @@ export class SocketService {
           const roomIdsToCheck = Array.from(new Set([conversationId, ...(supConvForCheck ? [supConvForCheck.id, supConvForCheck.conversationId] : [])]));
 
           // Check if the other member is already viewing the conversation room (support or regular)
-          const otherMembers = allMembers.filter((m) => m.userId !== userId);
-          const isRecipientViewing = otherMembers.some(
-            (m) => roomIdsToCheck.some((rid) => this.isUserInConversation(m.userId, rid))
+          const isRecipientViewing = allMembers.some(
+            (m) => m.userId !== userId && roomIdsToCheck.some((rid) => this.isUserInConversation(m.userId, rid))
           );
-          const isRecipientOnline = otherMembers.some((m) => this.isUserOnline(m.userId));
-          const deliveryStatus = isRecipientViewing ? 'read' : (isRecipientOnline ? 'delivered' : 'sent');
 
           const created = await prisma.$transaction(async (tx) => {
             const msg = await tx.message.create({
@@ -1456,6 +1489,8 @@ export class SocketService {
             return msg;
           });
 
+          const isDelivered = isRecipientViewing;
+          const deliveryStatus = isRecipientViewing ? 'read' : 'sent';
           const norm = {
             id: String(created.id),
             conversationId: String(created.conversationId),
@@ -1470,7 +1505,9 @@ export class SocketService {
             fileName: created.type === 'file' ? created.text : null,
             fileSize: null,
             isRead: Boolean(created.isRead),
+            isDelivered,
             deliveryStatus,
+            deliveredAt: isRecipientViewing ? new Date().toISOString() : null,
             readAt: isRecipientViewing ? new Date().toISOString() : null,
             reactions: {},
             sender: created.sender || null,
