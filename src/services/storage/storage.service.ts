@@ -104,22 +104,33 @@ class CloudflareR2StorageService implements IStorageService {
   }
 
   private resolveBaseUrl(): string {
+    // 1. Explicit override via ASSETS_BASE_URL env var (highest priority)
+    const assetsBaseUrlOverride = process.env.ASSETS_BASE_URL || '';
+    if (assetsBaseUrlOverride && !assetsBaseUrlOverride.includes('r2.cloudflarestorage.com')) {
+      return assetsBaseUrlOverride.replace(/\/+$/, '');
+    }
+
+    // 2. S3_PUBLIC_URL if it's not a private R2 endpoint
     const rawPublicUrl = config.storage.s3.publicUrl || '';
     if (rawPublicUrl && !rawPublicUrl.includes('r2.cloudflarestorage.com')) {
       return rawPublicUrl.replace(/\/+$/, '');
     }
 
-    // Direct Cloudflare CDN delivery domain if configured for environment (§5)
-    const envAssetsDomain = (config.domains as any)?.[config.env]?.assets;
-    if (envAssetsDomain && !envAssetsDomain.includes('r2.cloudflarestorage.com')) {
-      return envAssetsDomain.replace(/\/+$/, '');
+    // 3. Cloudflare CDN delivery domain from config — only use if it's explicitly
+    //    set via env var (meaning DNS is actually live), not the hardcoded default.
+    //    The hardcoded "assets.souqnaa.com" may not yet have a DNS record.
+    const envAssetsOverrideKey = `ASSETS_DOMAIN_${(config.env || 'production').toUpperCase()}`;
+    const envAssetsDynamic = process.env[envAssetsOverrideKey] || '';
+    if (envAssetsDynamic && !envAssetsDynamic.includes('r2.cloudflarestorage.com')) {
+      return envAssetsDynamic.replace(/\/+$/, '');
     }
 
+    // 4. Fall back to Render/backend streaming endpoint
     const serverBase =
       process.env.RENDER_EXTERNAL_URL ||
       process.env.BACKEND_PUBLIC_URL ||
       process.env.API_BASE_URL ||
-      (config.domains?.backendPublicUrl && !config.domains.backendPublicUrl.includes('souqnaa.com') ? config.domains.backendPublicUrl : '') ||
+      config.domains?.backendPublicUrl ||
       `http://localhost:${config.port || 3000}`;
 
     return `${serverBase.replace(/\/+$/, '')}${config.apiPrefix}/storage/file`;
@@ -144,6 +155,14 @@ class CloudflareR2StorageService implements IStorageService {
     // 1. If rawUrl is a private R2 endpoint, convert to public streaming URL
     if (trimmed.includes('r2.cloudflarestorage.com')) {
       const match = trimmed.match(/r2\.cloudflarestorage\.com\/[^/]+\/(.+)$/);
+      if (match && match[1]) {
+        return this.getPublicUrl(match[1]);
+      }
+    }
+
+    // 1b. If rawUrl contains assets.souqnaa.com (missing DNS record), convert to public streaming URL
+    if (trimmed.includes('assets.souqnaa.com')) {
+      const match = trimmed.match(/assets\.souqnaa\.com\/(.+)$/);
       if (match && match[1]) {
         return this.getPublicUrl(match[1]);
       }

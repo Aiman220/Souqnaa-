@@ -1,4 +1,4 @@
-﻿
+
 const googleOAuth = {
   clientId: '',
   clientSecret: '',
@@ -83,21 +83,31 @@ export const config = {
       web: 'https://www.souqnaa.com',
       admin: 'https://admin.souqnaa.com',
       seller: 'https://seller.souqnaa.com',
-      assets: 'https://assets.souqnaa.com',
+      assets:
+        process.env.ASSETS_BASE_URL ||
+        (process.env.RENDER_EXTERNAL_URL
+          ? `${process.env.RENDER_EXTERNAL_URL.replace(/\/+$/, '')}/api/v1/storage/file`
+          : process.env.BACKEND_PUBLIC_URL
+            ? `${process.env.BACKEND_PUBLIC_URL.replace(/\/+$/, '')}/api/v1/storage/file`
+            : 'https://souqnaa.onrender.com/api/v1/storage/file'),
     },
     development: {
       api: 'https://dev-api.souqnaa.com',
       web: 'https://dev.souqnaa.com',
       admin: 'https://dev-admin.souqnaa.com',
       seller: 'https://dev-seller.souqnaa.com',
-      assets: 'https://dev-assets.souqnaa.com',
+      assets:
+        process.env.ASSETS_BASE_URL ||
+        'https://souqnaa.onrender.com/api/v1/storage/file',
     },
     staging: {
       api: 'https://staging-api.souqnaa.com',
       web: 'https://staging.souqnaa.com',
       admin: 'https://staging-admin.souqnaa.com',
       seller: 'https://staging-seller.souqnaa.com',
-      assets: 'https://staging-assets.souqnaa.com',
+      assets:
+        process.env.ASSETS_BASE_URL ||
+        'https://souqnaa.onrender.com/api/v1/storage/file',
     },
   },
 

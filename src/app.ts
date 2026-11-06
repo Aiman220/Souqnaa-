@@ -141,6 +141,8 @@ export const createApp = (): Application => {
     'https://souqnaa.com',
     'https://admin.souqnaa.com',
     'https://seller.souqnaa.com',
+    // Render Hosted Services
+    'https://souqnaa.onrender.com',
     // Development Subdomains
     'https://dev.souqnaa.com',
     'https://dev-api.souqnaa.com',
@@ -215,7 +217,9 @@ export const createApp = (): Application => {
       } else if (
         config.corsOrigin === '*' ||
         allowedOriginsList.includes(origin) ||
-        /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+        /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
+        /^https:\/\/[a-zA-Z0-9-]+\.onrender\.com$/.test(origin) ||
+        /^https:\/\/([a-zA-Z0-9-]+\.)?souqnaa\.com$/.test(origin)
       ) {
         callback(null, true);
       } else {
