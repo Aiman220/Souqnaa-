@@ -1,4 +1,5 @@
 import path from 'path';
+import crypto from 'crypto';
 import {
   S3Client,
   PutObjectCommand,
@@ -6,6 +7,7 @@ import {
   GetObjectCommand,
   HeadObjectCommand,
 } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from '../../config';
 import { ImageProcessorService, ImageVariantName } from './image-processor.service';
 
@@ -28,9 +30,24 @@ export interface UploadResult {
   variants?: ImageVariantUrls;
 }
 
+export interface PresignedUploadResult {
+  uploadUrl: string;
+  key: string;
+  publicUrl: string;
+  expiresIn: number;
+  headers: Record<string, string>;
+}
+
 export interface IStorageService {
   uploadFile(file: Express.Multer.File, folder?: string): Promise<UploadResult>;
   deleteFile(key: string): Promise<void>;
+  createPresignedUploadUrl(
+    folder: string,
+    filename: string,
+    mimeType: string,
+    fileSize?: number
+  ): Promise<PresignedUploadResult>;
+  verifyUploadedObject(key: string, expectedFolder?: string): Promise<UploadResult>;
   getFileStream(key: string): Promise<{
     stream: NodeJS.ReadableStream;
     contentType?: string;
@@ -203,6 +220,154 @@ class CloudflareR2StorageService implements IStorageService {
       })
     );
     this.knownExistingKeys.add(cleanKey);
+  }
+
+  async createPresignedUploadUrl(
+    folder = 'general',
+    filename: string,
+    mimeType: string,
+    _fileSize?: number
+  ): Promise<PresignedUploadResult> {
+    const cleanFolder = folder.replace(/^\/+|\/+$/g, '') || 'general';
+    const ext =
+      path.extname(filename || '').toLowerCase() ||
+      (mimeType === 'image/jpeg'
+        ? '.jpg'
+        : mimeType === 'image/png'
+        ? '.png'
+        : mimeType === 'image/webp'
+        ? '.webp'
+        : mimeType === 'application/pdf'
+        ? '.pdf'
+        : mimeType === 'video/mp4'
+        ? '.mp4'
+        : '.bin');
+    const nonce = crypto.randomBytes(8).toString('hex');
+    const key = `${cleanFolder}/${Date.now()}-${nonce}${ext}`;
+
+    const isPrivate =
+      cleanFolder.startsWith('refund') ||
+      cleanFolder.startsWith('dispute') ||
+      cleanFolder.startsWith('support') ||
+      cleanFolder.startsWith('document') ||
+      cleanFolder.startsWith('report');
+
+    const cacheControl = isPrivate ? 'private, no-store' : 'public, max-age=31536000, immutable';
+
+    const command = new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      ContentType: mimeType,
+      CacheControl: cacheControl,
+    });
+
+    const uploadUrl = await getSignedUrl(this.s3, command, { expiresIn: 3600 });
+    const publicUrl = this.getPublicUrl(key);
+
+    return {
+      uploadUrl,
+      key,
+      publicUrl,
+      expiresIn: 3600,
+      headers: {
+        'Content-Type': mimeType,
+      },
+    };
+  }
+
+  async verifyUploadedObject(key: string, expectedFolder?: string): Promise<UploadResult> {
+    const cleanKey = key.replace(/^\/+/, '');
+    if (cleanKey.includes('..') || cleanKey.includes('\\') || /[\x00-\x1f]/.test(cleanKey)) {
+      throw new Error('Invalid storage key');
+    }
+
+    if (expectedFolder) {
+      const cleanExpected = expectedFolder.replace(/^\/+|\/+$/g, '');
+      if (!cleanKey.startsWith(`${cleanExpected}/`)) {
+        throw new Error(`Object key does not belong to expected folder ${expectedFolder}`);
+      }
+    }
+
+    // 1. Verify object exists via HEAD
+    const head = await this.s3.send(
+      new HeadObjectCommand({
+        Bucket: this.bucket,
+        Key: cleanKey,
+      })
+    );
+
+    const size = head.ContentLength || 0;
+    if (size === 0) {
+      throw new Error('Uploaded object is empty or not found');
+    }
+
+    // 2. Fetch header bytes to verify real magic bytes & MIME type
+    let headerBuffer: Buffer;
+    try {
+      const rangeRes = await this.s3.send(
+        new GetObjectCommand({
+          Bucket: this.bucket,
+          Key: cleanKey,
+          Range: 'bytes=0-1023',
+        })
+      );
+      headerBuffer = await streamToBuffer(rangeRes.Body as NodeJS.ReadableStream);
+    } catch {
+      const full = await this.getFileBuffer(cleanKey);
+      headerBuffer = full.buffer;
+    }
+
+    const detected = ImageProcessorService.detectMimeFromBuffer(headerBuffer);
+    this.knownExistingKeys.add(cleanKey);
+
+    let width: number | undefined;
+    let height: number | undefined;
+    let hash: string | undefined;
+
+    // 3. For images, inspect metadata and auto-generate variants in background
+    if (detected.isImage) {
+      try {
+        const full = await this.getFileBuffer(cleanKey);
+        const metadata = await ImageProcessorService.inspectImage(full.buffer);
+        width = metadata.width;
+        height = metadata.height;
+        hash = metadata.sha256;
+
+        setImmediate(async () => {
+          try {
+            const variants = await ImageProcessorService.generateAllVariants(full.buffer, cleanKey);
+            for (const v of variants) {
+              await this.putObject(v.key, v.buffer, v.mimeType);
+              this.knownExistingKeys.add(v.key);
+            }
+            console.log(`[Storage] Generated ${variants.length} background variants for verified key ${cleanKey}`);
+          } catch (varErr) {
+            console.warn(`[Storage] Background variant generation failed for verified key ${cleanKey}:`, varErr);
+          }
+        });
+      } catch (metaErr) {
+        console.warn(`[Storage] Failed to inspect image metadata for ${cleanKey}:`, metaErr);
+      }
+    }
+
+    const variants: ImageVariantUrls = {
+      thumbnail: this.getVariantUrl(cleanKey, 'thumbnail'),
+      small: this.getVariantUrl(cleanKey, 'small'),
+      medium: this.getVariantUrl(cleanKey, 'medium'),
+      large: this.getVariantUrl(cleanKey, 'large'),
+      original: this.getPublicUrl(cleanKey),
+    };
+
+    return {
+      url: this.getPublicUrl(cleanKey),
+      key: cleanKey,
+      size,
+      mimeType: detected.mime || head.ContentType || 'application/octet-stream',
+      width,
+      height,
+      hash,
+      variants,
+    };
   }
 
   async uploadFile(file: Express.Multer.File, folder = 'general'): Promise<UploadResult> {

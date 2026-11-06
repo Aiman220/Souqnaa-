@@ -213,8 +213,9 @@ export const createApp = (): Application => {
         // Allow mobile apps, curl, server-to-server requests without origin
         callback(null, true);
       } else if (
-        allowedOriginsList.filter((o) => o !== '*').includes(origin) ||
-        (config.env === 'development' && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin))
+        config.corsOrigin === '*' ||
+        allowedOriginsList.includes(origin) ||
+        /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
       ) {
         callback(null, true);
       } else {
@@ -223,7 +224,7 @@ export const createApp = (): Application => {
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
-    allowedHeaders: config.env === 'development' ? undefined : allowedHeadersList,
+    allowedHeaders: allowedHeadersList,
     exposedHeaders: [
       'X-Request-Id',
       'X-Correlation-ID',

@@ -1,3 +1,4 @@
+import path from 'path';
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { prisma } from '../../database/prisma';
@@ -30,12 +31,28 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
   fileFilter: (_req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/quicktime', 'video/webm'];
-    if (allowed.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new AppError('نوع الملف غير مدعوم. يُسمح بـ JPEG، PNG، WebP، MP4، MOV فقط', 400, 'INVALID_MEDIA') as any);
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const mime = (file.mimetype || '').toLowerCase();
+    const allowedMimes = [
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/gif',
+      'video/mp4',
+      'video/quicktime',
+      'video/webm',
+    ];
+    const allowedExts = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4', '.mov', '.webm'];
+
+    if (allowedMimes.includes(mime) || mime.startsWith('image/') || mime.startsWith('video/')) {
+      return cb(null, true);
     }
+    // Allow mobile octet-stream when extension is valid or to allow magic bytes check
+    if ((!mime || mime === 'application/octet-stream') && (allowedExts.includes(ext) || !ext)) {
+      return cb(null, true);
+    }
+
+    cb(new AppError('نوع الملف غير مدعوم. يُسمح بـ JPEG، PNG، WebP، MP4، MOV فقط', 400, 'INVALID_MEDIA') as any);
   },
 });
 
@@ -133,9 +150,19 @@ router.post('/media/upload', authenticate, upload.array('files', 6), async (req:
     const files = req.files as Express.Multer.File[];
     if (!files || files.length === 0) throw new AppError('لم يتم رفع أي ملف', 400);
 
+    // Optional upfront eligibility check if orderItemId was provided
+    if (req.body.orderItemId) {
+      const eligibility = await checkEligibility(req.user!.userId, String(req.body.orderItemId));
+      if (!eligibility.eligible) {
+        throw new AppError('غير مصرح لك برفع وسائط لهذا الطلب.', 403, 'REVIEW_NOT_ELIGIBLE');
+      }
+    }
+
     const results = await Promise.all(
       files.map(async (file) => {
-        const isVideo = file.mimetype.startsWith('video/');
+        const isVideo =
+          file.mimetype.startsWith('video/') ||
+          /\.(mp4|mov|webm)$/i.test(file.originalname || '');
         const folder = isVideo ? 'review-videos' : 'review-images';
         const uploaded = await storageService.uploadFile(file, folder);
         return {

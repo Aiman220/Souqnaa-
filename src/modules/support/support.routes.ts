@@ -106,6 +106,13 @@ const upload = multer({
     const ext = path.extname(file.originalname || '').toLowerCase();
     const mime = (file.mimetype || '').toLowerCase();
 
+    // Allow mobile octet-stream when extension is valid
+    if (!mime || mime === 'application/octet-stream') {
+      if (ALLOWED_EXTENSIONS.has(ext) || !ext) {
+        return cb(null, true);
+      }
+    }
+
     if (!ALLOWED_EXTENSIONS.has(ext) || !ALLOWED_MIME_TYPES.has(mime)) {
       return cb(
         new AppError(

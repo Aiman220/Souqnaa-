@@ -1,3 +1,4 @@
+import path from 'path';
 import multer from 'multer';
 import { Router, Request, Response, NextFunction } from 'express';
 import { remoteConfigService } from './remote-config.service';
@@ -11,7 +12,13 @@ const iconUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const mime = (file.mimetype || '').toLowerCase();
+    const imageExts = ['.png', '.jpg', '.jpeg', '.webp', '.svg', '.ico'];
+
+    if (mime.startsWith('image/')) {
+      cb(null, true);
+    } else if ((!mime || mime === 'application/octet-stream') && (imageExts.includes(ext) || !ext)) {
       cb(null, true);
     } else {
       cb(new AppError('الملف المرفوع يجب أن يكون صورة صالحة (PNG, JPG, SVG, WebP, ICO)', 400));
