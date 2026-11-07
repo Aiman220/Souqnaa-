@@ -472,12 +472,14 @@ router.post('/', authenticate, requireSeller, async (req: Request, res: Response
             })),
           },
           variants: {
-            create: variants.map((v: any) => ({
-              nameAr: v.nameAr,
-              nameEn: v.nameEn,
+            create: variants.map((v: any, idx: number) => ({
+              nameAr: v.nameAr || `متغير ${idx + 1}`,
+              nameEn: v.nameEn || v.nameAr || `Variant ${idx + 1}`,
+              sku: v.sku || null,
               price: parseFloat(v.price),
               compareAtPrice: v.compareAtPrice ? parseFloat(v.compareAtPrice) : null,
-              stockQuantity: parseInt(v.stockQuantity || '0', 10),
+              stockQuantity: parseInt(v.stockQuantity || v.stock || '0', 10),
+              image: v.image || null,
             })),
           },
         },
@@ -554,6 +556,7 @@ router.put('/:id', authenticate, requireSeller, async (req: Request, res: Respon
       videoUrl,
       isActive,
       stockQuantity,
+      variants,
     } = req.body;
 
     const updateData: any = {};
@@ -602,6 +605,26 @@ router.put('/:id', authenticate, requireSeller, async (req: Request, res: Respon
       if (prevAvailable <= 0 && newAvailable > 0) {
         WishlistAlertsJob.onProductStockRestocked(id).catch(() => {});
       }
+    }
+
+    if (Array.isArray(variants)) {
+      await prisma.$transaction(async (tx) => {
+        await tx.productVariant.deleteMany({ where: { productId: id } });
+        if (variants.length > 0) {
+          await tx.productVariant.createMany({
+            data: variants.map((v: any, index: number) => ({
+              productId: id,
+              nameAr: v.nameAr || `متغير ${index + 1}`,
+              nameEn: v.nameEn || v.nameAr || `Variant ${index + 1}`,
+              sku: v.sku || `${updated.sku || 'SKU'}-V${index + 1}-${Date.now().toString().slice(-4)}`,
+              price: v.price !== undefined && v.price !== '' ? parseFloat(v.price) : updated.price,
+              compareAtPrice: v.compareAtPrice ? parseFloat(v.compareAtPrice) : null,
+              stockQuantity: parseInt(v.stockQuantity || v.stock || '0', 10) || 0,
+              image: v.image || null,
+            })),
+          });
+        }
+      });
     }
 
     if (price !== undefined) {

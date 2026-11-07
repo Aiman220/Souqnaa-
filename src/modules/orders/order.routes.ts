@@ -209,7 +209,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
                       images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
                     },
                   },
-                  variant: { select: { id: true, image: true } },
+                  variant: { select: { id: true, nameAr: true, nameEn: true, sku: true, price: true, image: true } },
                 },
               },
             },
@@ -227,6 +227,10 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
             ...so,
             items: (so.items || []).map((item: any) => ({
               ...item,
+              variantName: item.variant?.nameAr || item.variant?.nameEn || null,
+              variantNameAr: item.variant?.nameAr || null,
+              variantNameEn: item.variant?.nameEn || null,
+              sku: item.variant?.sku || item.sku || item.product?.sku || null,
               productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
             })),
           })),
@@ -1632,7 +1636,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
                     images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
                   },
                 },
-                variant: { select: { id: true, image: true } },
+                variant: { select: { id: true, nameAr: true, nameEn: true, sku: true, price: true, image: true } },
               },
             },
           },
@@ -1648,6 +1652,10 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
         if (so.items) {
           so.items = so.items.map((item: any) => ({
             ...item,
+            variantName: item.variant?.nameAr || item.variant?.nameEn || null,
+            variantNameAr: item.variant?.nameAr || null,
+            variantNameEn: item.variant?.nameEn || null,
+            sku: item.variant?.sku || item.sku || item.product?.sku || null,
             productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
           }));
         }
@@ -2685,7 +2693,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
                       images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
                     },
                   },
-                  variant: { select: { id: true, image: true } },
+                  variant: { select: { id: true, nameAr: true, nameEn: true, sku: true, price: true, image: true } },
                 },
               },
               deliveryMethod: true,
@@ -2777,6 +2785,10 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
           deliveryMethodCode: details.deliveryMethodCode,
           items: (so.items || []).map((item: any) => ({
             ...item,
+            variantName: item.variant?.nameAr || item.variant?.nameEn || null,
+            variantNameAr: item.variant?.nameAr || null,
+            variantNameEn: item.variant?.nameEn || null,
+            sku: item.variant?.sku || item.sku || item.product?.sku || null,
             productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
           })),
         };
@@ -2835,7 +2847,7 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
                     images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
                   },
                 },
-                variant: { select: { id: true, image: true } },
+                variant: { select: { id: true, nameAr: true, nameEn: true, sku: true, price: true, image: true } },
               },
             },
             deliveryMethod: true,
@@ -2904,6 +2916,10 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
         deliveryMethodCode: details.deliveryMethodCode,
         items: (so.items || []).map((item: any) => ({
           ...item,
+          variantName: item.variant?.nameAr || item.variant?.nameEn || null,
+          variantNameAr: item.variant?.nameAr || null,
+          variantNameEn: item.variant?.nameEn || null,
+          sku: item.variant?.sku || item.sku || item.product?.sku || null,
           productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
         })),
         disputes: disputes.filter(d => d.sellerId === so.sellerId || !d.sellerId),

@@ -1284,7 +1284,7 @@ router.get('/dashboard', async (req: Request, res: Response, next: NextFunction)
                 images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
               },
             },
-            variant: { select: { id: true, image: true } },
+            variant: { select: { id: true, nameAr: true, nameEn: true, sku: true, price: true, image: true } },
           },
         },
       },
@@ -1301,6 +1301,10 @@ router.get('/dashboard', async (req: Request, res: Response, next: NextFunction)
       ...ro,
       items: (ro.items || []).map((item: any) => ({
         ...item,
+        variantName: item.variant?.nameAr || item.variant?.nameEn || null,
+        variantNameAr: item.variant?.nameAr || null,
+        variantNameEn: item.variant?.nameEn || null,
+        sku: item.variant?.sku || item.sku || item.product?.sku || null,
         productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
       })),
     }));
@@ -2004,7 +2008,7 @@ router.get('/me/orders', async (req: Request, res: Response, next: NextFunction)
                   images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
                 },
               },
-              variant: { select: { id: true, image: true } },
+              variant: { select: { id: true, nameAr: true, nameEn: true, sku: true, price: true, image: true } },
             },
           },
           deliveryMethod: true,
@@ -2061,6 +2065,10 @@ router.get('/me/orders', async (req: Request, res: Response, next: NextFunction)
         deliveryMethodCode,
         items: (o.items || []).map((item: any) => ({
           ...item,
+          variantName: item.variant?.nameAr || item.variant?.nameEn || null,
+          variantNameAr: item.variant?.nameAr || null,
+          variantNameEn: item.variant?.nameEn || null,
+          sku: item.variant?.sku || item.sku || item.product?.sku || null,
           productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
         })),
         notes: (o as any).notes || o.order?.notes || null,
@@ -2130,7 +2138,7 @@ router.get('/me/orders/:id', async (req: Request, res: Response, next: NextFunct
                 images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
               },
             },
-            variant: { select: { id: true, image: true } },
+            variant: { select: { id: true, nameAr: true, nameEn: true, sku: true, price: true, image: true } },
           },
         },
         deliveryMethod: true,
@@ -2186,6 +2194,10 @@ router.get('/me/orders/:id', async (req: Request, res: Response, next: NextFunct
       deliveryMethodCode,
       items: (order.items || []).map((item: any) => ({
         ...item,
+        variantName: item.variant?.nameAr || item.variant?.nameEn || null,
+        variantNameAr: item.variant?.nameAr || null,
+        variantNameEn: item.variant?.nameEn || null,
+        sku: item.variant?.sku || item.sku || item.product?.sku || null,
         productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
       })),
       notes: (order as any).notes || order.order?.notes || null,
@@ -2496,7 +2508,7 @@ async function getFullSellerOrder(sellerOrderId: string) {
               images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
             },
           },
-          variant: { select: { id: true, image: true } },
+          variant: { select: { id: true, nameAr: true, nameEn: true, sku: true, price: true, image: true } },
         },
       },
       deliveryMethod: true,
@@ -4649,6 +4661,14 @@ router.get('/me/orders/:id', async (req: Request, res: Response, next: NextFunct
 
     ResponseUtil.success(res, {
       ...sellerOrder,
+      items: (sellerOrder.items || []).map((item: any) => ({
+        ...item,
+        variantName: item.variant?.nameAr || item.variant?.nameEn || null,
+        variantNameAr: item.variant?.nameAr || null,
+        variantNameEn: item.variant?.nameEn || null,
+        sku: item.variant?.sku || item.sku || item.product?.sku || null,
+        productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
+      })),
       deliveryMethodName,
       deliveryMethodCode,
     });

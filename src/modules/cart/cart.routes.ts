@@ -129,6 +129,10 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 
       storeMap[storeId].items.push({
         ...item,
+        variantName: item.variant?.nameAr || item.variant?.nameEn || null,
+        variantNameAr: item.variant?.nameAr || null,
+        variantNameEn: item.variant?.nameEn || null,
+        variantSku: item.variant?.sku || null,
         image: primaryImage,
         unitPrice,
         itemTotal,
