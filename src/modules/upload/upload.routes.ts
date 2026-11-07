@@ -1,13 +1,14 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import path from 'path';
-import dns from 'dns/promises';
 import { storageService } from '../../services/storage/storage.service';
 import { authenticate } from '../../middleware/auth.middleware';
 import { ResponseUtil } from '../../utils/response.util';
 import { AppError } from '../../middleware/error.middleware';
 import { uploadFileLimiter, uploadByUrlLimiter } from '../../middleware/rate-limiter.middleware';
 import { ImageProcessorService } from '../../services/storage/image-processor.service';
+import { fetchPublicMedia } from '../../utils/remote-media-fetch.util';
+import { validatePresignFileSize } from '../../utils/upload-policy.util';
 
 const router = Router();
 router.use(authenticate);
@@ -239,41 +240,7 @@ const upload = multer({
   },
 });
 
-export function isPrivateOrReservedHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().trim();
-  if (
-    host === 'localhost' ||
-    host.endsWith('.local') ||
-    host.endsWith('.internal') ||
-    host.endsWith('.corp') ||
-    host === '0.0.0.0' ||
-    host === '::1' ||
-    host === '[::1]' ||
-    host.startsWith('fe80:') ||
-    host.startsWith('fc00:') ||
-    host.startsWith('fd') ||
-    host.includes('::ffff:127.') ||
-    host.includes('::ffff:10.') ||
-    host.includes('::ffff:192.168.') ||
-    host.includes('::ffff:169.254.')
-  ) {
-    return true;
-  }
-
-  // IPv4 regex check
-  const ipv4Match = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (ipv4Match) {
-    const [_, o1, o2] = ipv4Match.map(Number);
-    if (o1 === 127) return true; // Loopback
-    if (o1 === 10) return true; // 10.0.0.0/8
-    if (o1 === 172 && o2 >= 16 && o2 <= 31) return true; // 172.16.0.0/12
-    if (o1 === 192 && o2 === 168) return true; // 192.168.0.0/16
-    if (o1 === 169 && o2 === 254) return true; // Link-local / Cloud metadata (AWS, GCP, Azure)
-    if (o1 === 0) return true;
-  }
-
-  return false;
-}
+export { isPrivateOrReservedHost } from '../../utils/url-security.util';
 
 // POST /api/v1/upload (single)
 router.post('/', uploadFileLimiter, upload.single('file'), async (req: Request, res: Response, next: NextFunction) => {
@@ -339,48 +306,16 @@ router.post('/by-url', uploadByUrlLimiter, async (req: Request, res: Response, n
       throw new AppError('بروتوكول الرابط غير مدعوم. يسمح فقط بروابط HTTP/HTTPS.', 400, 'INVALID_PROTOCOL');
     }
 
-    if (isPrivateOrReservedHost(parsedUrl.hostname)) {
-      throw new AppError('لا يمكن استرداد الملفات من عناوين الشبكة الداخلية أو العناوين المحجوزة.', 403, 'SSRF_BLOCKED');
-    }
-
-    // Resolve DNS and verify resolved IP to prevent DNS rebinding attacks
     try {
-      const resolved = await dns.lookup(parsedUrl.hostname);
-      if (isPrivateOrReservedHost(resolved.address)) {
-        throw new AppError('لا يمكن استرداد الملفات من عناوين الشبكة الداخلية أو العناوين المحجوزة.', 403, 'SSRF_BLOCKED');
+      const maxSize = FOLDER_MAX_SIZES[folder] || 10 * 1024 * 1024;
+      const response = await fetchPublicMedia(cleanUrl, maxSize, 10000);
+      const rawContentType = response.contentType || '';
+
+      if (!ALLOWED_MIME_TYPES.has(rawContentType)) {
+        throw new AppError('نوع محتوى الملف المسترد غير مدعوم أو غير آمن.', 400, 'UNSUPPORTED_MEDIA_TYPE');
       }
-    } catch (dnsErr: any) {
-      if (dnsErr instanceof AppError) throw dnsErr;
-      throw new AppError('تعذر التحقق من عنوان الخادم للرابط المطلوب.', 400, 'DNS_LOOKUP_FAILED');
-    }
 
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10000);
-
-      const response = await fetch(cleanUrl, {
-        signal: controller.signal,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) SOUQNA-Media-Fetcher/1.0',
-          'Accept': 'image/jpeg,image/png,image/webp,image/gif,application/pdf,video/mp4',
-        },
-      });
-      clearTimeout(timeout);
-
-      if (response.ok) {
-        const rawContentType = (response.headers.get('content-type') || '').toLowerCase().split(';')[0].trim();
-
-        if (!ALLOWED_MIME_TYPES.has(rawContentType)) {
-          throw new AppError('نوع محتوى الملف المسترد غير مدعوم أو غير آمن.', 400, 'UNSUPPORTED_MEDIA_TYPE');
-        }
-
-        const arrayBuffer = await response.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-
-        const maxSize = FOLDER_MAX_SIZES[folder] || 10 * 1024 * 1024;
-        if (buffer.length > maxSize) {
-          throw new AppError(`حجم الملف المسترد يتجاوز الحد الأقصى (${Math.round(maxSize / (1024 * 1024))} ميجابايت).`, 400, 'FILE_TOO_LARGE');
-        }
+      const buffer = response.body;
 
         // Verify buffer magic bytes
         const detected = ImageProcessorService.detectMimeFromBuffer(buffer);
@@ -400,8 +335,7 @@ router.post('/by-url', uploadByUrlLimiter, async (req: Request, res: Response, n
 
         const result = await storageService.uploadFile(mockFile, folder);
         ResponseUtil.created(res, result, 'تم تحميل وحفظ الملف بنجاح');
-        return;
-      }
+      return;
     } catch (fetchErr: any) {
       if (fetchErr instanceof AppError) throw fetchErr;
       console.warn('[Upload by URL] Direct download failed:', fetchErr?.message);
@@ -420,7 +354,7 @@ router.post('/presign', uploadFileLimiter, async (req: Request, res: Response, n
     const folder = sanitizeFolder(rawFolder);
     const filename = String(req.body.filename || req.body.name || `file_${Date.now()}`);
     let mimeType = String(req.body.mimeType || req.body.contentType || '').toLowerCase().trim();
-    const fileSize = typeof req.body.fileSize === 'number' ? req.body.fileSize : undefined;
+    const fileSize = req.body.fileSize;
 
     // Authorization checks:
     const userRole = (req as any).user?.role;
@@ -449,13 +383,7 @@ router.post('/presign', uploadFileLimiter, async (req: Request, res: Response, n
     }
 
     const maxSize = FOLDER_MAX_SIZES[folder] || 15 * 1024 * 1024;
-    if (fileSize && fileSize > maxSize) {
-      throw new AppError(
-        `حجم الملف يتجاوز الحد الأقصى المسموح (${Math.round(maxSize / (1024 * 1024))} ميجابايت)`,
-        400,
-        'FILE_TOO_LARGE'
-      );
-    }
+    validatePresignFileSize(fileSize, maxSize);
 
     const presigned = await storageService.createPresignedUploadUrl(
       folder,

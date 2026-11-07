@@ -118,6 +118,72 @@ class RedisService {
     }
   }
 
+  /** Read security state from shared Redis, bypassing the process-local cache. */
+  async getAuthoritative(key: string): Promise<string | null> {
+    if (this.isConnected && this.client) return this.client.get(key);
+    if (config.env === 'development' || config.env === 'test') {
+      const item = this.memoryCache.get(key);
+      if (item && (!item.expiry || item.expiry > Date.now())) return item.value;
+      return null;
+    }
+    throw new Error('Shared Redis is unavailable for security-sensitive state');
+  }
+
+  async setAuthoritative(key: string, value: string, ttlSeconds = 0): Promise<void> {
+    if (this.isConnected && this.client) {
+      if (ttlSeconds > 0) await this.client.set(key, value, 'EX', ttlSeconds);
+      else await this.client.set(key, value);
+      this.memoryCache.set(key, { value, expiry: ttlSeconds > 0 ? Date.now() + ttlSeconds * 1000 : 0 });
+      return;
+    }
+    if (config.env === 'development' || config.env === 'test') return this.set(key, value, ttlSeconds);
+    throw new Error('Shared Redis is unavailable for security-sensitive state');
+  }
+
+  async deleteAuthoritative(key: string): Promise<void> {
+    if (this.isConnected && this.client) await this.client.del(key);
+    else if (config.env !== 'development' && config.env !== 'test') {
+      throw new Error('Shared Redis is unavailable for security-sensitive state');
+    }
+    this.memoryCache.delete(key);
+  }
+
+  async getAndDeleteAuthoritative(key: string): Promise<string | null> {
+    if (this.isConnected && this.client) {
+      const value = await this.client.getdel(key);
+      this.memoryCache.delete(key);
+      return value;
+    }
+    if (config.env === 'development' || config.env === 'test') {
+      const item = this.memoryCache.get(key);
+      this.memoryCache.delete(key);
+      return !item || (item.expiry && item.expiry <= Date.now()) ? null : item.value;
+    }
+    throw new Error('Shared Redis is unavailable for security-sensitive state');
+  }
+
+  /** Atomically rotate a refresh token only when the stored token still matches. */
+  async compareAndSetAuthoritative(key: string, expected: string, replacement: string, ttlSeconds: number): Promise<boolean> {
+    if (this.isConnected && this.client) {
+      const result = await this.client.eval(
+        "if redis.call('GET', KEYS[1]) == ARGV[1] then redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3]); return 1 else return 0 end",
+        1, key, expected, replacement, String(ttlSeconds)
+      );
+      if (Number(result) === 1) {
+        this.memoryCache.set(key, { value: replacement, expiry: Date.now() + ttlSeconds * 1000 });
+        return true;
+      }
+      return false;
+    }
+    if (config.env === 'development' || config.env === 'test') {
+      const current = this.memoryCache.get(key);
+      if (!current || (current.expiry && current.expiry <= Date.now()) || current.value !== expected) return false;
+      this.memoryCache.set(key, { value: replacement, expiry: Date.now() + ttlSeconds * 1000 });
+      return true;
+    }
+    throw new Error('Shared Redis is unavailable for security-sensitive state');
+  }
+
   async del(key: string): Promise<void> {
     // 1. Invalidate L1 memory cache immediately (0ms)
     this.memoryCache.delete(key);
@@ -367,7 +433,11 @@ class RedisService {
       }
     }
 
-    // In-memory fallback
+    if (config.env !== 'development' && config.env !== 'test') {
+      throw new Error('Shared Redis is unavailable for idempotency state');
+    }
+
+    // In-memory fallback for isolated local development/tests only.
     const now = Date.now();
     const existing = this.memoryCache.get(key);
     if (existing && (existing.expiry === 0 || existing.expiry > now)) {

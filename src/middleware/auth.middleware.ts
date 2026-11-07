@@ -2,6 +2,8 @@ import { Request, Response, NextFunction } from 'express';
 import { JwtUtil, TokenPayload } from '../utils/jwt.util';
 import { AppError } from './error.middleware';
 import { prisma } from '../database/prisma';
+import { redis } from '../database/redis';
+import { hasActiveSession } from '../utils/auth-session.util';
 
 declare global {
   namespace Express {
@@ -28,6 +30,10 @@ export const authenticate = async (
     }
 
     const payload = JwtUtil.verifyAccessToken(token);
+    const activeSession = await redis.getAuthoritative(`active_session:${payload.userId}`);
+    if (!hasActiveSession(payload.sid, activeSession)) {
+      throw new AppError('Session has been revoked. Please sign in again.', 401, 'SESSION_REVOKED');
+    }
 
     // Verify user is still active in database
     const user = await prisma.user.findUnique({
@@ -72,7 +78,8 @@ export const optionalAuth = async (
 
     if (token) {
       const payload = JwtUtil.verifyAccessToken(token);
-      req.user = payload;
+      const activeSession = await redis.getAuthoritative(`active_session:${payload.userId}`);
+      if (hasActiveSession(payload.sid, activeSession)) req.user = payload;
     }
     next();
   } catch {

@@ -87,6 +87,7 @@ export class AdminSessionService {
     const epochNow = Math.floor(Date.now() / 1000);
     // Delete single/primary refresh token
     await redis.del(`refresh:${userId}`);
+    await redis.deleteAuthoritative(`active_session:${userId}`);
     // Record revocation timestamp
     await redis.set(`admin:session_revoked_at:${userId}`, String(epochNow), 30 * 24 * 3600); // 30 days retention
   }
@@ -107,7 +108,7 @@ export class AdminSessionService {
     }
 
     // Token was issued before revocation event
-    return tokenIat < revokedAt;
+    return tokenIat <= revokedAt;
   }
 
   /**

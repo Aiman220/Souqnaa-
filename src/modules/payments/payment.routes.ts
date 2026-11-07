@@ -8,6 +8,8 @@ import { requireFeature } from '../remote-config/remote-config.middleware';
 import { remoteConfigService } from '../remote-config/remote-config.service';
 import { financialLimiter, checkoutLimiter } from '../../middleware/rate-limiter.middleware';
 import { UrlSecurityUtil } from '../../utils/url-security.util';
+import { idempotencyMiddleware } from '../../middleware/idempotency.middleware';
+import { requireProviderVerifiedPayment } from './payment-confirmation.util';
 
 const router = Router();
 
@@ -51,60 +53,7 @@ router.post(
   requireFeature('online_payment', 'عمليات الدفع الإلكتروني معطلة حالياً لأسباب الصيانة التشغيلية.'),
   async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const orderId = String(req.params.orderId);
-    const { transactionId, gateway = 'Mada' } = req.body;
-
-    const order = await prisma.order.findUnique({
-      where: { id: orderId },
-      include: { payment: true },
-    });
-
-    if (!order) throw new AppError('Order not found', 404);
-
-    if (order.userId !== req.user!.userId && req.user!.role !== 'ADMIN') {
-      throw new AppError('Forbidden: Access denied to other customer orders', 403, 'FORBIDDEN');
-    }
-
-    if (req.user!.role !== 'ADMIN') {
-      throw new AppError(
-        'تأكيد الدفع المباشر من العميل معطل. يتم التأكيد آلياً عبر إشعارات البوابة (Webhook) أو مراجعة الحوالة بواسطة الإدارة.',
-        403,
-        'CLIENT_CONFIRMATION_DISABLED'
-      );
-    }
-
-    const payment = order.payment;
-    if (!payment) throw new AppError('Payment record not found for this order', 404);
-
-    const updated = await prisma.$transaction(async (tx) => {
-      const confirmed = await tx.payment.update({
-        where: { id: payment.id },
-        data: {
-          status: PaymentStatus.PAID,
-          transactionId: transactionId || `TXN-${Date.now()}`,
-          paidAt: new Date(),
-        },
-      });
-
-      await tx.paymentTransaction.create({
-        data: {
-          paymentId: payment.id,
-          gateway,
-          referenceId: transactionId || `REF-${Date.now()}`,
-          amount: payment.amount,
-          status: PaymentStatus.PAID,
-        },
-      });
-
-      await tx.order.update({
-        where: { id: orderId },
-        data: { status: 'CONFIRMED' },
-      });
-
-      return confirmed;
-    });
-
-    ResponseUtil.success(res, updated, 'Payment confirmed successfully');
+    requireProviderVerifiedPayment();
   } catch (error) {
     next(error);
   }
@@ -143,6 +92,7 @@ router.get('/platform-wallets', checkoutLimiter, async (req: Request, res: Respo
 router.post(
   '/:orderId/wallet-transfer',
   authenticate,
+  idempotencyMiddleware,
   financialLimiter,
   requireFeature('electronic_wallet_providers', 'الدفع عبر المحافظ الإلكترونية معطل حالياً.'),
   async (req: Request, res: Response, next: NextFunction) => {

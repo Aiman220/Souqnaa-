@@ -4,11 +4,12 @@ import { randomUUID } from 'crypto';
 import { JwtUtil } from '../../utils/jwt.util';
 import { prisma } from '../../database/prisma';
 import { verifyProductPayload, verifyOrderPayload } from '../../modules/chat/chat.routes';
+import { redis } from '../../database/redis';
 import { sendChatNotification, markChatNotificationsAsRead } from '../../modules/chat/chat.notification';
 import { config } from '../../config';
-import { redis } from '../../database/redis';
 import { SupportAgentStatus, SupportConversationStatus } from '@prisma/client';
 import { backendTelemetry } from '../telemetry/backend-telemetry.service';
+import { hasActiveSession } from '../../utils/auth-session.util';
 
 export class SocketService {
   private static instance: SocketService;
@@ -378,7 +379,7 @@ export class SocketService {
     });
 
     // JWT Authentication for WebSocket (with seamless guest fallback)
-    this.io.use((socket, next) => {
+    this.io.use(async (socket, next) => {
       try {
         const auth = socket.handshake.auth;
         const headers = socket.handshake.headers;
@@ -401,7 +402,14 @@ export class SocketService {
         }
         try {
           const payload = JwtUtil.verifyAccessToken(token);
-          socket.data.user = payload;
+          const activeSession = await redis.getAuthoritative(`active_session:${payload.userId}`);
+          const user = await prisma.user.findUnique({ where: { id: payload.userId }, select: { id: true, role: true, isActive: true } });
+          if (!hasActiveSession(payload.sid, activeSession) || !user?.isActive) {
+            socket.data.user = { userId: `guest_${socket.id}`, role: 'GUEST' };
+            socket.data.authError = 'Session expired or revoked';
+            return next();
+          }
+          socket.data.user = { ...payload, role: user.role };
           console.log(`[Socket.IO] Authenticated user: ${payload.userId} (${payload.role})`);
         } catch (tokenErr: any) {
           console.warn(`[Socket.IO] [AUTH] Handshake token verification failed (expired or invalid). Falling back to guest.`);

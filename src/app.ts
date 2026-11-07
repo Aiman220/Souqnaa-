@@ -10,7 +10,6 @@ import { config } from './config';
 import { errorHandler } from './middleware/error.middleware';
 import { globalLimiter } from './middleware/rate-limiter.middleware';
 import { requestIdMiddleware } from './middleware/request-id.middleware';
-import { idempotencyMiddleware } from './middleware/idempotency.middleware';
 import { performanceLoggerMiddleware } from './middleware/performance-logger.middleware';
 import { backendTelemetry } from './services/telemetry/backend-telemetry.service';
 import { maintenanceMiddleware, getMaintenanceConfig, setMaintenanceConfig } from './middleware/maintenance.middleware';
@@ -257,7 +256,6 @@ export const createApp = (): Application => {
   app.options('*', cors(corsOptions));
   app.use(requestIdMiddleware);
   app.use(performanceLoggerMiddleware);
-  app.use(idempotencyMiddleware);
   app.use(
     compression({
       threshold: 1024,

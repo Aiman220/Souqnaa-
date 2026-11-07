@@ -1796,8 +1796,8 @@ const handleGetWalletTransfers = async (req: Request, res: Response, next: NextF
   }
 };
 
-router.get('/payments/wallet-transfers', handleGetWalletTransfers);
-router.get('/orders/wallet-transfers', handleGetWalletTransfers);
+router.get('/payments/wallet-transfers', requirePermission('finance:view'), handleGetWalletTransfers);
+router.get('/orders/wallet-transfers', requirePermission('finance:view'), handleGetWalletTransfers);
 
 // POST /api/v1/admin/payments/:orderId/verify-wallet
 // Admin approves and verifies manual wallet transfer
@@ -1946,8 +1946,8 @@ const handleVerifyWalletPayment = async (req: Request, res: Response, next: Next
   }
 };
 
-router.post('/payments/:orderId/verify-wallet', handleVerifyWalletPayment);
-router.post('/orders/:orderId/verify-wallet', handleVerifyWalletPayment);
+router.post('/payments/:orderId/verify-wallet', requirePermission('finance:payments'), handleVerifyWalletPayment);
+router.post('/orders/:orderId/verify-wallet', requirePermission('finance:payments'), handleVerifyWalletPayment);
 
 // POST /api/v1/admin/payments/:orderId/reject-wallet
 // Admin rejects manual wallet transfer with reason

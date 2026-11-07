@@ -6,6 +6,8 @@ import { authenticate } from '../../middleware/auth.middleware';
 import { AppError } from '../../middleware/error.middleware';
 import { ImageProcessorService, ImageVariantName, IMAGE_VARIANTS } from '../../services/storage/image-processor.service';
 import { imageMetricsService } from '../../services/storage/image-metrics.service';
+import { prisma } from '../../database/prisma';
+import { isRefundEvidenceParticipant, isSellerReportOwnedBy, isStoredObjectMatch } from '../../utils/storage-access.util';
 
 const router = Router();
 
@@ -37,6 +39,7 @@ const MIME_MAP: Record<string, string> = {
 
 // Folder prefixes that require an authenticated session before streaming.
 const PRIVATE_FOLDER_PREFIXES = [
+  'chat/',
   'refunds/',
   'support/',
   'disputes/',
@@ -45,6 +48,41 @@ const PRIVATE_FOLDER_PREFIXES = [
 ];
 
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif', '.gif']);
+
+async function canReadPrivateObject(key: string, user: { userId: string; role: string }): Promise<boolean> {
+  if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') return true;
+  if (key.startsWith('reports/')) return user.role === 'SELLER' && isSellerReportOwnedBy(user.userId, key);
+  if (key.startsWith('documents/')) {
+    const seller = await prisma.seller.findFirst({
+      where: {
+        userId: user.userId,
+        OR: [
+          { idFrontUrl: { contains: key } }, { idBackUrl: { contains: key } },
+          { idSelfieUrl: { contains: key } }, { businessDocUrl: { contains: key } },
+        ],
+      },
+      select: { id: true, idFrontUrl: true, idBackUrl: true, idSelfieUrl: true, businessDocUrl: true },
+    });
+    return !!seller && [seller.idFrontUrl, seller.idBackUrl, seller.idSelfieUrl, seller.businessDocUrl]
+      .some((url) => isStoredObjectMatch(url, key));
+  }
+  if (key.startsWith('refunds/') || key.startsWith('disputes/')) {
+    const evidence = await prisma.refundEvidence.findMany({
+      where: { fileUrl: { contains: key } },
+      select: { fileUrl: true, refundRequest: { select: { customerId: true, seller: { select: { userId: true } } } } },
+    });
+    return evidence.some((item) => isStoredObjectMatch(item.fileUrl, key) &&
+      isRefundEvidenceParticipant(user.userId, item.refundRequest.customerId, item.refundRequest.seller.userId));
+  }
+  if (key.startsWith('support/') || key.startsWith('chat/')) {
+    const messages = await prisma.message.findMany({
+      where: { attachmentUrl: { contains: key }, conversation: { members: { some: { userId: user.userId } } } },
+      select: { attachmentUrl: true },
+    });
+    return messages.some((item) => isStoredObjectMatch(item.attachmentUrl, key));
+  }
+  return false;
+}
 
 /**
  * Normalizes user-supplied tier or variant string into standard ImageVariantName.
@@ -140,10 +178,9 @@ async function handleFileRequest(req: Request, res: Response, next: NextFunction
 
       // Role authorization for privileged folders
       const userRole = (req as any).user?.role;
-      if (key.startsWith('reports/')) {
-        if (userRole !== 'ADMIN' && userRole !== 'SUPER_ADMIN' && userRole !== 'SELLER') {
-          return res.status(403).json({ success: false, message: 'Forbidden: Insufficient permissions to access reports' });
-        }
+      const user = (req as any).user;
+      if (!user || !(await canReadPrivateObject(key, user))) {
+        return res.status(403).json({ success: false, message: 'Forbidden: You do not have access to this file' });
       }
     }
 

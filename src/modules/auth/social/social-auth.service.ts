@@ -130,7 +130,8 @@ export class SocialAuthenticationService {
         role: user.role,
       });
 
-      await redis.set(`refresh:${user.id}`, tokens.refreshToken, 7 * 24 * 3600);
+      await redis.setAuthoritative(`refresh:${user.id}`, tokens.refreshToken, 7 * 24 * 3600);
+      await redis.setAuthoritative(`active_session:${user.id}`, tokens.sessionId, 7 * 24 * 3600);
 
       const isNewAccount = false;
       const requiresOnboarding =
@@ -228,7 +229,8 @@ export class SocialAuthenticationService {
               role: existingUserByEmail.role,
             });
 
-            await redis.set(`refresh:${existingUserByEmail.id}`, tokens.refreshToken, 7 * 24 * 3600);
+            await redis.setAuthoritative(`refresh:${existingUserByEmail.id}`, tokens.refreshToken, 7 * 24 * 3600);
+            await redis.setAuthoritative(`active_session:${existingUserByEmail.id}`, tokens.sessionId, 7 * 24 * 3600);
 
             const requiresOnboarding =
               existingUserByEmail.role === UserRoleType.SELLER && existingUserByEmail.seller
@@ -336,7 +338,8 @@ export class SocialAuthenticationService {
       role: newUser.role,
     });
 
-    await redis.set(`refresh:${newUser.id}`, tokens.refreshToken, 7 * 24 * 3600);
+    await redis.setAuthoritative(`refresh:${newUser.id}`, tokens.refreshToken, 7 * 24 * 3600);
+    await redis.setAuthoritative(`active_session:${newUser.id}`, tokens.sessionId, 7 * 24 * 3600);
 
     return {
       accessToken: tokens.accessToken,

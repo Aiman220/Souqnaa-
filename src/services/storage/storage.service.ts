@@ -136,8 +136,17 @@ class CloudflareR2StorageService implements IStorageService {
     return `${serverBase.replace(/\/+$/, '')}${config.apiPrefix}/storage/file`;
   }
 
+  private resolveAuthenticatedStorageBaseUrl(): string {
+    const serverBase = process.env.RENDER_EXTERNAL_URL || process.env.BACKEND_PUBLIC_URL ||
+      process.env.API_BASE_URL || config.domains?.backendPublicUrl || `http://localhost:${config.port || 3000}`;
+    return `${serverBase.replace(/\/+$/, '')}${config.apiPrefix}/storage/file`;
+  }
+
   getPublicUrl(key: string): string {
     const cleanKey = key.replace(/^\/+/, '');
+    if (/^(chat|refunds|support|disputes|documents|reports)\//.test(cleanKey)) {
+      return `${this.resolveAuthenticatedStorageBaseUrl()}/${cleanKey}`;
+    }
     return `${this.resolveBaseUrl()}/${cleanKey}`;
   }
 
@@ -245,7 +254,7 @@ class CloudflareR2StorageService implements IStorageService {
     folder = 'general',
     filename: string,
     mimeType: string,
-    _fileSize?: number
+    fileSize: number
   ): Promise<PresignedUploadResult> {
     const cleanFolder = folder.replace(/^\/+|\/+$/g, '') || 'general';
     const ext =
@@ -268,6 +277,7 @@ class CloudflareR2StorageService implements IStorageService {
       cleanFolder.startsWith('refund') ||
       cleanFolder.startsWith('dispute') ||
       cleanFolder.startsWith('support') ||
+      cleanFolder.startsWith('chat') ||
       cleanFolder.startsWith('document') ||
       cleanFolder.startsWith('report');
 
@@ -277,6 +287,7 @@ class CloudflareR2StorageService implements IStorageService {
       Bucket: this.bucket,
       Key: key,
       ContentType: mimeType,
+      ContentLength: fileSize,
       CacheControl: cacheControl,
     });
 
@@ -290,6 +301,7 @@ class CloudflareR2StorageService implements IStorageService {
       expiresIn: 3600,
       headers: {
         'Content-Type': mimeType,
+        'Content-Length': String(fileSize),
       },
     };
   }
@@ -422,7 +434,7 @@ class CloudflareR2StorageService implements IStorageService {
       key,
       uploadBuffer,
       detected.mime,
-      folder.startsWith('refunds') || folder.startsWith('disputes') || folder.startsWith('support')
+      folder.startsWith('refunds') || folder.startsWith('disputes') || folder.startsWith('support') || folder.startsWith('chat')
         ? 'private, no-store'
         : 'public, max-age=31536000, immutable'
     );

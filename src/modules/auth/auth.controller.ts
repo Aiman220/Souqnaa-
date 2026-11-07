@@ -3,6 +3,9 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../../database/prisma';
 import { redis } from '../../database/redis';
 import { JwtUtil } from '../../utils/jwt.util';
+import { rotateRefreshTokenAtomically } from '../../utils/refresh-rotation.util';
+import { createOAuthSessionKey } from '../../utils/auth-session.util';
+import { consumeSingleUseOAuthState, signSingleUseOAuthState } from '../../utils/oauth-state.util';
 import { ResponseUtil } from '../../utils/response.util';
 import { AppError } from '../../middleware/error.middleware';
 import { UserRoleType, SellerStatus, MembershipStatus, MembershipAuditChangeType } from '@prisma/client';
@@ -156,7 +159,8 @@ export class AuthController {
       });
 
       // Save refresh token in Redis
-      await redis.set(`refresh:${user.id}`, tokens.refreshToken, 7 * 24 * 3600);
+      await redis.setAuthoritative(`refresh:${user.id}`, tokens.refreshToken, 7 * 24 * 3600);
+      await redis.setAuthoritative(`active_session:${user.id}`, tokens.sessionId, 7 * 24 * 3600);
 
       const sanitizedUser = AuthController.sanitizeUser(user);
 
@@ -269,7 +273,8 @@ export class AuthController {
       });
 
       // Rotate / store refresh token in Redis
-      await redis.set(`refresh:${user.id}`, tokens.refreshToken, 7 * 24 * 3600);
+      await redis.setAuthoritative(`refresh:${user.id}`, tokens.refreshToken, 7 * 24 * 3600);
+      await redis.setAuthoritative(`active_session:${user.id}`, tokens.sessionId, 7 * 24 * 3600);
 
       const sanitizedUser = AuthController.sanitizeUser(user, {
         adminRoles: adminRoles.length > 0 ? adminRoles : undefined,
@@ -291,10 +296,8 @@ export class AuthController {
       const { refreshToken } = req.body;
       const payload = JwtUtil.verifyRefreshToken(refreshToken);
 
-      const cachedToken = await redis.get(`refresh:${payload.userId}`);
-      if (!cachedToken || cachedToken !== refreshToken) {
-        throw new AppError('Invalid or revoked refresh token.', 401);
-      }
+      const activeSession = await redis.getAuthoritative(`active_session:${payload.userId}`);
+      if (!payload.sid || !activeSession || activeSession !== payload.sid) throw new AppError('Invalid or revoked refresh token.', 401);
 
       const user = await prisma.user.findUnique({
         where: { id: payload.userId },
@@ -317,9 +320,14 @@ export class AuthController {
         userId: user.id,
         email: user.email,
         role: user.role,
+        sid: payload.sid,
       });
 
-      await redis.set(`refresh:${user.id}`, newTokens.refreshToken, 7 * 24 * 3600);
+      const rotated = await rotateRefreshTokenAtomically(
+        redis.compareAndSetAuthoritative.bind(redis), user.id, refreshToken, newTokens.refreshToken, 7 * 24 * 3600
+      );
+      if (!rotated) throw new AppError('Refresh token has already been used or revoked.', 401, 'REFRESH_TOKEN_REPLAYED');
+      await redis.setAuthoritative(`active_session:${user.id}`, newTokens.sessionId, 7 * 24 * 3600);
 
       const sanitizedUser = AuthController.sanitizeUser(user);
 
@@ -337,7 +345,10 @@ export class AuthController {
   static async logout(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       if (req.user) {
-        await redis.del(`refresh:${req.user.userId}`);
+        await Promise.all([
+          redis.deleteAuthoritative(`refresh:${req.user.userId}`),
+          redis.deleteAuthoritative(`active_session:${req.user.userId}`),
+        ]);
       }
       ResponseUtil.success(res, null, 'Logged out successfully');
     } catch (error) {
@@ -607,26 +618,14 @@ export class AuthController {
       // Handle Universal Web OAuth pre-verified session exchange
       if (typeof credential === 'string' && credential.startsWith('session_')) {
         const sessionKey = credential.replace('session_', '');
-        const cached = await redis.get(`social_session_verified:${sessionKey}`);
+        const cached = await redis.getAndDeleteAuthoritative(`social_session_verified:${sessionKey}`);
         if (cached) {
-          // Retain session for 60s to ensure idempotent token exchange across concurrent deep links and in-app polling
-          await redis.expire(`social_session_verified:${sessionKey}`, 60);
           const result = JSON.parse(cached);
           const message = result.isNewAccount
             ? 'تم إنشاء الحساب بنجاح عبر تسجيل الدخول الاجتماعي'
             : 'تم تسجيل الدخول بنجاح';
           ResponseUtil.success(res, result, message);
           return;
-        }
-
-        // Secondary check on primary social_session cache
-        const rawSession = await redis.get(`social_session:${sessionKey}`);
-        if (rawSession) {
-          const parsed = JSON.parse(rawSession);
-          if (parsed?.status === 'success' && parsed.data) {
-            ResponseUtil.success(res, parsed.data, 'تم تسجيل الدخول بنجاح');
-            return;
-          }
         }
 
         throw new AppError('جلسة تسجيل الدخول الاجتماعي منتهية الصلاحية أو غير صالحة', 401, 'SOCIAL_SESSION_EXPIRED');
@@ -720,7 +719,8 @@ export class AuthController {
       const providerParam = String(req.params.provider || '').toLowerCase();
       const role = (req.query.role as string) || SocialAccountType.CUSTOMER;
       const platform = (req.query.platform as string) || 'android';
-      const sessionKey = (req.query.session_key as string) || (req.query.sessionKey as string) || crypto.randomBytes(16).toString('hex');
+      // Session identifiers are server-generated bearer capabilities.
+      const sessionKey = createOAuthSessionKey();
 
       if (role === 'ADMIN' || role === 'admin') {
         throw new AppError('غير مسموح باستخدام تسجيل الدخول الاجتماعي لحسابات الإدارة.', 403);
@@ -735,10 +735,8 @@ export class AuthController {
 
       const state = AuthController.signOAuthState(oauthState);
 
-      // Best effort cache in Redis, but verification does not depend on Redis!
-      try {
-        await redis.set(`oauth_state:${state}`, JSON.stringify(oauthState), 1200);
-      } catch (_) {}
+      // OAuth state is single-use and must be held in shared Redis.
+      await redis.setAuthoritative(`oauth_state:${state}`, JSON.stringify(oauthState), 1200);
 
       // Resolve callback URL dynamically
       const protocol = req.headers['x-forwarded-proto'] || req.protocol;
@@ -784,15 +782,7 @@ export class AuthController {
     platform: string;
     provider: string;
   }): string {
-    const dataObj = {
-      ...payload,
-      iat: Date.now(),
-      nonce: crypto.randomBytes(8).toString('hex'),
-    };
-    const dataStr = Buffer.from(JSON.stringify(dataObj)).toString('base64url');
-    const secret = config.jwt.secret || 'souqna-oauth-state-secret-2026';
-    const sig = crypto.createHmac('sha256', secret).update(dataStr).digest('base64url');
-    return `${dataStr}.${sig}`;
+    return signSingleUseOAuthState(payload, config.jwt.secret || 'souqna-oauth-state-secret-2026');
   }
 
   static async verifyOAuthState(stateStr: string): Promise<{
@@ -801,38 +791,11 @@ export class AuthController {
     platform: string;
     provider: string;
   } | null> {
-    try {
-      const parts = stateStr.split('.');
-      if (parts.length === 2) {
-        const [dataStr, sig] = parts;
-        const secret = config.jwt.secret || 'souqna-oauth-state-secret-2026';
-        const expectedSig = crypto.createHmac('sha256', secret).update(dataStr).digest('base64url');
-        const sigBuf = Buffer.from(sig);
-        const expBuf = Buffer.from(expectedSig);
-        if (sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf)) {
-          const parsed = JSON.parse(Buffer.from(dataStr, 'base64url').toString('utf8'));
-          // Allow 25 minutes validity window
-          if (Date.now() - (parsed.iat || 0) < 25 * 60 * 1000) {
-            return {
-              sessionKey: parsed.sessionKey,
-              role: parsed.role,
-              platform: parsed.platform,
-              provider: parsed.provider,
-            };
-          }
-        }
-      }
-    } catch (_) {}
-
-    // Fallback to Redis lookup if needed
-    try {
-      const cached = await redis.get(`oauth_state:${stateStr}`);
-      if (cached) {
-        return JSON.parse(cached);
-      }
-    } catch (_) {}
-
-    return null;
+    return consumeSingleUseOAuthState(
+      stateStr,
+      config.jwt.secret || 'souqna-oauth-state-secret-2026',
+      (state) => redis.getAndDeleteAuthoritative(`oauth_state:${state}`)
+    );
   }
 
   static async socialCallback(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -1064,6 +1027,7 @@ export class AuthController {
 
   static async getSocialSession(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
+      res.setHeader('Cache-Control', 'no-store, private');
       const { sessionKey } = req.params;
       if (!sessionKey) {
         throw new AppError('Session key is required.', 400);
@@ -1078,7 +1042,7 @@ export class AuthController {
       const parsed = JSON.parse(cached);
       if (parsed.status === 'success') {
         await redis.del(`social_session:${sessionKey}`);
-        ResponseUtil.success(res, parsed, 'Social login completed successfully');
+        ResponseUtil.success(res, { status: 'success' }, 'Social login completed successfully');
       } else if (parsed.status === 'cancelled') {
         await redis.del(`social_session:${sessionKey}`);
         ResponseUtil.success(res, { status: 'cancelled' }, 'User cancelled login');

@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { redis } from '../database/redis';
+import { buildScopedIdempotencyKey } from '../utils/idempotency-key.util';
 
 /**
  * Production Idempotency Guard Middleware (§1, §3).
@@ -18,11 +19,11 @@ export async function idempotencyMiddleware(req: Request, res: Response, next: N
     (req.headers['idempotency-key'] as string) ||
     (req.body && typeof req.body.idempotencyKey === 'string' ? req.body.idempotencyKey : undefined);
 
-  if (!rawKey || typeof rawKey !== 'string' || !rawKey.trim()) {
+  if (!req.user?.userId || !rawKey || typeof rawKey !== 'string' || !rawKey.trim()) {
     return next();
   }
 
-  const idempotencyKey = rawKey.trim();
+  const idempotencyKey = buildScopedIdempotencyKey(req.user.userId, method, `${req.baseUrl}${req.path}`, rawKey);
 
   try {
     const acquireResult = await redis.acquireIdempotency(idempotencyKey, 86400);
@@ -62,9 +63,8 @@ export async function idempotencyMiddleware(req: Request, res: Response, next: N
 
     next();
   } catch (error) {
-    // Fail-open on unexpected cache transport errors so legitimate user mutations are not blocked
     console.warn('[Idempotency] Error checking idempotency key:', error);
-    next();
+    next(error);
   }
 }
 

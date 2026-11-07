@@ -49,6 +49,7 @@ export const SYSTEM_PERMISSIONS: PermissionDefinition[] = [
 
   // Finance & Wallet
   { action: 'finance:view', description: 'الاطلاع على المؤشرات المالية والأرصدة' },
+  { action: 'finance:payments', description: 'مراجعة وإثبات استلام مدفوعات العملاء' },
   { action: 'finance:withdrawals', description: 'الموافقة على طلبات السحب وتنفيذ الحوالات' },
   { action: 'finance:commissions', description: 'إدارة منظومة العمولات الرباعية والضرائب' },
   { action: 'tax:manage', description: 'إدارة محرك الضرائب، نسب القيمة المضافة والإعفاءات (Tax Engine)' },
@@ -96,6 +97,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRole, string[]> = {
   [SystemRole.FINANCE_ADMIN]: [
     'dashboard:view',
     'finance:view',
+    'finance:payments',
     'finance:withdrawals',
     'finance:commissions',
     'tax:manage',
