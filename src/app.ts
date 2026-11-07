@@ -219,6 +219,8 @@ export const createApp = (): Application => {
         allowedOriginsList.includes(origin) ||
         /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
         /^https:\/\/[a-zA-Z0-9-]+\.onrender\.com$/.test(origin) ||
+        /^https:\/\/([a-zA-Z0-9-]+\.)?web\.app$/.test(origin) ||
+        /^https:\/\/([a-zA-Z0-9-]+\.)?firebaseapp\.com$/.test(origin) ||
         /^https:\/\/([a-zA-Z0-9-]+\.)?souqnaa\.com$/.test(origin)
       ) {
         callback(null, true);
