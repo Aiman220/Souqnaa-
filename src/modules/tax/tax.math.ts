@@ -30,7 +30,7 @@ export class TaxMath {
    */
   public static multiply(a: number, b: number, decimals: number = this.DEFAULT_DECIMALS): number {
     const factor = Math.pow(10, decimals);
-    const result = (a * b);
+    const result = (Math.round(a * factor) * Math.round(b * factor)) / (factor * factor);
     return this.round(result, RoundingStrategy.HALF_UP, decimals);
   }
 

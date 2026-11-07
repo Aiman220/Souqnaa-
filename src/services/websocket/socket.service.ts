@@ -353,7 +353,25 @@ export class SocketService {
 
   private setup(httpServer: HttpServer): void {
     this.io = new Server(httpServer, {
-      cors: { origin: '*', methods: ['GET', 'POST'] },
+      cors: {
+        origin: (origin, callback) => {
+          if (!origin) {
+            // Allow mobile apps, curl, flutter native sockets without origin
+            callback(null, true);
+          } else if (
+            (config.env !== 'production' && config.corsOrigin === '*') ||
+            (config.env !== 'production' && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) ||
+            /^https:\/\/(souqnaa(-[a-zA-Z0-9]+)?)\.onrender\.com$/.test(origin) ||
+            /^https:\/\/(souqnaa(-[a-zA-Z0-9]+)?)\.(web\.app|firebaseapp\.com)$/.test(origin) ||
+            /^https:\/\/([a-zA-Z0-9-]+\.)?souqnaa\.com$/.test(origin)
+          ) {
+            callback(null, true);
+          } else {
+            callback(new Error('Cross-Origin Request Blocked by SOUQNA CORS policy'));
+          }
+        },
+        methods: ['GET', 'POST'],
+      },
       pingTimeout: 20000,
       pingInterval: 25000,
       transports: ['websocket', 'polling'],

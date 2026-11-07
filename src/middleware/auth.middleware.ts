@@ -95,12 +95,9 @@ export const authorize = (...roles: string[]) => {
 export const requireRole = (roles: string[]) => authorize(...roles);
 
 export const requirePermissions = (permissions: string[]) => {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    // Basic authorization check
-    if (!req.user) {
-      return next(new AppError('Unauthorized', 401));
-    }
-    next();
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const { requirePermission } = await import('./rbac.middleware');
+    return requirePermission(...permissions)(req, res, next);
   };
 };
 

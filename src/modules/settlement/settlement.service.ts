@@ -8,7 +8,7 @@
 
 import { prisma } from '../../database/prisma';
 import { AppError } from '../../middleware/error.middleware';
-import { SettlementStatus, SellerOrderStatus } from '@prisma/client';
+import { SettlementStatus, SellerOrderStatus, Prisma } from '@prisma/client';
 import { TaxMath } from '../tax/tax.math';
 import { config } from '../../config';
 import { SellerFinancialRiskService } from '../commission/seller-financial-risk.service';
@@ -40,21 +40,44 @@ export class SettlementEngine {
   /**
    * Generates a unique, concurrency-safe Settlement Number: SET-YYYY-XXXXXX
    */
-  public static async generateSettlementNumber(): Promise<string> {
+  public static async generateSettlementNumber(tx?: Prisma.TransactionClient): Promise<string> {
+    const client = tx || prisma;
     const year = new Date().getFullYear();
-    const count = await prisma.settlement.count({
+    const prefix = `SET-${year}-`;
+
+    if (tx) {
+      try {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('settlement_number_generation'))`;
+      } catch (_) {}
+    }
+
+    const latest = await client.settlement.findFirst({
       where: {
-        createdAt: {
-          gte: new Date(`${year}-01-01T00:00:00.000Z`),
-          lt: new Date(`${year + 1}-01-01T00:00:00.000Z`),
+        settlementNumber: {
+          startsWith: prefix,
         },
       },
+      orderBy: {
+        settlementNumber: 'desc',
+      },
+      select: {
+        settlementNumber: true,
+      },
     });
-    let seqNum = count + 1;
-    let candidate = `SET-${year}-${String(seqNum).padStart(6, '0')}`;
-    while (await prisma.settlement.findUnique({ where: { settlementNumber: candidate } })) {
-      seqNum++;
-      candidate = `SET-${year}-${String(seqNum).padStart(6, '0')}`;
+
+    let nextSeq = 1;
+    if (latest && latest.settlementNumber) {
+      const parts = latest.settlementNumber.split('-');
+      const parsed = parseInt(parts[2] || '', 10);
+      if (!isNaN(parsed)) {
+        nextSeq = parsed + 1;
+      }
+    }
+
+    let candidate = `${prefix}${String(nextSeq).padStart(6, '0')}`;
+    while (await client.settlement.findUnique({ where: { settlementNumber: candidate } })) {
+      nextSeq++;
+      candidate = `${prefix}${String(nextSeq).padStart(6, '0')}`;
     }
     return candidate;
   }
@@ -225,46 +248,84 @@ export class SettlementEngine {
       TaxMath.subtract(TaxMath.subtract(netSettlementAmount, reserveAmount), debtRecoveredAmount)
     );
 
-    const settlementNumber = await this.generateSettlementNumber();
+    let maxRetries = 3;
+    let lastError: any = null;
 
-    return await prisma.$transaction(async (tx) => {
-      const settlement = await tx.settlement.create({
-        data: {
-          settlementNumber,
-          sellerId: input.sellerId,
-          periodStart: input.periodStart,
-          periodEnd: input.periodEnd,
-          settlementDate: new Date(),
-          currency,
-          status: SettlementStatus.PENDING,
-          grossSales,
-          discounts,
-          refunds,
-          commissionAmount,
-          taxAdjustments,
-          feeAmount,
-          authorizedAdjustments: 0,
-          deliveryReimbursementTotal,
-          sellerShippingContributionTotal,
-          netSettlementAmount,
-          reserveAmount,
-          debtRecoveredAmount,
-          payableSettlementAmount,
-          payoutMethod: input.payoutMethod || 'WALLET',
-          paymentReference: input.paymentReference,
-          notes: input.notes,
-          items: {
-            create: itemsData,
-          },
-        },
-        include: {
-          items: true,
-          seller: { include: { stores: true } },
-        },
-      });
+    while (maxRetries > 0) {
+      maxRetries--;
 
-      return settlement;
-    });
+      try {
+        return await prisma.$transaction(async (tx) => {
+          // Re-verify that none of the candidate orders have been settled concurrently
+          if (itemsData.length > 0) {
+            const candidateOrderIds = itemsData.map((item) => item.sellerOrderId);
+            const alreadySettledItem = await tx.settlementItem.findFirst({
+              where: {
+                sellerOrderId: { in: candidateOrderIds },
+              },
+              select: {
+                sellerOrderId: true,
+                settlement: { select: { settlementNumber: true } },
+              },
+            });
+
+            if (alreadySettledItem) {
+              throw new AppError(
+                `تعارض متزامن: الطلب [${alreadySettledItem.sellerOrderId}] تمت تسويته مسبقاً في التسوية [${alreadySettledItem.settlement?.settlementNumber || ''}]`,
+                409,
+                'SETTLEMENT_ORDER_ALREADY_SETTLED'
+              );
+            }
+          }
+
+          const settlementNumber = await this.generateSettlementNumber(tx);
+
+          const settlement = await tx.settlement.create({
+            data: {
+              settlementNumber,
+              sellerId: input.sellerId,
+              periodStart: input.periodStart,
+              periodEnd: input.periodEnd,
+              settlementDate: new Date(),
+              currency,
+              status: SettlementStatus.PENDING,
+              grossSales,
+              discounts,
+              refunds,
+              commissionAmount,
+              taxAdjustments,
+              feeAmount,
+              authorizedAdjustments: 0,
+              deliveryReimbursementTotal,
+              sellerShippingContributionTotal,
+              netSettlementAmount,
+              reserveAmount,
+              debtRecoveredAmount,
+              payableSettlementAmount,
+              payoutMethod: input.payoutMethod || 'WALLET',
+              paymentReference: input.paymentReference,
+              notes: input.notes,
+              items: {
+                create: itemsData,
+              },
+            },
+            include: {
+              items: true,
+              seller: { include: { stores: true } },
+            },
+          });
+
+          return settlement;
+        });
+      } catch (err: any) {
+        lastError = err;
+        if (err?.code === 'P2002' && maxRetries > 0) {
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw lastError;
   }
 
   /**

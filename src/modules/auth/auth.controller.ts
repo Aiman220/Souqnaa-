@@ -1377,8 +1377,8 @@ function renderOAuthResultHtml(
   params.set('status', success ? 'success' : 'error');
   if (provider) params.set('provider', provider.toLowerCase());
   if (sessionKey) params.set('sessionKey', sessionKey);
-  if (accessToken) params.set('token', accessToken);
-  if (refreshToken) params.set('refresh', refreshToken);
+  // Security Remediation (CRT-003): Never leak JWT access or refresh tokens into URL query parameters.
+  // The client exchanges the opaque sessionKey securely via POST/GET backchannel.
   if (message) params.set('message', message);
 
   const queryString = params.toString();
@@ -1489,8 +1489,7 @@ function renderOAuthResultHtml(
               window.opener.postMessage({
                 type: 'SOUQNA_OAUTH_RESULT',
                 success: ${success},
-                sessionKey: '${sessionKey || ''}',
-                token: '${accessToken || ''}'
+                sessionKey: '${sessionKey || ''}'
               }, '*');
             }
           } catch (_) {}
@@ -1503,8 +1502,7 @@ function renderOAuthResultHtml(
           window.opener.postMessage({
             type: 'SOUQNA_OAUTH_RESULT',
             success: ${success},
-            sessionKey: '${sessionKey || ''}',
-            token: '${accessToken || ''}'
+            sessionKey: '${sessionKey || ''}'
           }, '*');
           setTimeout(function() {
             try { window.close(); } catch (_) {}

@@ -46,7 +46,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       ];
     }
 
-    const [total, disputes] = await Promise.all([
+    const [total, disputes, pendingCount] = await Promise.all([
       prisma.dispute.count({ where }),
       prisma.dispute.findMany({
         where,
@@ -62,10 +62,18 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
           },
         },
       }),
+      prisma.dispute.count({
+        where: {
+          ...(where.sellerId ? { sellerId: where.sellerId } : {}),
+          ...(where.customerId ? { customerId: where.customerId } : {}),
+          status: { in: [DisputeStatus.OPEN, DisputeStatus.UNDER_REVIEW] },
+        },
+      }),
     ]);
 
     ResponseUtil.success(res, {
       disputes,
+      pendingCount,
       pagination: {
         page,
         limit,

@@ -37,6 +37,7 @@ import { AdminNotificationRouterService } from '../notifications/services/admin-
 import { NotificationCategory, NotificationPriority } from '../notifications/notification.types';
 import { interGovernorateTrackingService } from '../../services/delivery/inter-governorate-tracking.service';
 import { WishlistAlertsJob } from '../../services/jobs/wishlist-alerts.job';
+import { StorefrontInvalidatorService } from '../../services/storefront-invalidator.service';
 
 const router = Router();
 router.use(authenticate, requireSeller);
@@ -1487,7 +1488,7 @@ async function createSellerProduct(userId: string, body: any) {
       .filter(Boolean) as string[]
   );
 
-  return await prisma.$transaction(async (tx) => {
+  const createdProduct = await prisma.$transaction(async (tx) => {
     const created = await tx.product.create({
       data: {
         storeId: store.id,
@@ -1566,6 +1567,20 @@ async function createSellerProduct(userId: string, body: any) {
       },
     });
   });
+
+  if (createdProduct) {
+    StorefrontInvalidatorService.onProductMutation({
+      productId: createdProduct.id,
+      slug: createdProduct.slug,
+      storeId: store.id,
+      storeSlug: store.slug,
+      categoryId: createdProduct.categoryId,
+    }).catch((err) => {
+      console.warn('[createSellerProduct] Invalidation error:', err);
+    });
+  }
+
+  return createdProduct;
 }
 
 async function updateSellerProduct(userId: string, productId: string, body: any) {
@@ -1599,8 +1614,7 @@ async function updateSellerProduct(userId: string, productId: string, body: any)
     variants,
   } = body;
 
-  return await prisma.$transaction(async (tx) => {
-    // 1. Update Base Product
+  const updatedProduct = await prisma.$transaction(async (tx) => {
     const prod = await tx.product.update({
       where: { id: productId },
       data: {
@@ -1680,6 +1694,21 @@ async function updateSellerProduct(userId: string, productId: string, body: any)
       },
     });
   });
+
+  if (updatedProduct) {
+    const store = seller.stores.find((s) => s.id === updatedProduct.storeId) || seller.stores[0];
+    StorefrontInvalidatorService.onProductMutation({
+      productId: updatedProduct.id,
+      slug: updatedProduct.slug,
+      storeId: store?.id,
+      storeSlug: store?.slug,
+      categoryId: updatedProduct.categoryId,
+    }).catch((err) => {
+      console.warn('[updateSellerProduct] Invalidation error:', err);
+    });
+  }
+
+  return updatedProduct;
 }
 
 async function deleteSellerProduct(userId: string, productId: string) {
@@ -1692,6 +1721,18 @@ async function deleteSellerProduct(userId: string, productId: string) {
   if (!product) throw new AppError('المنتج غير موجود أو لا تملك صلاحية حذفه', 404);
 
   await prisma.product.delete({ where: { id: productId } });
+
+  const store = seller.stores.find((s) => s.id === product.storeId) || seller.stores[0];
+  StorefrontInvalidatorService.onProductMutation({
+    productId: product.id,
+    slug: product.slug,
+    storeId: store?.id,
+    storeSlug: store?.slug,
+    categoryId: product.categoryId,
+    isDelete: true,
+  }).catch((err) => {
+    console.warn('[deleteSellerProduct] Invalidation error:', err);
+  });
 }
 
 // ── GET Endpoints ────────────────────────────────────────────────────────────

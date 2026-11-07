@@ -153,6 +153,11 @@ export const createApp = (): Application => {
     'https://staging-api.souqnaa.com',
     'https://staging-admin.souqnaa.com',
     'https://staging-seller.souqnaa.com',
+    // Firebase Hosting Deployments
+    'https://souqnaa-admin.web.app',
+    'https://souqnaa-admin.firebaseapp.com',
+    'https://souqnaa.web.app',
+    'https://souqnaa.firebaseapp.com',
     // Localhost & Emulators
     'http://localhost:3000',
     'http://localhost:3001',
@@ -221,12 +226,11 @@ export const createApp = (): Application => {
         // Allow mobile apps, curl, server-to-server requests without origin
         callback(null, true);
       } else if (
-        config.corsOrigin === '*' ||
+        (config.env !== 'production' && config.corsOrigin === '*') ||
         allowedOriginsList.includes(origin) ||
-        /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
-        /^https:\/\/[a-zA-Z0-9-]+\.onrender\.com$/.test(origin) ||
-        /^https:\/\/([a-zA-Z0-9-]+\.)?web\.app$/.test(origin) ||
-        /^https:\/\/([a-zA-Z0-9-]+\.)?firebaseapp\.com$/.test(origin) ||
+        (config.env !== 'production' && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) ||
+        /^https:\/\/(souqnaa(-[a-zA-Z0-9]+)?)\.onrender\.com$/.test(origin) ||
+        /^https:\/\/(souqnaa(-[a-zA-Z0-9]+)?)\.(web\.app|firebaseapp\.com)$/.test(origin) ||
         /^https:\/\/([a-zA-Z0-9-]+\.)?souqnaa\.com$/.test(origin)
       ) {
         callback(null, true);
@@ -598,7 +602,6 @@ export const createApp = (): Application => {
   app.use(`${p}/integrity`, integrityRoutes);
 
   app.use(`${p}/admin`, adminRoutes);
-  app.use('/admin', adminRoutes);
   // Authoritative Seller Financial Risk & Reserves Engine
   app.use(`${p}/admin/finance/risk`, sellerFinancialRiskAdminRoutes);
   app.use(`${p}/admin/financial-risk`, sellerFinancialRiskAdminRoutes);
@@ -629,8 +632,6 @@ export const createApp = (): Application => {
   // Production-Grade Remote Configuration & Feature Flags System
   app.use(`${p}/config/remote`, remoteConfigPublicRoutes);
   app.use(`${p}/remote-config`, remoteConfigPublicRoutes);
-  app.use('/config/remote', remoteConfigPublicRoutes);
-  app.use('/remote-config', remoteConfigPublicRoutes);
   app.use(`${p}/admin/feature-flags`, remoteConfigAdminRoutes);
 
   // Production-Grade Centralized Tax Engine (SOUQNAA Marketplace)
@@ -640,49 +641,35 @@ export const createApp = (): Application => {
   // Production-Grade Centralized Financial Statements Engine (SOUQNAA Marketplace)
   app.use(`${p}/seller`, sellerStatementsRouter);
   app.use(`${p}/admin`, adminStatementsRouter);
-  app.use('/seller', sellerStatementsRouter);
-  app.use('/admin', adminStatementsRouter);
 
   // Production-Grade Advanced Analytics Engine (Client Batch & Seller/Admin Analysis) (§39)
   app.use(`${p}/analytics`, analyticsRouter);
-  app.use('/analytics', analyticsRouter);
   app.use(`${p}/seller/analytics`, sellerAnalyticsRouter);
   app.use(`${p}/admin/analytics`, adminAnalyticsRouter);
-  app.use('/seller/analytics', sellerAnalyticsRouter);
-  app.use('/admin/analytics', adminAnalyticsRouter);
   app.use(`${p}/sellers/me/analytics`, sellerAnalyticsRouter);
   app.use(`${p}/admin/reports/analytics`, adminAnalyticsRouter);
-  app.use('/sellers/me/analytics', sellerAnalyticsRouter);
-  app.use('/admin/reports/analytics', adminAnalyticsRouter);
 
   // Production-Grade Customer Membership & VIP Tiers Engine
   app.use(`${p}/customers/me/membership`, customerMembershipRoutes);
   app.use(`${p}/customer/membership`, customerMembershipRoutes);
   app.use(`${p}/membership`, customerMembershipRoutes);
-  app.use('/customers/me/membership', customerMembershipRoutes);
-  app.use('/customer/membership', customerMembershipRoutes);
-  app.use('/membership', customerMembershipRoutes);
   app.use(`${p}/admin/membership`, adminMembershipRoutes);
-  app.use('/admin/membership', adminMembershipRoutes);
 
   // Production-Grade Universal App Lifecycle, Version Policy & Distribution Engine (§46)
   app.use(`${p}/app`, appLifecyclePublicRoutes);
   app.use(`${p}/admin/app`, appLifecycleAdminRoutes);
-  app.use('/admin/app', appLifecycleAdminRoutes);
 
   // Production-Grade Customer Profile Smart Action Center Engine
   app.use(`${p}/customers/me/action-center`, customerActionCenterRoutes);
   app.use(`${p}/customer/action-center`, customerActionCenterRoutes);
   app.use(`${p}/action-center`, customerActionCenterRoutes);
   app.use(`${p}/admin/action-center`, adminActionCenterRoutes);
-  app.use('/admin/action-center', adminActionCenterRoutes);
 
   // Production-Grade Authoritative Seller Performance Score Engine
   app.use(`${p}/seller`, sellerPerformanceRouter);
   app.use(`${p}/seller/me`, sellerPerformanceRouter);
   app.use(`${p}/sellers/me`, sellerPerformanceRouter);
   app.use(`${p}/admin`, adminSellerPerformanceRouter);
-  app.use('/admin', adminSellerPerformanceRouter);
 
   // 404 Route handler — do NOT echo raw req.originalUrl to avoid reflected path info leakage
   app.use((req: Request, res: Response) => {

@@ -122,9 +122,22 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       where: { ...userFilter, isRead: false },
     });
 
+    const parsedItems = items.map((item) => {
+      let parsedData = item.data;
+      if (typeof item.data === 'string') {
+        try {
+          parsedData = JSON.parse(item.data);
+        } catch (_) {}
+      }
+      return {
+        ...item,
+        data: parsedData,
+      };
+    });
+
     ResponseUtil.success(res, {
-      items,
-      notifications: items,
+      items: parsedItems,
+      notifications: parsedItems,
       total,
       unreadCount,
       page,

@@ -13,7 +13,7 @@ const HOME_CACHE_TTL_SECONDS = 60;
 
 export async function invalidateHomeFeedCache(): Promise<void> {
   try {
-    await redis.del(HOME_CACHE_KEY);
+    await redis.delPattern(`${HOME_CACHE_KEY}*`);
   } catch (_) {}
 }
 

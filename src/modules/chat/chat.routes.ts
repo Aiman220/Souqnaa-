@@ -609,21 +609,6 @@ router.post('/', conversationCreationLimiter, async (req: Request, res: Response
       }
     }
 
-    // 6. Graceful fallback to first active store in system if target user not directly found
-    if (!targetUserId || targetUserId === currentUserId) {
-      const anyStore = await prisma.store.findFirst({
-        where: {
-          isActive: true,
-          seller: { userId: { not: currentUserId } },
-        },
-        include: { seller: { select: { userId: true } } },
-      });
-      if (anyStore?.seller?.userId) {
-        targetUserId = anyStore.seller.userId;
-        storeName = anyStore.name;
-      }
-    }
-
     if (!targetUserId) {
       return ResponseUtil.error(res, 'Could not determine conversation participant', 400);
     }

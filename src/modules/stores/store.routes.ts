@@ -15,6 +15,16 @@ const router = Router();
 
 const STOREFRONT_TTL = 60; // 1 minute Redis TTL
 
+export async function invalidateStorefrontCache(slugOrId?: string): Promise<void> {
+  try {
+    if (slugOrId) {
+      await redis.delPattern(`storefront:${slugOrId}*`);
+    } else {
+      await redis.delPattern('storefront:*');
+    }
+  } catch (_) {}
+}
+
 // Helper: resolve store by id OR slug
 async function resolveStore(idOrSlug: string) {
   return prisma.store.findFirst({
@@ -323,8 +333,8 @@ router.get('/:slug/products', storefrontLimiter, async (req: Request, res: Respo
         ? { price: { ...(minPrice !== undefined && { gte: minPrice }), ...(maxPrice !== undefined && { lte: maxPrice }) } }
         : {}),
       ...(minRating !== undefined && { rating: { gte: minRating } }),
-      ...(hasDiscount && { discountPrice: { not: null } }),
-      ...(inStock && { stock: { gt: 0 } }),
+      ...(hasDiscount && { compareAtPrice: { not: null } }),
+      ...(inStock && { inventory: { quantity: { gt: 0 } } }),
     };
 
     const orderBy: any = (() => {

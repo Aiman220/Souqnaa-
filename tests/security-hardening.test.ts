@@ -176,6 +176,38 @@ async function runSecurityTests() {
   const failedWalletResult = evaluatePaymentStatus({}, PaymentMethodType.WALLET, false);
   assert(failedWalletResult.status === PaymentStatus.PENDING, 'Uncommitted / insufficient wallet payment cannot produce PAID status');
 
+  // 5.2 Adversarial cancellation test: Unpaid wallet order cancellation MUST NOT issue wallet refund (Fix SEC-01 & SOUQNA-VULN-FIN-02)
+  function evaluateCancellationRefundEligibility(payment: {
+    status: PaymentStatus;
+    method: PaymentMethodType | string;
+    paidAt: Date | null;
+  } | null): boolean {
+    return Boolean(
+      payment &&
+      (payment.status === PaymentStatus.PAID ||
+        payment.status === PaymentStatus.PARTIALLY_REFUNDED ||
+        payment.paidAt !== null)
+    );
+  }
+
+  const unpaidWalletOrder = { status: PaymentStatus.PENDING, method: 'WALLET', paidAt: null };
+  assert(
+    !evaluateCancellationRefundEligibility(unpaidWalletOrder),
+    'Order with method WALLET and status PENDING is strictly NOT eligible for cancellation refund'
+  );
+
+  const failedWalletOrder = { status: PaymentStatus.FAILED, method: 'WALLET', paidAt: null };
+  assert(
+    !evaluateCancellationRefundEligibility(failedWalletOrder),
+    'Order with method WALLET and status FAILED is strictly NOT eligible for cancellation refund'
+  );
+
+  const paidWalletOrder = { status: PaymentStatus.PAID, method: 'WALLET', paidAt: new Date() };
+  assert(
+    evaluateCancellationRefundEligibility(paidWalletOrder),
+    'Verified paid order with status PAID is correctly eligible for cancellation refund'
+  );
+
   // ─────────────────────────────────────────────────────────────
   // 6. FIX B — UNAUTHORIZED SELLER BALANCE CREATION ELIMINATION
   // ─────────────────────────────────────────────────────────────

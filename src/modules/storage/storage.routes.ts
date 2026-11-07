@@ -80,8 +80,12 @@ function resolveTargetWidth(variant?: ImageVariantName, requestedWidth?: number)
 /**
  * GET /api/v1/storage/metrics
  * Performance, bandwidth savings, and cache hit ratio observability snapshot (§9).
+ * Protected: requires ADMIN authentication.
  */
-router.get('/metrics', async (_req: Request, res: Response) => {
+router.get('/metrics', authenticate, async (req: any, res: Response) => {
+  if (req.user?.role !== 'ADMIN' && req.user?.role !== 'SUPER_ADMIN') {
+    return res.status(403).json({ success: false, message: 'Forbidden' });
+  }
   res.setHeader('Cache-Control', 'no-store, private');
   res.json({
     success: true,
@@ -133,6 +137,14 @@ async function handleFileRequest(req: Request, res: Response, next: NextFunction
           else resolve();
         });
       });
+
+      // Role authorization for privileged folders
+      const userRole = (req as any).user?.role;
+      if (key.startsWith('reports/')) {
+        if (userRole !== 'ADMIN' && userRole !== 'SUPER_ADMIN' && userRole !== 'SELLER') {
+          return res.status(403).json({ success: false, message: 'Forbidden: Insufficient permissions to access reports' });
+        }
+      }
     }
 
     const ext = path.extname(key).toLowerCase();

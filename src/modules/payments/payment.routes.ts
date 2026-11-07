@@ -6,7 +6,8 @@ import { AppError } from '../../middleware/error.middleware';
 import { PaymentStatus } from '@prisma/client';
 import { requireFeature } from '../remote-config/remote-config.middleware';
 import { remoteConfigService } from '../remote-config/remote-config.service';
-import { financialLimiter } from '../../middleware/rate-limiter.middleware';
+import { financialLimiter, checkoutLimiter } from '../../middleware/rate-limiter.middleware';
+import { UrlSecurityUtil } from '../../utils/url-security.util';
 
 const router = Router();
 
@@ -25,6 +26,10 @@ router.post(
       });
 
       if (!order) throw new AppError('Order not found', 404);
+
+      if (order.userId !== req.user!.userId && req.user!.role !== 'ADMIN') {
+        throw new AppError('Forbidden: Access denied to other customer orders', 403, 'FORBIDDEN');
+      }
 
       ResponseUtil.success(res, {
         clientSecret: `pi_mock_${order.id}_secret_${Date.now()}`,
@@ -60,7 +65,7 @@ router.post(
       throw new AppError('Forbidden: Access denied to other customer orders', 403, 'FORBIDDEN');
     }
 
-    if (req.user!.role !== 'ADMIN' && process.env.NODE_ENV !== 'test') {
+    if (req.user!.role !== 'ADMIN') {
       throw new AppError(
         'تأكيد الدفع المباشر من العميل معطل. يتم التأكيد آلياً عبر إشعارات البوابة (Webhook) أو مراجعة الحوالة بواسطة الإدارة.',
         403,
@@ -107,7 +112,7 @@ router.post(
 
 // GET /api/v1/payments/merchant-wallets
 // Returns official store/marketplace accounts for Yemeni digital wallet providers (dynamically configured by admin)
-router.get('/merchant-wallets', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/merchant-wallets', checkoutLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const isWalletsActive = await remoteConfigService.isFeatureActive('electronic_wallet_providers');
     if (!isWalletsActive) {
@@ -123,7 +128,7 @@ router.get('/merchant-wallets', async (req: Request, res: Response, next: NextFu
 
 // GET /api/v1/payments/platform-wallets
 // Returns active platform wallet accounts for customers & sellers depositing or paying
-router.get('/platform-wallets', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/platform-wallets', checkoutLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const channel = req.query.channel as string | undefined;
     const wallets = await remoteConfigService.getPlatformWalletAccounts(channel);
@@ -152,6 +157,33 @@ router.post(
 
       if (!walletProvider) throw new AppError('يرجى تحديد مزود المحفظة الرقمية', 400);
       if (!walletTransactionRef) throw new AppError('يرجى إدخال رقم العملية أو المرجع البنكي للتحويل', 400);
+
+      const cleanRef = String(walletTransactionRef).trim();
+      if (cleanRef.length < 3) {
+        throw new AppError('يرجى إدخال رقم مرجع تحويل صالح', 400);
+      }
+
+      // Replay protection: verify reference is not reused across different orders
+      const existingRef = await prisma.payment.findFirst({
+        where: {
+          walletTransactionRef: cleanRef,
+          orderId: { not: orderId },
+        },
+        select: { id: true },
+      });
+      if (existingRef) {
+        throw new AppError(
+          'رقم العملية أو المرجع البنكي تم استخدامه مسبقاً لطلب آخر. يرجى التأكد من بيانات التحويل.',
+          409,
+          'DUPLICATE_TRANSACTION_REFERENCE'
+        );
+      }
+
+      if (walletReceiptUrl && typeof walletReceiptUrl === 'string') {
+        if (!UrlSecurityUtil.isSafeUrl(walletReceiptUrl.trim())) {
+          throw new AppError('رابط إشعار التحويل غير صالح أو غير مسموح به لأسباب أمنية', 400, 'INVALID_RECEIPT_URL');
+        }
+      }
 
       const isProviderActive = await remoteConfigService.isWalletProviderActive(walletProvider);
       if (!isProviderActive) {

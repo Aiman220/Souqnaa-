@@ -288,14 +288,58 @@ export class OrderStateMachine {
     const result = await prisma.$transaction(async (tx) => {
       const soldCountUpdates: Array<{ productId: string; soldCount: number; delta: number }> = [];
 
-      // 1. Update Seller Order Status
-      const updatedSellerOrder = await tx.sellerOrder.update({
+      // 0. Concurrency & TOCTOU Protection: Re-read authoritative status inside transaction
+      const currentSubOrder = await tx.sellerOrder.findUnique({
         where: { id: sellerOrderId },
+        select: { status: true },
+      });
+
+      if (!currentSubOrder) throw new AppError('طلب المتجر غير موجود', 404);
+
+      const latestStatus = currentSubOrder.status as string;
+
+      // Idempotent: Already transitioned by another concurrent request
+      if (latestStatus === targetStatusStr) {
+        return {
+          sellerOrder,
+          parentStatus: sellerOrder.order?.status || latestStatus,
+          soldCountUpdates: [],
+        };
+      }
+
+      // Re-verify transition validity against the latest database state
+      if (!this.isValidTransition(latestStatus, targetStatusStr)) {
+        throw new AppError(
+          `تعارض في التحديث المتزامن: لا يمكن تحويل حالة الطلب الحالية [${latestStatus}] إلى [${targetStatusStr}]`,
+          409,
+          'CONCURRENT_TRANSITION_CONFLICT'
+        );
+      }
+
+      // 1. Update Seller Order Status using atomic CAS guard
+      const casUpdate = await tx.sellerOrder.updateMany({
+        where: {
+          id: sellerOrderId,
+          status: currentSubOrder.status,
+        },
         data: {
           status: targetStatus,
           ...(targetStatusStr === 'DELIVERED' ? { deliveredAt: new Date() } : {}),
         },
       });
+
+      if (casUpdate.count === 0) {
+        throw new AppError(
+          'تعارض في التحديث المتزامن للطلب. يرجى إعادة المحاولة.',
+          409,
+          'CONCURRENT_TRANSITION_CONFLICT'
+        );
+      }
+
+      const updatedSellerOrder = await tx.sellerOrder.findUnique({
+        where: { id: sellerOrderId },
+      });
+      if (!updatedSellerOrder) throw new AppError('طلب المتجر غير موجود', 404);
 
       // 2. Manage Inventory & Balance based on target status
       if (isCancellationOrRejection) {
@@ -314,14 +358,20 @@ export class OrderStateMachine {
           }
         }
 
-        // Revert seller pending balance safely without going below 0
-        const currentBal = await tx.sellerBalance.findUnique({
-          where: { sellerId: sellerOrder.sellerId },
-        });
-        if (currentBal) {
-          await tx.sellerBalance.update({
-            where: { id: currentBal.id },
-            data: { pendingBalance: Math.max(0, currentBal.pendingBalance - sellerOrder.sellerPayout) },
+        // Revert seller pending balance atomically without race conditions
+        const payout = sellerOrder.sellerPayout || 0;
+        if (payout > 0) {
+          await tx.sellerBalance.upsert({
+            where: { sellerId: sellerOrder.sellerId },
+            update: {
+              pendingBalance: { decrement: payout },
+            },
+            create: {
+              sellerId: sellerOrder.sellerId,
+              pendingBalance: 0,
+              availableBalance: 0,
+              withdrawnBalance: 0,
+            },
           });
         }
 
@@ -454,17 +504,16 @@ export class OrderStateMachine {
         }
 
         const isCodOrder = sellerOrder.order.payment?.method === 'CASH_ON_DELIVERY';
-        const currentBal = await tx.sellerBalance.findUnique({
-          where: { sellerId: sellerOrder.sellerId },
-        });
-        const newPending = currentBal ? Math.max(0, currentBal.pendingBalance - sellerOrder.sellerPayout) : 0;
+        const payout = sellerOrder.sellerPayout || 0;
 
         if (isCodOrder) {
           // COD: Cash is collected in person by seller/courier upon delivery.
           // Marketplace does NOT credit availableBalance to prevent double payout.
           await tx.sellerBalance.upsert({
             where: { sellerId: sellerOrder.sellerId },
-            update: { pendingBalance: newPending },
+            update: {
+              ...(payout > 0 ? { pendingBalance: { decrement: payout } } : {}),
+            },
             create: {
               sellerId: sellerOrder.sellerId,
               pendingBalance: 0,
@@ -473,31 +522,33 @@ export class OrderStateMachine {
             },
           });
         } else {
-          // Prepaid: Platform holds customer funds and moves payout to availableBalance
+          // Prepaid: Platform holds customer funds and moves payout atomically to availableBalance
           const bal = await tx.sellerBalance.upsert({
             where: { sellerId: sellerOrder.sellerId },
             update: {
-              pendingBalance: newPending,
-              availableBalance: { increment: sellerOrder.sellerPayout },
+              ...(payout > 0 ? { pendingBalance: { decrement: payout } } : {}),
+              availableBalance: { increment: payout },
             },
             create: {
               sellerId: sellerOrder.sellerId,
               pendingBalance: 0,
-              availableBalance: sellerOrder.sellerPayout,
+              availableBalance: payout,
               withdrawnBalance: 0,
             },
           });
 
           // Record credit transaction
-          await tx.sellerTransaction.create({
-            data: {
-              sellerBalanceId: bal.id,
-              amount: sellerOrder.sellerPayout,
-              type: TransactionType.CREDIT,
-              referenceId: sellerOrder.id,
-              description: `أرباح الطلب #${sellerOrder.order.orderNumber}`,
-            },
-          });
+          if (payout > 0) {
+            await tx.sellerTransaction.create({
+              data: {
+                sellerBalanceId: bal.id,
+                amount: payout,
+                type: TransactionType.CREDIT,
+                referenceId: sellerOrder.id,
+                description: `أرباح الطلب #${sellerOrder.order.orderNumber}`,
+              },
+            });
+          }
         }
 
         // Update payment status to PAID if it was CASH_ON_DELIVERY and PENDING
@@ -759,7 +810,7 @@ export class OrderStateMachine {
         data: {
           orderId: sellerOrder.orderId,
           sellerOrderId: sellerOrder.id,
-          fromStatus: currentStatus,
+          fromStatus: latestStatus,
           toStatus: targetStatusStr,
           status: targetStatus as any,
           changedBy,
@@ -779,7 +830,7 @@ export class OrderStateMachine {
           details: JSON.stringify({
             sellerOrderId: sellerOrder.id,
             orderId: sellerOrder.orderId,
-            fromStatus: currentStatus,
+            fromStatus: latestStatus,
             toStatus: targetStatusStr,
             role: changedByRole,
             reason,
@@ -1065,14 +1116,57 @@ export class OrderStateMachine {
     const result = await prisma.$transaction(async (tx) => {
       const soldCountUpdates: Array<{ productId: string; soldCount: number; delta: number }> = [];
 
-      // 1. Update Order Status
-      const updatedOrder = await tx.order.update({
+      // 0. Concurrency & TOCTOU Protection: Re-read authoritative order status inside transaction
+      const currentParentOrder = await tx.order.findUnique({
         where: { id: orderId },
+        select: { status: true },
+      });
+
+      if (!currentParentOrder) throw new AppError('الطلب غير موجود', 404);
+
+      const latestParentStatus = currentParentOrder.status as string;
+
+      // Idempotent: Already transitioned by another concurrent request
+      if (latestParentStatus === targetStatusStr) {
+        return {
+          updatedOrder: order,
+          soldCountUpdates: [],
+        };
+      }
+
+      // Re-verify transition validity against the latest database state
+      if (!this.isValidTransition(latestParentStatus, targetStatusStr)) {
+        throw new AppError(
+          `تعارض في التحديث المتزامن: لا يمكن تحويل حالة الطلب الحالية [${latestParentStatus}] إلى [${targetStatusStr}]`,
+          409,
+          'CONCURRENT_TRANSITION_CONFLICT'
+        );
+      }
+
+      // 1. Update Order Status using atomic CAS guard
+      const casUpdate = await tx.order.updateMany({
+        where: {
+          id: orderId,
+          status: currentParentOrder.status,
+        },
         data: {
           status: targetStatus,
           ...(targetStatusStr === 'DELIVERED' ? { deliveredAt: new Date() } : {}),
         },
       });
+
+      if (casUpdate.count === 0) {
+        throw new AppError(
+          'تعارض في التحديث المتزامن للطلب. يرجى إعادة المحاولة.',
+          409,
+          'CONCURRENT_TRANSITION_CONFLICT'
+        );
+      }
+
+      const updatedOrder = await tx.order.findUnique({
+        where: { id: orderId },
+      });
+      if (!updatedOrder) throw new AppError('الطلب غير موجود', 404);
 
       // 2. Cascade status to child SellerOrders
       for (const so of order.sellerOrders) {
@@ -1137,14 +1231,20 @@ export class OrderStateMachine {
             }
           }
 
-          // Revert pending balance safely without going below 0
-          const currentBal = await tx.sellerBalance.findUnique({
-            where: { sellerId: so.sellerId },
-          });
-          if (currentBal) {
-            await tx.sellerBalance.update({
-              where: { id: currentBal.id },
-              data: { pendingBalance: Math.max(0, currentBal.pendingBalance - so.sellerPayout) },
+          // Revert pending balance atomically without race conditions
+          const payout = so.sellerPayout || 0;
+          if (payout > 0) {
+            await tx.sellerBalance.upsert({
+              where: { sellerId: so.sellerId },
+              update: {
+                pendingBalance: { decrement: payout },
+              },
+              create: {
+                sellerId: so.sellerId,
+                pendingBalance: 0,
+                availableBalance: 0,
+                withdrawnBalance: 0,
+              },
             });
           }
         }
@@ -1192,17 +1292,16 @@ export class OrderStateMachine {
           }
 
           const isCodOrder = order.payment?.method === 'CASH_ON_DELIVERY';
-          const currentBal = await tx.sellerBalance.findUnique({
-            where: { sellerId: so.sellerId },
-          });
-          const newPending = currentBal ? Math.max(0, currentBal.pendingBalance - so.sellerPayout) : 0;
+          const payout = so.sellerPayout || 0;
 
           if (isCodOrder) {
             // COD: Cash is collected directly in-person by seller/courier.
             // Platform does not credit availableBalance to avoid double payout.
             await tx.sellerBalance.upsert({
               where: { sellerId: so.sellerId },
-              update: { pendingBalance: newPending },
+              update: {
+                ...(payout > 0 ? { pendingBalance: { decrement: payout } } : {}),
+              },
               create: {
                 sellerId: so.sellerId,
                 pendingBalance: 0,
@@ -1211,30 +1310,32 @@ export class OrderStateMachine {
               },
             });
           } else {
-            // Prepaid: Platform holds customer funds, move to availableBalance
+            // Prepaid: Platform holds customer funds, move atomically to availableBalance
             const bal = await tx.sellerBalance.upsert({
               where: { sellerId: so.sellerId },
               update: {
-                pendingBalance: newPending,
-                availableBalance: { increment: so.sellerPayout },
+                ...(payout > 0 ? { pendingBalance: { decrement: payout } } : {}),
+                availableBalance: { increment: payout },
               },
               create: {
                 sellerId: so.sellerId,
                 pendingBalance: 0,
-                availableBalance: so.sellerPayout,
+                availableBalance: payout,
                 withdrawnBalance: 0,
               },
             });
 
-            await tx.sellerTransaction.create({
-              data: {
-                sellerBalanceId: bal.id,
-                amount: so.sellerPayout,
-                type: TransactionType.CREDIT,
-                referenceId: so.id,
-                description: `أرباح الطلب #${order.orderNumber}`,
-              },
-            });
+            if (payout > 0) {
+              await tx.sellerTransaction.create({
+                data: {
+                  sellerBalanceId: bal.id,
+                  amount: payout,
+                  type: TransactionType.CREDIT,
+                  referenceId: so.id,
+                  description: `أرباح الطلب #${order.orderNumber}`,
+                },
+              });
+            }
           }
 
           // Authoritative Platform Commission collection & Outstanding liability handling
@@ -1261,7 +1362,6 @@ export class OrderStateMachine {
           order.payment &&
           (order.payment.status === PaymentStatus.PAID ||
             order.payment.status === PaymentStatus.PARTIALLY_REFUNDED ||
-            order.payment.method === 'WALLET' ||
             order.payment.paidAt !== null)
         );
         if (isPaid) {
@@ -1309,7 +1409,7 @@ export class OrderStateMachine {
       await tx.orderStatusHistory.create({
         data: {
           orderId: order.id,
-          fromStatus: currentStatus,
+          fromStatus: latestParentStatus,
           toStatus: targetStatusStr,
           status: targetStatus,
           changedBy,
@@ -1328,7 +1428,7 @@ export class OrderStateMachine {
           resource: 'orders',
           details: JSON.stringify({
             orderId: order.id,
-            fromStatus: currentStatus,
+            fromStatus: latestParentStatus,
             toStatus: targetStatusStr,
             role: changedByRole,
             reason,

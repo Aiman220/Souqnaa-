@@ -8,6 +8,19 @@ import { RefundEligibilityService } from '../services/refund-eligibility.service
 import { RefundStateMachine } from '../refund.state-machine';
 import { RefundActorType } from '@prisma/client';
 import { requireFeature } from '../../remote-config/remote-config.middleware';
+import { UrlSecurityUtil } from '../../../utils/url-security.util';
+
+const ALLOWED_REFUND_EVIDENCE_MIMES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+  'video/mp4',
+  'video/quicktime',
+  'video/webm',
+  'application/pdf',
+]);
 
 const router = Router();
 router.use(authenticate);
@@ -245,23 +258,48 @@ router.post('/:id/evidence', async (req: Request, res: Response, next: NextFunct
     const id = String(req.params.id);
     const { fileUrl, fileType, fileSize, mimeType, description } = req.body;
 
-    if (!fileUrl) throw new AppError('رابط الملف مطلوب', 400);
+    if (!fileUrl || typeof fileUrl !== 'string' || !fileUrl.trim()) {
+      throw new AppError('رابط الملف مطلوب', 400);
+    }
+
+    const trimmedUrl = fileUrl.trim();
+    if (!UrlSecurityUtil.isSafeUrl(trimmedUrl)) {
+      throw new AppError('رابط الملف غير صالح أو غير مسموح به لأسباب أمنية', 400, 'INVALID_FILE_URL');
+    }
+
+    const safeMime = String(mimeType || fileType || 'image/jpeg').toLowerCase().trim();
+    if (!ALLOWED_REFUND_EVIDENCE_MIMES.has(safeMime)) {
+      throw new AppError(
+        'نوع الملف غير مسموح به. الصيغ المسموح بها: JPEG, PNG, WebP, HEIC, MP4, PDF',
+        400,
+        'UNSUPPORTED_MIME_TYPE'
+      );
+    }
+
+    const safeSize = Number(fileSize) || 0;
+    if (safeSize < 0 || safeSize > 50 * 1024 * 1024) {
+      throw new AppError('حجم الملف يتجاوز الحد الأقصى المسموح به (50 ميجابايت)', 400);
+    }
 
     const refund = await prisma.refundRequest.findFirst({
       where: { id, customerId },
     });
     if (!refund) throw new AppError('طلب الاسترجاع غير موجود', 404);
 
+    const safeDescription = description && typeof description === 'string'
+      ? description.slice(0, 1000).trim()
+      : null;
+
     const evidence = await prisma.refundEvidence.create({
       data: {
         refundRequestId: id,
         uploadedBy: customerId,
         uploadedByRole: RefundActorType.CUSTOMER,
-        fileUrl,
-        fileType: fileType || 'image/jpeg',
-        fileSize: fileSize || 0,
-        mimeType: mimeType || 'image/jpeg',
-        description: description || null,
+        fileUrl: trimmedUrl,
+        fileType: safeMime,
+        fileSize: safeSize,
+        mimeType: safeMime,
+        description: safeDescription,
       },
     });
 

@@ -495,8 +495,14 @@ router.post('/', authenticate, requireSeller, async (req: Request, res: Response
       return created;
     });
 
-    catalogVisualIndexService.indexProduct(product.id).catch(err => {
-      console.warn('[VisualIndex] Background product reindex error:', err);
+    StorefrontInvalidatorService.onProductMutation({
+      productId: product.id,
+      slug: product.slug,
+      storeId: validStore.id,
+      storeSlug: validStore.slug,
+      categoryId: product.categoryId,
+    }).catch((err) => {
+      console.warn('[createProduct] Invalidation error:', err);
     });
 
     ResponseUtil.created(res, product, 'Product created successfully');
@@ -639,7 +645,14 @@ router.put('/:id', authenticate, requireSeller, async (req: Request, res: Respon
       console.warn('[Recommendation] Product cache invalidation error:', err);
     });
 
-    StorefrontInvalidatorService.invalidateProduct(id, updated.slug);
+    StorefrontInvalidatorService.onProductMutation({
+      productId: id,
+      slug: updated.slug,
+      storeId: existing.storeId,
+      categoryId: updated.categoryId,
+    }).catch((err) => {
+      console.warn('[updateProduct] Invalidation error:', err);
+    });
 
     ResponseUtil.success(res, updated, 'Product updated successfully');
   } catch (error) {

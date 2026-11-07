@@ -2925,7 +2925,7 @@ router.get('/disputes', async (req: Request, res: Response, next: NextFunction) 
       ];
     }
 
-    const [total, disputes] = await Promise.all([
+    const [total, disputes, pendingCount] = await Promise.all([
       prisma.dispute.count({ where }),
       prisma.dispute.findMany({
         where,
@@ -2941,6 +2941,11 @@ router.get('/disputes', async (req: Request, res: Response, next: NextFunction) 
           },
         },
         orderBy: { createdAt: 'desc' },
+      }),
+      prisma.dispute.count({
+        where: {
+          status: { in: [DisputeStatus.OPEN, DisputeStatus.UNDER_REVIEW] },
+        },
       }),
     ]);
 
@@ -3005,6 +3010,7 @@ router.get('/disputes', async (req: Request, res: Response, next: NextFunction) 
 
     ResponseUtil.success(res, {
       disputes: enrichedDisputes,
+      pendingCount,
       pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
     });
   } catch (error) {

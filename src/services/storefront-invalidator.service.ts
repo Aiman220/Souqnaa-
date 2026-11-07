@@ -93,4 +93,73 @@ export class StorefrontInvalidatorService {
     if (slug) tags.push(`store-${slug}`);
     this.triggerInvalidation({ tags });
   }
+
+  /**
+   * Comprehensive cache and real-time invalidator called when a product is created,
+   * updated, or deleted. Clears Redis home feed, store cache, search vocabulary,
+   * storefront web caches (Next.js/Cloudflare), and emits a WebSocket broadcast.
+   */
+  static async onProductMutation(options: {
+    productId: string;
+    slug?: string;
+    storeId?: string;
+    storeSlug?: string;
+    categoryId?: string;
+    isDelete?: boolean;
+  }): Promise<void> {
+    const { productId, slug, storeId, storeSlug, categoryId, isDelete } = options;
+
+    // 1. Invalidate Web Storefront (Next.js & Cloudflare Edge)
+    this.invalidateProduct(productId, slug);
+    if (storeId) this.invalidateStore(storeId, storeSlug);
+    if (categoryId) this.invalidateCategory(categoryId);
+
+    // 2. Invalidate Redis Caches
+    try {
+      const { redis } = await import('../database/redis');
+      await Promise.allSettled([
+        redis.delPattern('cache:home:feed*'),
+        redis.delPattern('recommendations:home:*'),
+        redis.del('search:catalog:vocab'),
+        redis.delPattern('search:suggestions:*'),
+        storeSlug ? redis.delPattern(`storefront:${storeSlug}*`) : Promise.resolve(),
+        storeId ? redis.delPattern(`storefront:${storeId}*`) : Promise.resolve(),
+        redis.del(`recommendations:product_page:${productId}`),
+        redis.delPattern(`recommendations:product:*:${productId}:*`),
+      ]);
+    } catch (err: any) {
+      console.warn('[StorefrontInvalidator] Redis invalidation error:', err?.message);
+    }
+
+    // 3. Update Visual Search index if not deleted
+    if (!isDelete) {
+      try {
+        const { catalogVisualIndexService } = await import('../modules/search/visual/catalog-visual-index.service');
+        catalogVisualIndexService.indexProduct(productId).catch((err) => {
+          console.warn('[VisualIndex] Background product reindex error:', err);
+        });
+      } catch (_) {}
+    }
+
+    // 4. Broadcast real-time WebSocket event to all connected customer apps
+    try {
+      const { SocketService } = await import('./websocket/socket.service');
+      const socket = SocketService.get();
+      if (socket) {
+        socket.emitGlobal(isDelete ? 'catalog:product_deleted' : 'catalog:product_created', {
+          productId,
+          slug,
+          storeId,
+          storeSlug,
+          categoryId,
+          timestamp: Date.now(),
+        });
+        socket.emitGlobal('catalog:updated', {
+          productId,
+          storeId,
+          timestamp: Date.now(),
+        });
+      }
+    } catch (_) {}
+  }
 }
