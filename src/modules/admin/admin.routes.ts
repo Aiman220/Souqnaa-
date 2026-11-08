@@ -39,6 +39,7 @@ import { notificationEventBus } from '../notifications/services/event-bus';
 import { setMaintenanceConfig } from '../../middleware/maintenance.middleware';
 import { SellerFinancialRiskService } from '../commission/seller-financial-risk.service';
 import { AdminRbacService, SYSTEM_PERMISSIONS } from './admin-rbac.service';
+import { resolveRefundAmount } from './refund-amount.policy';
 import { recommendationService } from '../recommendations/services/recommendation.service';
 
 const router = Router();
@@ -1910,34 +1911,36 @@ const handleVerifyWalletPayment = async (req: Request, res: Response, next: Next
     }, req);
 
     try {
-      SocketService.get()?.emitGlobal('payment:verified', {
+      const socketSvc = SocketService.get();
+      const sellerUsers = await prisma.seller.findMany({
+        where: { id: { in: order.sellerOrders.map((sellerOrder) => sellerOrder.sellerId) } },
+        select: { userId: true },
+      });
+      const paymentPayload = {
         orderId: order.id,
         orderNumber: order.orderNumber,
         status: PaymentStatus.PAID,
-      });
-      // Now that payment is verified by Admin, notify sellers so it appears in real-time under "جديدة / بانتظار القبول"
-      SocketService.get()?.emitGlobal('new:order', {
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-        total: order.total,
-      });
-      SocketService.get()?.emitGlobal('order:created', {
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-      });
-      SocketService.get()?.emitGlobal('order:status', {
+      };
+      const orderPayload = {
         orderId: order.id,
         orderNumber: order.orderNumber,
         status: result.updatedOrder.status,
-      });
-      SocketService.get()?.emitGlobal('order:updated', {
-        orderId: order.id,
-        status: result.updatedOrder.status,
-      });
-      SocketService.get()?.emitGlobal('seller:orders_updated', {
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-      });
+      };
+      if (socketSvc) {
+        socketSvc.emitToUser(order.userId, 'payment:verified', paymentPayload);
+        socketSvc.emitToUser(order.userId, 'order:created', { orderId: order.id, orderNumber: order.orderNumber });
+        socketSvc.emitToUser(order.userId, 'order:status', orderPayload);
+        socketSvc.emitToUser(order.userId, 'order:updated', { orderId: order.id, status: result.updatedOrder.status });
+        for (const seller of sellerUsers) {
+          socketSvc.emitToUser(seller.userId, 'new:order', { orderId: order.id, orderNumber: order.orderNumber, total: order.total });
+          socketSvc.emitToUser(seller.userId, 'order:created', { orderId: order.id, orderNumber: order.orderNumber });
+          socketSvc.emitToUser(seller.userId, 'order:status', orderPayload);
+          socketSvc.emitToUser(seller.userId, 'seller:orders_updated', { orderId: order.id, orderNumber: order.orderNumber });
+        }
+        void socketSvc.emitToAdminsWithPermission('finance:payments', 'payment:verified', paymentPayload);
+        void socketSvc.emitToAdminsWithPermission('orders:view', 'order:status', orderPayload);
+        void socketSvc.emitToAdminsWithPermission('orders:view', 'order:updated', { orderId: order.id, status: result.updatedOrder.status });
+      }
     } catch (_) {}
 
     ResponseUtil.success(res, result, 'تم التحقق من الحوالة وتأكيد دفع الطلب بنجاح');
@@ -1962,7 +1965,7 @@ const handleRejectWalletPayment = async (req: Request, res: Response, next: Next
 
     const order = await prisma.order.findFirst({
       where: { OR: [{ id: orderId }, { orderNumber: orderId }] },
-      include: { payment: true, user: true },
+      include: { payment: true, user: true, sellerOrders: true },
     });
 
     if (!order) throw new AppError('الطلب غير موجود', 404);
@@ -2074,30 +2077,35 @@ const handleRejectWalletPayment = async (req: Request, res: Response, next: Next
     }, req);
 
     try {
-      SocketService.get()?.emitGlobal('payment:rejected', {
+      const socketSvc = SocketService.get();
+      const sellerUsers = await prisma.seller.findMany({
+        where: { id: { in: order.sellerOrders.map((sellerOrder) => sellerOrder.sellerId) } },
+        select: { userId: true },
+      });
+      const paymentPayload = {
         orderId: order.id,
         orderNumber: order.orderNumber,
         status: PaymentStatus.FAILED,
-        reason,
-      });
-      SocketService.get()?.emitGlobal('order:cancelled', {
+      };
+      const orderPayload = {
         orderId: order.id,
         orderNumber: order.orderNumber,
         status: OrderStatus.CANCELLED_BY_ADMIN,
-      });
-      SocketService.get()?.emitGlobal('order:status', {
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-        status: OrderStatus.CANCELLED_BY_ADMIN,
-      });
-      SocketService.get()?.emitGlobal('order:updated', {
-        orderId: order.id,
-        status: OrderStatus.CANCELLED_BY_ADMIN,
-      });
-      SocketService.get()?.emitGlobal('seller:orders_updated', {
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-      });
+      };
+      if (socketSvc) {
+        socketSvc.emitToUser(order.userId, 'payment:rejected', { ...paymentPayload, reason });
+        socketSvc.emitToUser(order.userId, 'order:cancelled', orderPayload);
+        socketSvc.emitToUser(order.userId, 'order:status', orderPayload);
+        socketSvc.emitToUser(order.userId, 'order:updated', { orderId: order.id, status: OrderStatus.CANCELLED_BY_ADMIN });
+        for (const seller of sellerUsers) {
+          socketSvc.emitToUser(seller.userId, 'order:cancelled', orderPayload);
+          socketSvc.emitToUser(seller.userId, 'order:status', orderPayload);
+          socketSvc.emitToUser(seller.userId, 'seller:orders_updated', { orderId: order.id, orderNumber: order.orderNumber });
+        }
+        void socketSvc.emitToAdminsWithPermission('finance:payments', 'payment:rejected', paymentPayload);
+        void socketSvc.emitToAdminsWithPermission('orders:view', 'order:status', orderPayload);
+        void socketSvc.emitToAdminsWithPermission('orders:view', 'order:updated', { orderId: order.id, status: OrderStatus.CANCELLED_BY_ADMIN });
+      }
     } catch (_) {}
 
     ResponseUtil.success(res, result, 'تم تسجيل رفض إشعار التحويل وإشعار العميل بنجاح');
@@ -2106,8 +2114,8 @@ const handleRejectWalletPayment = async (req: Request, res: Response, next: Next
   }
 };
 
-router.post('/payments/:orderId/reject-wallet', handleRejectWalletPayment);
-router.post('/orders/:orderId/reject-wallet', handleRejectWalletPayment);
+router.post('/payments/:orderId/reject-wallet', requirePermission('finance:payments'), handleRejectWalletPayment);
+router.post('/orders/:orderId/reject-wallet', requirePermission('finance:payments'), handleRejectWalletPayment);
 
 // ==============================================================================
 // ==============================================
@@ -2567,7 +2575,7 @@ router.post('/cancellations/:id/reject', async (req: Request, res: Response, nex
 });
 
 // GET /returns — List return requests
-router.get('/returns', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/returns', requirePermission('disputes:resolve'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 20;
@@ -2610,7 +2618,7 @@ router.get('/returns', async (req: Request, res: Response, next: NextFunction) =
 });
 
 // POST /returns/:id/approve — Admin approves return request
-router.post('/returns/:id/approve', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/returns/:id/approve', requirePermission('disputes:resolve', 'finance:payments'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
     const { refundAmount } = req.body;
@@ -2622,7 +2630,12 @@ router.post('/returns/:id/approve', async (req: Request, res: Response, next: Ne
 
     if (!returnReq) throw new AppError('طلب الإرجاع غير موجود', 404);
 
-    const amount = refundAmount ? parseFloat(refundAmount) : returnReq.order.total;
+    const amount = refundAmount === undefined || refundAmount === null
+      ? Number(returnReq.order.total)
+      : Number(refundAmount);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > Number(returnReq.order.total)) {
+      throw new AppError('مبلغ الاسترداد غير صالح أو يتجاوز إجمالي الطلب', 400, 'INVALID_REFUND_AMOUNT');
+    }
 
     await prisma.returnRequest.update({
       where: { id },
@@ -2684,21 +2697,24 @@ router.post('/returns/:id/approve', async (req: Request, res: Response, next: Ne
     try {
       const socketSvc = SocketService.get();
       if (socketSvc) {
-        socketSvc.emitGlobal('order:return_approved', {
+        const payload = {
           orderId: returnReq.orderId,
           returnRequestId: id,
           amount,
-        });
-        socketSvc.emitGlobal('order:status', {
+        };
+        socketSvc.emitToUser(returnReq.order.userId, 'order:return_approved', payload);
+        socketSvc.emitToUser(returnReq.order.userId, 'REFUND_APPROVED', payload);
+        socketSvc.emitToUser(returnReq.order.userId, 'order:status', {
           orderId: returnReq.orderId,
           status: 'RETURN_APPROVED',
         });
-        socketSvc.emitGlobal('REFUND_APPROVED', {
+        socketSvc.emitToUser(returnReq.order.userId, 'order:refund_updated', {
+          orderId: returnReq.orderId,
+          status: 'RETURN_APPROVED',
+        });
+        void socketSvc.emitToAdminsWithPermission('disputes:resolve', 'admin:return_approved', {
           orderId: returnReq.orderId,
           returnRequestId: id,
-        });
-        socketSvc.emitGlobal('order:refund_updated', {
-          orderId: returnReq.orderId,
           status: 'RETURN_APPROVED',
         });
       }
@@ -2711,7 +2727,7 @@ router.post('/returns/:id/approve', async (req: Request, res: Response, next: Ne
 });
 
 // POST /refunds/:id/process — Admin processes refund
-router.post('/refunds/:id/process', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/refunds/:id/process', requirePermission('finance:payments', 'disputes:resolve'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
     const { amount, reason } = req.body;
@@ -2723,12 +2739,30 @@ router.post('/refunds/:id/process', async (req: Request, res: Response, next: Ne
 
     if (!order) throw new AppError('الطلب غير موجود', 404);
 
-    const refundAmount = amount ? parseFloat(amount) : order.total;
+    const { refund, refundAmount } = await prisma.$transaction(async (tx) => {
+      // Serialize refund processing for an order so parallel requests cannot both pass the balance check.
+      await tx.$queryRaw`SELECT "id" FROM "Order" WHERE "id" = ${order.id} FOR UPDATE`;
+      const currentOrder = await tx.order.findUnique({
+        where: { id: order.id },
+        include: { payment: true, sellerOrders: true },
+      });
+      if (!currentOrder) throw new AppError('الطلب غير موجود', 404);
+      if (!currentOrder.payment) throw new AppError('لا توجد دفعة مسجلة لهذا الطلب', 409);
+      if (currentOrder.status === OrderStatus.REFUNDED || currentOrder.payment.status === PaymentStatus.REFUNDED) {
+        throw new AppError('تم استرداد هذا الطلب مسبقاً', 409, 'REFUND_ALREADY_PROCESSED');
+      }
 
-    const refund = await prisma.$transaction(async (tx) => {
+      const priorRefunds = await tx.refund.aggregate({
+        where: { orderId: currentOrder.id, status: 'COMPLETED' },
+        _sum: { amount: true },
+      });
+      const capturedAmount = Number(currentOrder.payment.amount ?? currentOrder.total);
+      const alreadyRefunded = Number(priorRefunds._sum.amount ?? 0);
+      const refundAmount = resolveRefundAmount(amount, capturedAmount, alreadyRefunded);
+
       const ref = await tx.refund.create({
         data: {
-          orderId: order.id,
+          orderId: currentOrder.id,
           amount: refundAmount,
           reason: reason || 'استرداد مالي من قبل الإدارة',
           status: 'COMPLETED',
@@ -2736,55 +2770,49 @@ router.post('/refunds/:id/process', async (req: Request, res: Response, next: Ne
       });
 
       await tx.payment.update({
-        where: { orderId: order.id },
+        where: { orderId: currentOrder.id },
         data: { status: PaymentStatus.REFUNDED },
       });
 
       await tx.order.update({
-        where: { id: order.id },
+        where: { id: currentOrder.id },
         data: { status: OrderStatus.REFUNDED },
       });
 
-      if (order.userId) {
-        try {
-          await CustomerWalletService.creditRefund(
-            {
-              customerId: order.userId,
-              amount: refundAmount,
-              refundId: ref.id,
-              currency: 'YER',
-              orderNumber: order.orderNumber,
-              refundNumber: ref.id,
-              adminUserId: req.user!.userId,
-            },
-            tx
-          );
-        } catch (_) {}
+      if (currentOrder.userId) {
+        await CustomerWalletService.creditRefund(
+          {
+            customerId: currentOrder.userId,
+            amount: refundAmount,
+            refundId: ref.id,
+            currency: currentOrder.currency || 'YER',
+            orderNumber: currentOrder.orderNumber,
+            refundNumber: ref.id,
+            adminUserId: req.user!.userId,
+          },
+          tx
+        );
       }
 
       // Deduct from seller wallet
-      const sellerId = order.sellerOrders[0]?.sellerId;
+      const sellerId = currentOrder.sellerOrders[0]?.sellerId;
       if (sellerId) {
-        try {
-          await RefundService.adjustSellerSettlement(
-            {
-              sellerId,
-              orderId: order.id,
-              currency: order.currency || 'YER',
-              refundNumber: `REF-${ref.id.substring(0, 8).toUpperCase()}`,
-            },
-            refundAmount,
-            tx
-          );
-        } catch (settleErr) {
-          console.error('[AdminRefundProcess] Error adjusting seller settlement:', settleErr);
-        }
+        await RefundService.adjustSellerSettlement(
+          {
+            sellerId,
+            orderId: currentOrder.id,
+            currency: currentOrder.currency || 'YER',
+            refundNumber: `REF-${ref.id.substring(0, 8).toUpperCase()}`,
+          },
+          refundAmount,
+          tx
+        );
       }
 
       await tx.orderStatusHistory.create({
         data: {
-          orderId: order.id,
-          fromStatus: order.status,
+          orderId: currentOrder.id,
+          fromStatus: currentOrder.status,
           toStatus: 'REFUNDED',
           status: OrderStatus.REFUNDED,
           changedBy: req.user!.userId,
@@ -2794,7 +2822,7 @@ router.post('/refunds/:id/process', async (req: Request, res: Response, next: Ne
         },
       });
 
-      return ref;
+      return { refund: ref, refundAmount };
     });
 
     await logAdminAction(req.user?.userId, 'REFUND_PROCESSED', 'refunds', { orderId: order.id, refundAmount, reason }, req);
@@ -2802,19 +2830,27 @@ router.post('/refunds/:id/process', async (req: Request, res: Response, next: Ne
     try {
       const socketSvc = SocketService.get();
       if (socketSvc) {
-        socketSvc.emitGlobal('order:status', {
+        const refundStatusPayload = {
           orderId: order.id,
           status: 'REFUNDED',
-        });
-        socketSvc.emitGlobal('REFUND_COMPLETED', {
+        };
+        const refundPayload = {
           orderId: order.id,
           amount: refundAmount,
+        };
+        const recipients = [order.userId];
+        const sellerUsers = await prisma.seller.findMany({
+          where: { id: { in: order.sellerOrders.map((sellerOrder) => sellerOrder.sellerId) } },
+          select: { userId: true },
         });
-        socketSvc.emitGlobal('refund:completed', {
-          orderId: order.id,
-          amount: refundAmount,
-        });
-        socketSvc.emitGlobal('order:refund_updated', {
+        recipients.push(...sellerUsers.map((seller) => seller.userId));
+        for (const recipientId of new Set(recipients)) {
+          socketSvc.emitToUser(recipientId, 'order:status', refundStatusPayload);
+          socketSvc.emitToUser(recipientId, 'REFUND_COMPLETED', refundPayload);
+          socketSvc.emitToUser(recipientId, 'refund:completed', refundPayload);
+          socketSvc.emitToUser(recipientId, 'order:refund_updated', refundStatusPayload);
+        }
+        void socketSvc.emitToAdminsWithPermission('finance:payments', 'admin:refund_updated', {
           orderId: order.id,
           status: 'REFUNDED',
         });
@@ -2830,7 +2866,7 @@ router.post('/refunds/:id/process', async (req: Request, res: Response, next: Ne
 // ==============================================================================
 // 9. PAYMENTS, REFUNDS & DISPUTES
 // ==============================================================================
-router.get('/payments', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/payments', requirePermission('finance:view'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 20;
@@ -2859,7 +2895,7 @@ router.get('/payments', async (req: Request, res: Response, next: NextFunction) 
 });
 
 // Debug endpoint: raw dispute count + first 5 records (no filters)
-router.get('/disputes/debug', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/disputes/debug', requirePermission('disputes:resolve'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const count = await prisma.dispute.count();
     const all = await prisma.dispute.findMany({ take: 5, orderBy: { createdAt: 'desc' } });
@@ -2869,7 +2905,7 @@ router.get('/disputes/debug', async (req: Request, res: Response, next: NextFunc
   }
 });
 
-router.get('/disputes', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/disputes', requirePermission('disputes:resolve'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 20;
@@ -3018,7 +3054,7 @@ router.get('/disputes', async (req: Request, res: Response, next: NextFunction) 
   }
 });
 
-router.get('/disputes/:id', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/disputes/:id', requirePermission('disputes:resolve'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
     const dispute = await prisma.dispute.findUnique({
@@ -3081,7 +3117,7 @@ router.get('/disputes/:id', async (req: Request, res: Response, next: NextFuncti
   }
 });
 
-router.patch('/disputes/:id/status', async (req: Request, res: Response, next: NextFunction) => {
+router.patch('/disputes/:id/status', requirePermission('disputes:resolve'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
     const { status, note } = req.body;
@@ -3111,7 +3147,7 @@ router.patch('/disputes/:id/status', async (req: Request, res: Response, next: N
   }
 });
 
-router.post('/disputes/:id/resolve', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/disputes/:id/resolve', requirePermission('disputes:resolve'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
     const { decision, resolution, refundAmount, note } = req.body;
@@ -3251,59 +3287,13 @@ router.post('/disputes/:id/resolve', async (req: Request, res: Response, next: N
     try {
       const socketSvc = SocketService.get();
       if (socketSvc) {
-        socketSvc.emitGlobal('dispute:resolved', {
-          orderId: dispute.orderId,
+        const disputeSeller = await prisma.seller.findUnique({
+          where: { id: dispute.sellerId },
+          select: { userId: true },
+        });
+        void socketSvc.emitToAdminsWithPermission('disputes:resolve', 'dispute:resolved', {
           disputeId: dispute.id,
-          decision: finalDecision,
-          resolution,
-          refundAmount: parsedRefundAmount,
           status: finalStatus,
-        });
-        socketSvc.emitGlobal('DISPUTE_RESOLVED', {
-          orderId: dispute.orderId,
-          disputeId: dispute.id,
-          decision: finalDecision,
-          resolution,
-          refundAmount: parsedRefundAmount,
-          status: finalStatus,
-        });
-        socketSvc.emitGlobal('order:status', {
-          orderId: dispute.orderId,
-          status: isRejected ? 'DELIVERED' : 'REFUNDED',
-        });
-        socketSvc.emitGlobal('order:refund_updated', {
-          orderId: dispute.orderId,
-          status: isRejected ? 'CLOSED' : 'REFUNDED',
-        });
-        socketSvc.emitGlobal('REFUND_COMPLETED', {
-          orderId: dispute.orderId,
-          amount: parsedRefundAmount,
-        });
-        socketSvc.emitGlobal('refund:completed', {
-          orderId: dispute.orderId,
-          amount: parsedRefundAmount,
-        });
-        socketSvc.emitGlobal('REFUND_ADMIN_DECISION', {
-          orderId: dispute.orderId,
-          decision: finalDecision,
-          decisionReason: resolution,
-          refundAmount: parsedRefundAmount,
-          approvedAmount: parsedRefundAmount,
-        });
-        socketSvc.emitGlobal('refund:admin_decision', {
-          orderId: dispute.orderId,
-          decision: finalDecision,
-          decisionReason: resolution,
-          refundAmount: parsedRefundAmount,
-          approvedAmount: parsedRefundAmount,
-        });
-        socketSvc.emitGlobal('refund:updated', {
-          orderId: dispute.orderId,
-          status: isRejected ? 'CLOSED' : 'REFUNDED',
-        });
-        socketSvc.emitGlobal('refund:status', {
-          orderId: dispute.orderId,
-          status: isRejected ? 'CLOSED' : 'REFUNDED',
         });
 
         if (dispute.customerId) {
@@ -3329,6 +3319,36 @@ router.post('/disputes/:id/resolve', async (req: Request, res: Response, next: N
             orderId: dispute.orderId,
             status: isRejected ? 'CLOSED' : 'REFUNDED',
           });
+          if (!isRejected && parsedRefundAmount > 0) {
+            socketSvc.emitToUser(dispute.customerId, 'REFUND_COMPLETED', {
+              orderId: dispute.orderId,
+              amount: parsedRefundAmount,
+            });
+            socketSvc.emitToUser(dispute.customerId, 'refund:completed', {
+              orderId: dispute.orderId,
+              amount: parsedRefundAmount,
+            });
+          }
+        }
+        if (disputeSeller?.userId) {
+          socketSvc.emitToUser(disputeSeller.userId, 'order:status', {
+            orderId: dispute.orderId,
+            status: isRejected ? 'DELIVERED' : 'REFUNDED',
+          });
+          socketSvc.emitToUser(disputeSeller.userId, 'order:refund_updated', {
+            orderId: dispute.orderId,
+            status: isRejected ? 'CLOSED' : 'REFUNDED',
+          });
+          if (!isRejected && parsedRefundAmount > 0) {
+            socketSvc.emitToUser(disputeSeller.userId, 'REFUND_COMPLETED', {
+              orderId: dispute.orderId,
+              amount: parsedRefundAmount,
+            });
+            socketSvc.emitToUser(disputeSeller.userId, 'refund:completed', {
+              orderId: dispute.orderId,
+              amount: parsedRefundAmount,
+            });
+          }
         }
       }
     } catch (_) {}
@@ -3447,7 +3467,7 @@ router.post('/disputes/:id/resolve', async (req: Request, res: Response, next: N
   }
 });
 
-router.post('/disputes/:id/notes', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/disputes/:id/notes', requirePermission('disputes:resolve'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
     const { note } = req.body;
@@ -3470,7 +3490,7 @@ router.post('/disputes/:id/notes', async (req: Request, res: Response, next: Nex
   }
 });
 
-router.get('/finance/refunds-ledger', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/finance/refunds-ledger', requirePermission('finance:view'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 20;
@@ -3496,7 +3516,7 @@ router.get('/finance/refunds-ledger', async (req: Request, res: Response, next: 
 // ==============================================================================
 // 10. FINANCE, COMMISSION & WITHDRAWALS
 // ==============================================================================
-router.get('/finance/overview', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/finance/overview', requirePermission('finance:view'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const [
       totalVolume,
@@ -3840,7 +3860,7 @@ router.post('/withdrawals/:id/approve', requirePermission('finance:withdrawals')
       });
     }
 
-    SocketService.get()?.emitGlobal('withdrawal:updated', {
+    void SocketService.get()?.emitToAdminsWithPermission('finance:withdrawals', 'admin:withdrawal_updated', {
       withdrawalId: withdrawal.id,
       sellerId: withdrawal.sellerId,
       status: 'APPROVED',
@@ -3941,12 +3961,10 @@ router.post('/withdrawals/:id/complete', requirePermission('finance:withdrawals'
       });
     }
 
-    SocketService.get()?.emitGlobal('withdrawal:updated', {
+    void SocketService.get()?.emitToAdminsWithPermission('finance:withdrawals', 'admin:withdrawal_updated', {
       withdrawalId: result.w.id,
       sellerId: result.w.sellerId,
       status: 'COMPLETED',
-      proofImageUrl,
-      externalRef: finalRef,
     });
 
     await logAdminAction(req.user?.userId, 'WITHDRAWAL_COMPLETED', 'withdrawals', { id, referenceId: finalRef }, req);
@@ -4049,11 +4067,10 @@ router.post('/withdrawals/:id/reject', requirePermission('finance:withdrawals'),
       });
     }
 
-    SocketService.get()?.emitGlobal('withdrawal:updated', {
+    void SocketService.get()?.emitToAdminsWithPermission('finance:withdrawals', 'admin:withdrawal_updated', {
       withdrawalId: result.w.id,
       sellerId: result.w.sellerId,
       status: 'REJECTED',
-      reason,
     });
 
     await logAdminAction(req.user?.userId, 'WITHDRAWAL_REJECTED', 'withdrawals', { id, reason }, req);
@@ -4068,7 +4085,7 @@ router.post('/withdrawals/:id/reject', requirePermission('finance:withdrawals'),
 // ──────────────────────────────────────────────────────────────────────────
 
 // GET /api/v1/admin/customer-withdrawals
-router.get('/customer-withdrawals', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/customer-withdrawals', requirePermission('finance:view'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const status = req.query.status as string | undefined;
     const page = parseInt(req.query.page as string, 10) || 1;
@@ -4106,7 +4123,7 @@ router.get('/customer-withdrawals', async (req: Request, res: Response, next: Ne
 });
 
 // POST /api/v1/admin/customer-withdrawals/:id/approve
-router.post('/customer-withdrawals/:id/approve', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/customer-withdrawals/:id/approve', requirePermission('finance:withdrawals'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
     const { adminNote } = req.body;
@@ -4130,8 +4147,10 @@ router.post('/customer-withdrawals/:id/approve', async (req: Request, res: Respo
       withdrawalId: updated.id,
       status: 'APPROVED',
     });
-    SocketService.get()?.emitGlobal('admin:customer_withdrawal_updated', updated);
-    SocketService.get()?.emitGlobal('customer:withdrawal_updated', updated);
+    void SocketService.get()?.emitToAdminsWithPermission('finance:withdrawals', 'admin:customer_withdrawal_updated', {
+      withdrawalId: updated.id,
+      status: updated.status,
+    });
 
     await logAdminAction(req.user?.userId, 'CUSTOMER_WITHDRAWAL_APPROVED', 'customer_withdrawals', { id, adminNote }, req);
     ResponseUtil.success(res, updated, 'تمت الموافقة على طلب السحب');
@@ -4141,7 +4160,7 @@ router.post('/customer-withdrawals/:id/approve', async (req: Request, res: Respo
 });
 
 // POST /api/v1/admin/customer-withdrawals/:id/complete
-router.post('/customer-withdrawals/:id/complete', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/customer-withdrawals/:id/complete', requirePermission('finance:withdrawals'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
     const { proofImageUrl, externalRef, adminNote } = req.body;
@@ -4173,8 +4192,10 @@ router.post('/customer-withdrawals/:id/complete', async (req: Request, res: Resp
       withdrawalId: result.id,
       status: 'COMPLETED',
     });
-    SocketService.get()?.emitGlobal('admin:customer_withdrawal_updated', result);
-    SocketService.get()?.emitGlobal('customer:withdrawal_updated', result);
+    void SocketService.get()?.emitToAdminsWithPermission('finance:withdrawals', 'admin:customer_withdrawal_updated', {
+      withdrawalId: result.id,
+      status: result.status,
+    });
 
     await logAdminAction(req.user?.userId, 'CUSTOMER_WITHDRAWAL_COMPLETED', 'customer_withdrawals', { id, externalRef }, req);
     ResponseUtil.success(res, result, 'تم إتمام التحويل بنجاح');
@@ -4184,7 +4205,7 @@ router.post('/customer-withdrawals/:id/complete', async (req: Request, res: Resp
 });
 
 // POST /api/v1/admin/customer-withdrawals/:id/reject
-router.post('/customer-withdrawals/:id/reject', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/customer-withdrawals/:id/reject', requirePermission('finance:withdrawals'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
     const { reason } = req.body;
@@ -4213,8 +4234,10 @@ router.post('/customer-withdrawals/:id/reject', async (req: Request, res: Respon
       withdrawalId: result.id,
       status: 'REJECTED',
     });
-    SocketService.get()?.emitGlobal('admin:customer_withdrawal_updated', result);
-    SocketService.get()?.emitGlobal('customer:withdrawal_updated', result);
+    void SocketService.get()?.emitToAdminsWithPermission('finance:withdrawals', 'admin:customer_withdrawal_updated', {
+      withdrawalId: result.id,
+      status: result.status,
+    });
 
     await logAdminAction(req.user?.userId, 'CUSTOMER_WITHDRAWAL_REJECTED', 'customer_withdrawals', { id, reason }, req);
     ResponseUtil.success(res, result, 'تم رفض طلب السحب');
@@ -4224,7 +4247,7 @@ router.post('/customer-withdrawals/:id/reject', async (req: Request, res: Respon
 });
 
 // ── GET /api/v1/admin/deposits ──────────────────────────────────────────────
-router.get('/deposits', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/deposits', requirePermission('finance:view'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const page = parseInt(req.query.page as string, 10) || 1;
     const limit = parseInt(req.query.limit as string, 10) || 20;
@@ -4302,7 +4325,7 @@ router.get('/deposits', async (req: Request, res: Response, next: NextFunction) 
 });
 
 // ── POST /api/v1/admin/deposits/:id/approve ──────────────────────────────────
-router.post('/deposits/:id/approve', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/deposits/:id/approve', requirePermission('finance:payments'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
     const { adminNote } = req.body;
@@ -4421,19 +4444,14 @@ router.post('/deposits/:id/approve', async (req: Request, res: Response, next: N
       SocketService.get()?.emitToUser(deposit.userId, 'customer:deposit_approved', updated);
       SocketService.get()?.emitToUser(deposit.userId, 'customer:wallet_updated', { depositId: deposit.id });
       SocketService.get()?.emitToUser(deposit.userId, 'wallet:updated', { depositId: deposit.id });
-      SocketService.get()?.emitGlobal('customer:deposit_approved', updated);
-      SocketService.get()?.emitGlobal('deposit:approved', updated);
-      SocketService.get()?.emitGlobal('deposit:completed', updated);
-      SocketService.get()?.emitGlobal('customer:wallet_updated', { userId: deposit.userId, depositId: deposit.id });
-      SocketService.get()?.emitGlobal('wallet:updated', { userId: deposit.userId, depositId: deposit.id });
     } else {
       SocketService.get()?.emitToUser(deposit.userId, 'seller:deposit_approved', updated);
       SocketService.get()?.emitToUser(deposit.userId, 'seller:balance_updated', { depositId: deposit.id });
-      SocketService.get()?.emitGlobal('seller:deposit_approved', updated);
-      SocketService.get()?.emitGlobal('seller:balance_updated', { sellerId: deposit.sellerId, depositId: deposit.id });
     }
-    SocketService.get()?.emitGlobal('admin:deposit_updated', updated);
-    SocketService.get()?.emitGlobal('deposit:updated', updated);
+    void SocketService.get()?.emitToAdminsWithPermission('finance:payments', 'admin:deposit_updated', {
+      depositId: deposit.id,
+      status: updated.status,
+    });
 
     await logAdminAction(req.user?.userId, 'WALLET_DEPOSIT_APPROVED', 'wallet_deposits', { id, amount: deposit.amount }, req);
     ResponseUtil.success(res, updated, 'تم اعتماد وتأكيد طلب شحن المحفظة بنجاح');
@@ -4443,7 +4461,7 @@ router.post('/deposits/:id/approve', async (req: Request, res: Response, next: N
 });
 
 // ── POST /api/v1/admin/deposits/:id/reject ───────────────────────────────────
-router.post('/deposits/:id/reject', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/deposits/:id/reject', requirePermission('finance:payments'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
     const { reason, adminNote } = req.body;
@@ -4501,18 +4519,14 @@ router.post('/deposits/:id/reject', async (req: Request, res: Response, next: Ne
     if (deposit.userType === 'CUSTOMER') {
       SocketService.get()?.emitToUser(deposit.userId, 'customer:deposit_rejected', updated);
       SocketService.get()?.emitToUser(deposit.userId, 'customer:wallet_updated', { depositId: deposit.id });
-      SocketService.get()?.emitGlobal('customer:deposit_rejected', updated);
-      SocketService.get()?.emitGlobal('deposit:rejected', updated);
-      SocketService.get()?.emitGlobal('customer:wallet_updated', { userId: deposit.userId, depositId: deposit.id });
-      SocketService.get()?.emitGlobal('wallet:updated', { userId: deposit.userId, depositId: deposit.id });
     } else {
       SocketService.get()?.emitToUser(deposit.userId, 'seller:deposit_rejected', updated);
       SocketService.get()?.emitToUser(deposit.userId, 'seller:balance_updated', { depositId: deposit.id });
-      SocketService.get()?.emitGlobal('seller:deposit_rejected', updated);
-      SocketService.get()?.emitGlobal('seller:balance_updated', { sellerId: deposit.sellerId, depositId: deposit.id });
     }
-    SocketService.get()?.emitGlobal('admin:deposit_updated', updated);
-    SocketService.get()?.emitGlobal('deposit:updated', updated);
+    void SocketService.get()?.emitToAdminsWithPermission('finance:payments', 'admin:deposit_updated', {
+      depositId: deposit.id,
+      status: updated.status,
+    });
 
     await logAdminAction(req.user?.userId, 'WALLET_DEPOSIT_REJECTED', 'wallet_deposits', { id, rejectionReason }, req);
     ResponseUtil.success(res, updated, 'تم رفض طلب شحن المحفظة');

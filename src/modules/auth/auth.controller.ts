@@ -423,11 +423,20 @@ export class AuthController {
         select: { id: true },
       });
 
-      // Clear reset state and revoke active sessions/refresh tokens
+      // Clear reset state and revoke the authoritative access session and refresh token.
       await redis.del(`pwd_reset:${cleanEmail}`);
       await redis.del(attemptsKey);
       if (updatedUser?.id) {
-        await redis.del(`refresh:${updatedUser.id}`);
+        await Promise.all([
+          redis.del(`active_session:${updatedUser.id}`),
+          redis.del(`refresh:${updatedUser.id}`),
+        ]);
+        try {
+          const { SocketService } = await import('../../services/websocket/socket.service');
+          SocketService.get()?.disconnectUser(updatedUser.id);
+        } catch {
+          // The deleted authoritative session still blocks future authenticated requests.
+        }
       }
 
       ResponseUtil.success(res, null, 'Password updated successfully. You can now login.');

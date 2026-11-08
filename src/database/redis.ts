@@ -33,7 +33,7 @@ class RedisService {
 
       if (config.redis.url) {
         if (config.redis.tls) {
-          redisOptions.tls = { rejectUnauthorized: false };
+          redisOptions.tls = { rejectUnauthorized: true };
         }
         this.client = new Redis(config.redis.url, redisOptions);
       } else {
@@ -41,7 +41,7 @@ class RedisService {
         redisOptions.port = config.redis.port;
         redisOptions.password = config.redis.password;
         if (config.redis.tls) {
-          redisOptions.tls = { rejectUnauthorized: false };
+          redisOptions.tls = { rejectUnauthorized: true };
         }
         this.client = new Redis(redisOptions);
       }

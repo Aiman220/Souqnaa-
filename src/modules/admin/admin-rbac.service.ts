@@ -1,6 +1,7 @@
 import { prisma } from '../../database/prisma';
 import { redis } from '../../database/redis';
 import { AppError } from '../../middleware/error.middleware';
+import { selectAdminIdsWithPermission } from './admin-rbac-policy';
 
 export enum SystemRole {
   SUPER_ADMIN = 'SUPER_ADMIN',
@@ -397,21 +398,18 @@ export class AdminRbacService {
       },
     });
 
-    const matchingAdminIds: string[] = [];
+    const permissionsByAdmin = new Map<string, ReadonlySet<string>>();
     for (const admin of activeAdmins) {
-      const perms = await this.getUserPermissions(admin.id);
-      if (perms.has(action)) {
-        matchingAdminIds.push(admin.id);
-      }
+      permissionsByAdmin.set(admin.id, await this.getUserPermissions(admin.id));
     }
 
-    if (matchingAdminIds.length === 0) {
-      const superAdmins = await this.getAdminUserIdsWithRole(SystemRole.SUPER_ADMIN);
-      if (superAdmins.length > 0) return superAdmins;
-      return activeAdmins.map((a) => a.id);
-    }
-
-    return matchingAdminIds;
+    const superAdmins = await this.getAdminUserIdsWithRole(SystemRole.SUPER_ADMIN);
+    return selectAdminIdsWithPermission(
+      activeAdmins.map((admin) => admin.id),
+      permissionsByAdmin,
+      action,
+      superAdmins
+    );
   }
 
   /**

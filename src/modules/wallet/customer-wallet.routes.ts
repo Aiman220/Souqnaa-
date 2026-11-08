@@ -247,8 +247,11 @@ router.post('/withdraw', financialLimiter, requireIntegrity('WALLET_WITHDRAWAL')
 
     SocketService.get()?.emitToUser(userId, 'customer:withdrawal_created', result);
     SocketService.get()?.emitToUser(userId, 'customer:wallet_updated', { withdrawalId: result.id });
-    SocketService.get()?.emitGlobal('admin:customer_withdrawal_created', result);
-    SocketService.get()?.emitGlobal('customer:withdrawal_updated', result);
+    void SocketService.get()?.emitToAdminsWithPermission(
+      'finance:withdrawals',
+      'admin:customer_withdrawal_created',
+      { withdrawalId: result.id, status: result.status }
+    );
 
     ResponseUtil.created(res, result, 'تم تقديم طلب السحب بنجاح وسيتم معالجته في أقرب وقت');
   } catch (error) {
@@ -333,9 +336,11 @@ router.post('/deposits', financialLimiter, async (req: Request, res: Response, n
 
     // Real-time broadcast
     SocketService.get()?.emitToUser(userId, 'customer:deposit_created', deposit);
-    SocketService.get()?.emitGlobal('customer:deposit_created', deposit);
-    SocketService.get()?.emitGlobal('deposit:created', deposit);
-    SocketService.get()?.emitGlobal('admin:deposit_created', deposit);
+    void SocketService.get()?.emitToAdminsWithPermission(
+      'finance:payments',
+      'admin:deposit_created',
+      { depositId: deposit.id, amount: deposit.amount, userType: deposit.userType }
+    );
 
     ResponseUtil.created(res, deposit, 'تم إرسال طلب شحن المحفظة بنجاح وهو الآن قيد مراجعة الإدارة');
   } catch (error) {

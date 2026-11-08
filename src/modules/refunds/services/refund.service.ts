@@ -288,20 +288,11 @@ export class RefundService {
         })
       ).catch(() => {});
 
-      // Realtime broadcast to all connected apps (Customer, Seller, Admin)
-      SocketService.get()?.emitGlobal('REFUND_CREATED', {
-        refundId: refund.id,
-        orderId: order.id,
-        status: refund.status,
-      });
-      SocketService.get()?.emitGlobal('order:return_requested', {
-        orderId: order.id,
-        refundId: refund.id,
-      });
-      SocketService.get()?.emitGlobal('order:status', {
-        orderId: order.id,
-        status: order.status,
-      });
+      void SocketService.get()?.emitToOrderParticipants(order.id, [
+        { event: 'REFUND_CREATED', data: { refundId: refund.id, orderId: order.id, status: refund.status }, adminPermission: 'disputes:resolve' },
+        { event: 'order:return_requested', data: { orderId: order.id, refundId: refund.id }, adminPermission: 'disputes:resolve' },
+        { event: 'order:status', data: { orderId: order.id, status: order.status }, adminPermission: 'orders:view' },
+      ]);
     } catch (_) {}
 
     return refund;
@@ -464,39 +455,15 @@ export class RefundService {
     await RefundService.emitAdjustedProductSales((updated as any)?.__adjustedProducts);
 
     try {
-      SocketService.get()?.emitGlobal('refund:seller_accepted', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        status: updated.status,
-      });
-      SocketService.get()?.emitGlobal('REFUND_APPROVED', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        status: updated.status,
-      });
-      SocketService.get()?.emitGlobal('refund:status', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        status: updated.status,
-      });
-      SocketService.get()?.emitGlobal('refund:updated', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        status: updated.status,
-      });
-      SocketService.get()?.emitGlobal('order:return_approved', {
-        orderId: updated.orderId,
-        refundId: updated.id,
-      });
-      SocketService.get()?.emitGlobal('order:refund_updated', {
-        orderId: updated.orderId,
-        refundId: updated.id,
-        status: updated.status,
-      });
-      SocketService.get()?.emitGlobal('order:status', {
-        orderId: updated.orderId,
-        status: updated.order?.status,
-      });
+      void SocketService.get()?.emitToOrderParticipants(updated.orderId, [
+        { event: 'refund:seller_accepted', data: { refundId: updated.id, orderId: updated.orderId, status: updated.status }, adminPermission: 'disputes:resolve' },
+        { event: 'REFUND_APPROVED', data: { refundId: updated.id, orderId: updated.orderId, status: updated.status }, adminPermission: 'disputes:resolve' },
+        { event: 'refund:status', data: { refundId: updated.id, orderId: updated.orderId, status: updated.status }, adminPermission: 'disputes:resolve' },
+        { event: 'refund:updated', data: { refundId: updated.id, orderId: updated.orderId, status: updated.status }, adminPermission: 'disputes:resolve' },
+        { event: 'order:return_approved', data: { orderId: updated.orderId, refundId: updated.id }, adminPermission: 'disputes:resolve' },
+        { event: 'order:refund_updated', data: { orderId: updated.orderId, refundId: updated.id, status: updated.status }, adminPermission: 'disputes:resolve' },
+        { event: 'order:status', data: { orderId: updated.orderId, status: updated.order?.status }, adminPermission: 'orders:view' },
+      ]);
     } catch (_) {}
 
     return updated;
@@ -617,42 +584,15 @@ export class RefundService {
     ).catch(() => {});
 
     try {
-      SocketService.get()?.emitGlobal('refund:seller_rejected', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        status: updated.status,
-        rejectionReason,
-      });
-      SocketService.get()?.emitGlobal('REFUND_SELLER_REJECTED', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        status: updated.status,
-        rejectionReason,
-      });
-      SocketService.get()?.emitGlobal('refund:status', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        status: updated.status,
-      });
-      SocketService.get()?.emitGlobal('refund:updated', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        status: updated.status,
-      });
-      SocketService.get()?.emitGlobal('order:return_rejected', {
-        orderId: updated.orderId,
-        refundId: updated.id,
-        reason: rejectionReason,
-      });
-      SocketService.get()?.emitGlobal('order:refund_updated', {
-        orderId: updated.orderId,
-        refundId: updated.id,
-        status: updated.status,
-      });
-      SocketService.get()?.emitGlobal('order:status', {
-        orderId: updated.orderId,
-        status: updated.order?.status,
-      });
+      void SocketService.get()?.emitToOrderParticipants(updated.orderId, [
+        { event: 'refund:seller_rejected', data: { refundId: updated.id, orderId: updated.orderId, status: updated.status, rejectionReason }, adminPermission: 'disputes:resolve' },
+        { event: 'REFUND_SELLER_REJECTED', data: { refundId: updated.id, orderId: updated.orderId, status: updated.status, rejectionReason }, adminPermission: 'disputes:resolve' },
+        { event: 'refund:status', data: { refundId: updated.id, orderId: updated.orderId, status: updated.status }, adminPermission: 'disputes:resolve' },
+        { event: 'refund:updated', data: { refundId: updated.id, orderId: updated.orderId, status: updated.status }, adminPermission: 'disputes:resolve' },
+        { event: 'order:return_rejected', data: { orderId: updated.orderId, refundId: updated.id, reason: rejectionReason }, adminPermission: 'disputes:resolve' },
+        { event: 'order:refund_updated', data: { orderId: updated.orderId, refundId: updated.id, status: updated.status }, adminPermission: 'disputes:resolve' },
+        { event: 'order:status', data: { orderId: updated.orderId, status: updated.order?.status }, adminPermission: 'orders:view' },
+      ]);
     } catch (_) {}
 
     return updated;
@@ -735,35 +675,14 @@ export class RefundService {
     await RefundService.emitAdjustedProductSales((updated as any)?.__adjustedProducts);
 
     try {
-      SocketService.get()?.emitGlobal('refund:customer_accepted', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        status: updated.status,
-      });
-      SocketService.get()?.emitGlobal('refund:closed', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        status: updated.status,
-      });
-      SocketService.get()?.emitGlobal('refund:status', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        status: updated.status,
-      });
-      SocketService.get()?.emitGlobal('refund:updated', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        status: updated.status,
-      });
-      SocketService.get()?.emitGlobal('order:refund_updated', {
-        orderId: updated.orderId,
-        refundId: updated.id,
-        status: updated.status,
-      });
-      SocketService.get()?.emitGlobal('order:status', {
-        orderId: updated.orderId,
-        status: updated.order?.status,
-      });
+      void SocketService.get()?.emitToOrderParticipants(updated.orderId, [
+        { event: 'refund:customer_accepted', data: { refundId: updated.id, orderId: updated.orderId, status: updated.status }, adminPermission: 'disputes:resolve' },
+        { event: 'refund:closed', data: { refundId: updated.id, orderId: updated.orderId, status: updated.status }, adminPermission: 'disputes:resolve' },
+        { event: 'refund:status', data: { refundId: updated.id, orderId: updated.orderId, status: updated.status }, adminPermission: 'disputes:resolve' },
+        { event: 'refund:updated', data: { refundId: updated.id, orderId: updated.orderId, status: updated.status }, adminPermission: 'disputes:resolve' },
+        { event: 'order:refund_updated', data: { orderId: updated.orderId, refundId: updated.id, status: updated.status }, adminPermission: 'disputes:resolve' },
+        { event: 'order:status', data: { orderId: updated.orderId, status: updated.order?.status }, adminPermission: 'orders:view' },
+      ]);
     } catch (_) {}
 
     if (updated.status === RefundStatus.REFUND_PENDING || updated.status === RefundStatus.REFUND_COMPLETED) {
@@ -937,40 +856,15 @@ export class RefundService {
     ).catch(() => {});
 
     try {
-      SocketService.get()?.emitGlobal('dispute:created', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        disputeReason,
-      });
-      SocketService.get()?.emitGlobal('admin:new_dispute', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        disputeReason,
-      });
-      SocketService.get()?.emitGlobal('refund:disputed', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        status: updated.status,
-      });
-      SocketService.get()?.emitGlobal('refund:status', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        status: updated.status,
-      });
-      SocketService.get()?.emitGlobal('refund:updated', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        status: updated.status,
-      });
-      SocketService.get()?.emitGlobal('order:refund_updated', {
-        orderId: updated.orderId,
-        refundId: updated.id,
-        status: updated.status,
-      });
-      SocketService.get()?.emitGlobal('order:status', {
-        orderId: updated.orderId,
-        status: updated.order?.status,
-      });
+      void SocketService.get()?.emitToOrderParticipants(updated.orderId, [
+        { event: 'dispute:created', data: { refundId: updated.id, orderId: updated.orderId, disputeReason }, adminPermission: 'disputes:resolve' },
+        { event: 'admin:new_dispute', data: { refundId: updated.id, orderId: updated.orderId }, adminPermission: 'disputes:resolve' },
+        { event: 'refund:disputed', data: { refundId: updated.id, orderId: updated.orderId, status: updated.status }, adminPermission: 'disputes:resolve' },
+        { event: 'refund:status', data: { refundId: updated.id, orderId: updated.orderId, status: updated.status }, adminPermission: 'disputes:resolve' },
+        { event: 'refund:updated', data: { refundId: updated.id, orderId: updated.orderId, status: updated.status }, adminPermission: 'disputes:resolve' },
+        { event: 'order:refund_updated', data: { orderId: updated.orderId, refundId: updated.id, status: updated.status }, adminPermission: 'disputes:resolve' },
+        { event: 'order:status', data: { orderId: updated.orderId, status: updated.order?.status }, adminPermission: 'orders:view' },
+      ]);
     } catch (_) {}
 
     return updated;
@@ -1167,46 +1061,16 @@ export class RefundService {
     await RefundService.emitAdjustedProductSales((updated as any)?.__adjustedProducts);
 
     try {
-      SocketService.get()?.emitGlobal('dispute:resolved', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        decision,
-        reason: decisionReason,
-      });
-      SocketService.get()?.emitGlobal('DISPUTE_RESOLVED', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        decision,
-      });
-      SocketService.get()?.emitGlobal('REFUND_ADMIN_DECISION', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        decision,
-      });
-      SocketService.get()?.emitGlobal('refund:admin_decision', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        decision,
-      });
-      SocketService.get()?.emitGlobal('refund:status', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        status: updated.status,
-      });
-      SocketService.get()?.emitGlobal('refund:updated', {
-        refundId: updated.id,
-        orderId: updated.orderId,
-        status: updated.status,
-      });
-      SocketService.get()?.emitGlobal('order:refund_updated', {
-        orderId: updated.orderId,
-        refundId: updated.id,
-        status: updated.status,
-      });
-      SocketService.get()?.emitGlobal('order:status', {
-        orderId: updated.orderId,
-        status: updated.order?.status,
-      });
+      void SocketService.get()?.emitToOrderParticipants(updated.orderId, [
+        { event: 'dispute:resolved', data: { refundId: updated.id, orderId: updated.orderId, decision }, adminPermission: 'disputes:resolve' },
+        { event: 'DISPUTE_RESOLVED', data: { refundId: updated.id, orderId: updated.orderId, decision }, adminPermission: 'disputes:resolve' },
+        { event: 'REFUND_ADMIN_DECISION', data: { refundId: updated.id, orderId: updated.orderId, decision }, adminPermission: 'disputes:resolve' },
+        { event: 'refund:admin_decision', data: { refundId: updated.id, orderId: updated.orderId, decision }, adminPermission: 'disputes:resolve' },
+        { event: 'refund:status', data: { refundId: updated.id, orderId: updated.orderId, status: updated.status }, adminPermission: 'disputes:resolve' },
+        { event: 'refund:updated', data: { refundId: updated.id, orderId: updated.orderId, status: updated.status }, adminPermission: 'disputes:resolve' },
+        { event: 'order:refund_updated', data: { orderId: updated.orderId, refundId: updated.id, status: updated.status }, adminPermission: 'disputes:resolve' },
+        { event: 'order:status', data: { orderId: updated.orderId, status: updated.order?.status }, adminPermission: 'orders:view' },
+      ]);
     } catch (_) {}
 
     // Dispatch Push & In-App Notifications to Customer and Seller

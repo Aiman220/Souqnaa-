@@ -1668,19 +1668,11 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
         fullOrder?.payment?.method === PaymentMethodType.CASH_ON_DELIVERY ||
         fullOrder?.payment?.method === ('COD' as any);
 
-      if (isPaidOrCod) {
-        SocketService.get()?.emitGlobal('new:order', {
+      if (!isPaidOrCod) {
+        void SocketService.get()?.emitToAdminsWithPermission('finance:payments', 'admin:payment_transfer_submitted', {
           orderId: order.id,
           orderNumber: order.orderNumber,
-          displayOrderNumber: order.displayOrderNumber,
-          total: order.total,
-        });
-      } else {
-        SocketService.get()?.emitGlobal('admin:payment_transfer_submitted', {
-          orderId: order.id,
-          orderNumber: order.orderNumber,
-          displayOrderNumber: order.displayOrderNumber,
-          total: order.total,
+          status: 'PENDING',
         });
       }
 
@@ -3209,12 +3201,17 @@ router.post('/:id/cancellation-request', async (req: Request, res: Response, nex
         }
       }
 
-      SocketService.get()?.emitGlobal('order:cancellation_requested', {
+      const cancellationPayload = {
         orderId: order.id,
         orderNumber: order.orderNumber,
         requestId: cancellationRequest.id,
         reason,
-      });
+      };
+      const socketSvc = SocketService.get();
+      socketSvc?.emitToUser(order.userId, 'order:cancellation_requested', cancellationPayload);
+      for (const target of targetSellerOrders) {
+        if (target.seller?.userId) socketSvc?.emitToUser(target.seller.userId, 'order:cancellation_requested', cancellationPayload);
+      }
       SocketService.get()?.emitOrderStatusUpdate({
         orderId: order.id,
         orderNumber: order.orderNumber,
@@ -3495,11 +3492,22 @@ router.post('/:id/mock-pay', async (req: Request, res: Response, next: NextFunct
     });
 
     try {
-      SocketService.get()?.emitGlobal('order:paid', {
+      const paidPayload = {
         orderId: order.id,
         orderNumber: order.orderNumber,
         amount: order.total,
-      });
+      };
+      const socketSvc = SocketService.get();
+      if (socketSvc) {
+        socketSvc.emitToUser(req.user!.userId, 'order:paid', paidPayload);
+        for (const sellerOrder of updatedOrder?.sellerOrders || []) {
+          if (sellerOrder.seller?.userId) socketSvc.emitToUser(sellerOrder.seller.userId, 'order:paid', paidPayload);
+        }
+        void socketSvc.emitToAdminsWithPermission('orders:view', 'order:paid', {
+          orderId: order.id,
+          status: 'PAID',
+        });
+      }
     } catch (_) {}
 
     ResponseUtil.success(res, updatedOrder, 'تم تسجيل الدفع بنجاح. الطلب الآن بانتظار قبول المتجر');
@@ -3675,12 +3683,23 @@ router.post(['/:id/return-request', '/:id/return'], async (req: Request, res: Re
     });
 
     try {
-      SocketService.get()?.emitGlobal('order:return_requested', {
+      const sellerOrdersForNotification = await prisma.sellerOrder.findMany({
+        where: {
+          orderId: order.id,
+          ...(targetSellerOrderId ? { id: targetSellerOrderId } : {}),
+        },
+        select: { seller: { select: { userId: true } } },
+      });
+      const returnPayload = {
         orderId: order.id,
         orderNumber: order.orderNumber,
         reason,
         description,
-      });
+      };
+      SocketService.get()?.emitToUser(order.userId, 'order:return_requested', returnPayload);
+      for (const sellerOrder of sellerOrdersForNotification) {
+        if (sellerOrder.seller?.userId) SocketService.get()?.emitToUser(sellerOrder.seller.userId, 'order:return_requested', returnPayload);
+      }
       SocketService.get()?.emitOrderStatusUpdate({
         orderId: order.id,
         orderNumber: order.orderNumber,
@@ -3691,14 +3710,18 @@ router.post(['/:id/return-request', '/:id/return'], async (req: Request, res: Re
         changedByRole: 'CUSTOMER',
         extra: { previousStatus: order.status },
       });
-      SocketService.get()?.emitGlobal('REFUND_CREATED', {
+      SocketService.get()?.emitToUser(order.userId, 'REFUND_CREATED', {
         orderId: order.id,
         orderNumber: order.orderNumber,
         reason,
       });
-      SocketService.get()?.emitGlobal('order:refund_updated', {
+      SocketService.get()?.emitToUser(order.userId, 'order:refund_updated', {
         orderId: order.id,
         status: 'RETURN_REQUESTED',
+      });
+      void SocketService.get()?.emitToAdminsWithPermission('disputes:resolve', 'admin:return_requested', {
+        orderId: order.id,
+        returnRequestId: returnRequest.id,
       });
     } catch (_) {}
 
@@ -3908,21 +3931,18 @@ router.post(['/:id/disputes', '/:id/dispute'], async (req: Request, res: Respons
         })
       ).catch(() => {});
 
-      SocketService.get()?.emitGlobal('admin:new_dispute', {
+      void SocketService.get()?.emitToAdminsWithPermission('disputes:resolve', 'admin:new_dispute', {
         disputeId: dispute.id,
         refundId: refundReq.id,
         orderId: order.id,
         orderNumber: order.orderNumber,
-        customerId: req.user!.userId,
-        sellerId: targetSellerId,
-        reason,
       });
-      SocketService.get()?.emitGlobal('dispute:created', {
+      void SocketService.get()?.emitToAdminsWithPermission('disputes:resolve', 'dispute:created', {
         orderId: order.id,
         disputeId: dispute.id,
         refundId: refundReq.id,
       });
-      SocketService.get()?.emitGlobal('refund:disputed', {
+      void SocketService.get()?.emitToAdminsWithPermission('disputes:resolve', 'refund:disputed', {
         orderId: order.id,
         refundId: refundReq.id,
         status: 'ADMIN_REVIEW',

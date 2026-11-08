@@ -8,7 +8,7 @@ import { AppError } from '../../middleware/error.middleware';
 import { uploadFileLimiter, uploadByUrlLimiter } from '../../middleware/rate-limiter.middleware';
 import { ImageProcessorService } from '../../services/storage/image-processor.service';
 import { fetchPublicMedia } from '../../utils/remote-media-fetch.util';
-import { validatePresignFileSize } from '../../utils/upload-policy.util';
+import { assertUploadFolderRole, validatePresignFileSize } from '../../utils/upload-policy.util';
 
 const router = Router();
 router.use(authenticate);
@@ -248,6 +248,7 @@ router.post('/', uploadFileLimiter, upload.single('file'), async (req: Request, 
     if (!req.file) throw new AppError('No file uploaded', 400);
 
     const folder = sanitizeFolder(req.body.folder);
+    assertUploadFolderRole((req as any).user?.role, folder);
     enforceFolderFileSizeLimit(req.file, folder);
 
     // Deep magic-bytes validation (§7: "Do not trust client-provided MIME types or file extensions")
@@ -268,6 +269,7 @@ router.post('/multiple', uploadFileLimiter, upload.array('files', 10), async (re
     if (!files || files.length === 0) throw new AppError('No files uploaded', 400);
 
     const folder = sanitizeFolder(req.body.folder);
+    assertUploadFolderRole((req as any).user?.role, folder);
 
     for (const f of files) {
       enforceFolderFileSizeLimit(f, folder);
@@ -289,6 +291,7 @@ router.post('/by-url', uploadByUrlLimiter, async (req: Request, res: Response, n
   try {
     const { url } = req.body;
     const folder = sanitizeFolder(req.body.folder, 'products');
+    assertUploadFolderRole((req as any).user?.role, folder);
     if (!url || typeof url !== 'string' || !url.trim()) {
       throw new AppError('رابط الصورة مطلوب', 400);
     }
@@ -356,18 +359,7 @@ router.post('/presign', uploadFileLimiter, async (req: Request, res: Response, n
     let mimeType = String(req.body.mimeType || req.body.contentType || '').toLowerCase().trim();
     const fileSize = req.body.fileSize;
 
-    // Authorization checks:
-    const userRole = (req as any).user?.role;
-    if (['branding', 'categories', 'banners', 'campaign-badges'].includes(folder)) {
-      if (userRole !== 'ADMIN' && userRole !== 'SUPER_ADMIN') {
-        throw new AppError('غير مصرح لك بالرفع إلى هذا المجلد المحدد.', 403, 'FORBIDDEN_FOLDER');
-      }
-    }
-    if (['products', 'stores', 'seller-promotions', 'seller-verification'].includes(folder)) {
-      if (userRole !== 'SELLER' && userRole !== 'ADMIN' && userRole !== 'SUPER_ADMIN') {
-        throw new AppError('غير مصرح لك برفع وسائط التجار والمنتجات.', 403, 'FORBIDDEN_FOLDER');
-      }
-    }
+    assertUploadFolderRole((req as any).user?.role, folder);
 
     const ext = path.extname(filename).toLowerCase();
     if (BLOCKED_EXTENSIONS.has(ext)) {

@@ -8,8 +8,18 @@ import { buildScopedIdempotencyKey } from '../src/utils/idempotency-key.util';
 import { fetchPublicMedia } from '../src/utils/remote-media-fetch.util';
 import { UrlSecurityUtil, isPrivateOrReservedHost } from '../src/utils/url-security.util';
 import { isRefundEvidenceParticipant, isSellerReportOwnedBy, isStoredObjectMatch } from '../src/utils/storage-access.util';
-import { validatePresignFileSize } from '../src/utils/upload-policy.util';
+import { assertUploadFolderRole, validatePresignFileSize } from '../src/utils/upload-policy.util';
 import { rotateRefreshTokenAtomically } from '../src/utils/refresh-rotation.util';
+import { resolveRefundAmount } from '../src/modules/admin/refund-amount.policy';
+import { selectAdminIdsWithPermission } from '../src/modules/admin/admin-rbac-policy';
+
+function expectPolicyError(action: () => unknown, code: string): void {
+  assert.throws(action, (error: any) => error?.code === code);
+}
+
+function remediationSource(relativePath: string): string {
+  return fs.readFileSync(path.resolve(__dirname, '..', 'src', relativePath), 'utf8');
+}
 
 async function run() {
   // VULN-001: opaque OAuth keys and one-use state prevent attacker-selected sessions and replay.
@@ -111,7 +121,70 @@ async function run() {
   const redisSource = fs.readFileSync(path.join(__dirname, '../src/database/redis.ts'), 'utf8');
   assert.match(redisSource, /redis\.call\('GET', KEYS\[1\]\).*redis\.call\('SET', KEYS\[1\]/s);
 
-  console.log('Security remediation regression tests passed (VULN-001 through VULN-009).');
+  // F-01: privileged events use authorization-aware or user-scoped emitters.
+  const walletRoutes = remediationSource('modules/wallet/customer-wallet.routes.ts');
+  const adminRoutesSource = remediationSource('modules/admin/admin.routes.ts');
+  const sellerRoutes = remediationSource('modules/sellers/seller.routes.ts');
+  const orderRoutes = remediationSource('modules/orders/order.routes.ts');
+  const refundService = remediationSource('modules/refunds/services/refund.service.ts');
+  const disputeService = remediationSource('modules/disputes/dispute.service.ts');
+  const financeSources = `${walletRoutes}\n${adminRoutesSource}\n${sellerRoutes}\n${orderRoutes}\n${refundService}\n${disputeService}`;
+  assert.match(financeSources, /emitToAdminsWithPermission/);
+  assert.doesNotMatch(financeSources, /emitGlobal\(['"](?:admin:customer_withdrawal_created|customer:withdrawal_updated|customer:deposit_created|deposit:created|admin:deposit_created|admin:withdrawal_created|withdrawal:created|REFUND_COMPLETED|refund:completed)['"]/);
+
+  // F-02: admin event recipients fail closed when permission is absent.
+  const permissionSets = new Map<string, ReadonlySet<string>>([
+    ['finance', new Set(['finance:view', 'finance:payments'])],
+    ['support', new Set(['support:view'])],
+  ]);
+  assert.deepStrictEqual(
+    selectAdminIdsWithPermission(['finance', 'support', 'unassigned'], permissionSets, 'finance:payments', ['unassigned']),
+    ['finance', 'unassigned']
+  );
+  assert.match(adminRoutesSource, /router\.post\('\/payments\/:orderId\/reject-wallet', requirePermission\('finance:payments'\)/);
+  assert.match(adminRoutesSource, /router\.post\('\/customer-withdrawals\/:id\/complete', requirePermission\('finance:withdrawals'\)/);
+
+  // F-03: support, order, and dispute room access uses the existing permission model.
+  const socketSource = remediationSource('services/websocket/socket.service.ts');
+  assert.ok(socketSource.includes("adminPermissions.has('support:view') || adminPermissions.has('support:manage')"));
+  assert.ok(socketSource.includes("this.adminHasAnyPermission(userId, ['orders:view'])"));
+  assert.ok(socketSource.includes("this.adminHasAnyPermission(userId, ['disputes:resolve'])"));
+  assert.ok(socketSource.includes("permissions.has('support:manage')"));
+  assert.ok(socketSource.includes("socket.join('room:support_queue')"));
+  assert.ok(socketSource.includes("event === 'support:queue:updated'"));
+
+  // F-04: refunds are positive, finite, and capped to the remaining captured amount.
+  assert.strictEqual(resolveRefundAmount(undefined, 125, 25), 100);
+  assert.strictEqual(resolveRefundAmount('12.50', 125, 25), 12.5);
+  for (const invalid of [0, -1, 'nope', Number.POSITIVE_INFINITY, 101]) {
+    expectPolicyError(() => resolveRefundAmount(invalid, 125, 25), invalid === 101 ? 'REFUND_AMOUNT_EXCEEDS_REMAINING' : 'INVALID_REFUND_AMOUNT');
+  }
+  assert.ok(adminRoutesSource.includes('FOR UPDATE') && adminRoutesSource.includes('REFUND_ALREADY_PROCESSED'));
+
+  // F-05: Redis TLS verifies certificates in both connection modes.
+  const redisTlsSource = remediationSource('database/redis.ts');
+  assert.strictEqual((redisTlsSource.match(/rejectUnauthorized: true/g) || []).length, 2);
+  assert.ok(!redisTlsSource.includes('rejectUnauthorized: false'));
+
+  // F-06: password reset invalidates access, refresh, and live socket state.
+  const authSource = remediationSource('modules/auth/auth.controller.ts');
+  assert.ok(authSource.includes('redis.del(`active_session:${updatedUser.id}`)'));
+  assert.ok(authSource.includes('redis.del(`refresh:${updatedUser.id}`)'));
+  assert.ok(authSource.includes('disconnectUser(updatedUser.id)'));
+
+  // F-07: every upload entry point shares role-to-folder authorization.
+  assertUploadFolderRole('SELLER', 'products');
+  assertUploadFolderRole('CUSTOMER', 'general');
+  expectPolicyError(() => assertUploadFolderRole('CUSTOMER', 'products'), 'FORBIDDEN_FOLDER');
+  expectPolicyError(() => assertUploadFolderRole('SELLER', 'branding'), 'FORBIDDEN_FOLDER');
+  const uploadSource = remediationSource('modules/upload/upload.routes.ts');
+  assert.ok((uploadSource.match(/assertUploadFolderRole\(/g) || []).length >= 4);
+
+  // F-08: reactions require stored-conversation membership and use its canonical ID.
+  assert.ok(socketSource.includes('conversationId_userId: { conversationId: msg.conversationId, userId }'));
+  assert.ok(socketSource.includes('const targetConvId = msg.conversationId;'));
+
+  console.log('Security remediation regression tests passed (VULN-001 through VULN-009 and F-01 through F-08).');
 }
 
 run().catch((error) => {

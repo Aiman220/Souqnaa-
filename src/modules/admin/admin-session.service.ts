@@ -90,6 +90,12 @@ export class AdminSessionService {
     await redis.deleteAuthoritative(`active_session:${userId}`);
     // Record revocation timestamp
     await redis.set(`admin:session_revoked_at:${userId}`, String(epochNow), 30 * 24 * 3600); // 30 days retention
+    try {
+      const { SocketService } = await import('../../services/websocket/socket.service');
+      SocketService.get()?.disconnectUser(userId);
+    } catch {
+      // Session revocation remains authoritative even if the socket service is unavailable.
+    }
   }
 
   /**

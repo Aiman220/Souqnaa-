@@ -10,6 +10,7 @@ import { config } from '../../config';
 import { SupportAgentStatus, SupportConversationStatus } from '@prisma/client';
 import { backendTelemetry } from '../telemetry/backend-telemetry.service';
 import { hasActiveSession } from '../../utils/auth-session.util';
+import { AdminRbacService } from '../../modules/admin/admin-rbac.service';
 
 export class SocketService {
   private static instance: SocketService;
@@ -58,6 +59,15 @@ export class SocketService {
     recent.push(now);
     this.userTypingTimestamps.set(userId, recent);
     return true;
+  }
+
+  private async adminHasAnyPermission(userId: string, permissions: string[]): Promise<boolean> {
+    try {
+      const assigned = await AdminRbacService.getUserPermissions(userId);
+      return permissions.some((permission) => assigned.has(permission));
+    } catch {
+      return false;
+    }
   }
 
   public async resolveAndCacheConversationMeta(
@@ -451,10 +461,17 @@ export class SocketService {
       // Join user room
       socket.join(`user:${userId}`);
       if (socket.data.user?.role === 'ADMIN') {
-        socket.join('admin:disputes');
-        socket.join('admin:notifications');
-        socket.join('admin:orders');
-        socket.join('admin:dashboard');
+        try {
+          const permissions = await AdminRbacService.getUserPermissions(userId);
+          if (permissions.has('disputes:resolve')) socket.join('admin:disputes');
+          if (permissions.has('dashboard:view')) {
+            socket.join('admin:notifications');
+            socket.join('admin:dashboard');
+          }
+          if (permissions.has('orders:view')) socket.join('admin:orders');
+        } catch {
+          // Do not grant administrator rooms when the permission service is unavailable.
+        }
       }
       if (socket.data.user?.role === 'SELLER') {
         prisma.seller.findFirst({ where: { userId }, select: { id: true } })
@@ -483,7 +500,7 @@ export class SocketService {
 
           let isAuthorized = false;
           if (userRole === 'ADMIN') {
-            isAuthorized = true;
+            isAuthorized = await this.adminHasAnyPermission(userId, ['orders:view']);
           } else {
             const order = await prisma.order.findFirst({
               where: {
@@ -544,7 +561,7 @@ export class SocketService {
 
           let isAuthorized = false;
           if (userRole === 'ADMIN') {
-            isAuthorized = true;
+            isAuthorized = await this.adminHasAnyPermission(userId, ['disputes:resolve']);
           } else {
             const dispute = await prisma.dispute.findFirst({
               where: {
@@ -629,9 +646,18 @@ export class SocketService {
             baseConvId = supConv.conversationId;
           }
 
-          // Authorize: user must be conversation member, ADMIN, or assigned/requester of support conversation
+          // Authorize participants and only administrators with explicit support access.
           const userRole = socket.data.user?.role;
-          let isAuthorized = userRole === 'ADMIN';
+          const adminPermissions = userRole === 'ADMIN'
+            ? await AdminRbacService.getUserPermissions(userId)
+            : new Set<string>();
+          const hasSupportAccess = adminPermissions.has('support:view') || adminPermissions.has('support:manage');
+          const canManageSupport = adminPermissions.has('support:manage');
+          let isAuthorized = false;
+
+          if (userRole === 'ADMIN') {
+            isAuthorized = hasSupportAccess;
+          }
 
           if (!isAuthorized) {
             const member = await prisma.conversationMember.findUnique({
@@ -644,7 +670,7 @@ export class SocketService {
             } else if (supConv) {
               if (supConv.requesterId === userId) {
                 isAuthorized = true;
-              } else {
+              } else if (!supConv.assignedAgentId || supConv.assignedAgent?.adminUserId === userId) {
                 const agent = await prisma.supportAgent.findUnique({ where: { adminUserId: userId } });
                 if (agent) isAuthorized = true;
               }
@@ -663,7 +689,10 @@ export class SocketService {
             socket.join(`conversation:${supConv.conversationId}`);
 
             // 1. Direct unread badge clearance upon opening support chat room
-            const isAgent = userRole === 'ADMIN' || (await prisma.supportAgent.findUnique({ where: { adminUserId: userId } })) !== null;
+            const supportAgent = userRole === 'ADMIN'
+              ? await prisma.supportAgent.findUnique({ where: { adminUserId: userId } })
+              : null;
+            const isAgent = hasSupportAccess || supportAgent !== null;
             const isSeller = userRole === 'SELLER';
             const updateField = isAgent
               ? { unreadAgentCount: 0 }
@@ -685,10 +714,8 @@ export class SocketService {
             // Read receipts are strictly triggered by explicit recipient read activity (message:seen or /read).
 
             // 2. Real join when supporter enters the chat room
-            if (isAgent && (supConv.status === SupportConversationStatus.QUEUED || !supConv.assignedAgentId)) {
-              let agent = await prisma.supportAgent.findUnique({
-                where: { adminUserId: userId },
-              });
+            if (canManageSupport && (supConv.status === SupportConversationStatus.QUEUED || !supConv.assignedAgentId)) {
+              let agent = supportAgent;
               if (!agent) {
                 const adminUser = await prisma.user.findUnique({ where: { id: userId } });
                 if (adminUser) {
@@ -900,8 +927,10 @@ export class SocketService {
 
         // Authorize: Requester must be ADMIN or share at least one conversation with target user
         const userRole = socket.data.user?.role;
-        let isAuthorized = userRole === 'ADMIN';
-        if (!isAuthorized) {
+        let isAuthorized = false;
+        if (userRole === 'ADMIN') {
+          isAuthorized = await this.adminHasAnyPermission(userId, ['support:view', 'support:manage']);
+        } else {
           const shared = await prisma.conversationMember.findFirst({
             where: {
               userId,
@@ -963,13 +992,12 @@ export class SocketService {
           isTyping,
         };
 
-        const userRole = socket.data.user?.role;
         const now = Date.now();
         const cached = this.conversationMetaCache.get(cleanConvId);
 
         // Fast path 1: Instant dispatch from in-memory cached membership (0ms latency)
         if (cached && cached.expiresAt > now) {
-          const isAuthorized = userRole === 'ADMIN' || cached.memberUserIds.includes(userId);
+          const isAuthorized = socket.rooms.has(`conversation:${cleanConvId}`) || cached.memberUserIds.includes(userId);
           if (!isAuthorized) return;
 
           typingPayload.altConversationId = cached.altRoom;
@@ -1018,7 +1046,7 @@ export class SocketService {
         const meta = await this.resolveAndCacheConversationMeta(cleanConvId, userId);
         if (!meta) return;
 
-        const isAuthorized = userRole === 'ADMIN' || meta.memberUserIds.includes(userId);
+        const isAuthorized = socket.rooms.has(`conversation:${cleanConvId}`) || meta.memberUserIds.includes(userId);
         if (!isAuthorized) return;
 
         typingPayload.altConversationId = meta.altRoom;
@@ -1085,6 +1113,9 @@ export class SocketService {
       // Agent sets their active presence / status
       socket.on('support:agent:status', async ({ status }: { status: 'ONLINE' | 'AWAY' | 'BUSY' | 'OFFLINE' }) => {
         try {
+          if (socket.data.user?.role !== 'ADMIN') return;
+          const permissions = await AdminRbacService.getUserPermissions(userId);
+          if (!permissions.has('support:manage')) return;
           const agent = await prisma.supportAgent.findUnique({ where: { adminUserId: userId } });
           if (agent) {
             const isOnline = status !== 'OFFLINE';
@@ -1118,6 +1149,9 @@ export class SocketService {
       // Agent heartbeat (refreshes Redis presence without writing DB)
       socket.on('support:agent:heartbeat', async () => {
         try {
+          if (socket.data.user?.role !== 'ADMIN') return;
+          const permissions = await AdminRbacService.getUserPermissions(userId);
+          if (!permissions.has('support:view') && !permissions.has('support:manage')) return;
           const agent = await prisma.supportAgent.findUnique({ where: { adminUserId: userId } });
           if (agent) {
             await redis.set(`agent:${agent.id}:presence`, agent.status, 300);
@@ -1126,9 +1160,15 @@ export class SocketService {
       });
 
       // Join/leave support queue room (for Admin dashboard live updates)
-      socket.on('join:support_queue', () => {
-        if (socket.data.user?.role === 'ADMIN') {
-          socket.join('room:support_queue');
+      socket.on('join:support_queue', async () => {
+        if (socket.data.user?.role !== 'ADMIN') return;
+        try {
+          const permissions = await AdminRbacService.getUserPermissions(userId);
+          if (permissions.has('support:view') || permissions.has('support:manage')) {
+            socket.join('room:support_queue');
+          }
+        } catch {
+          // Fail closed if administrator permissions cannot be checked.
         }
       });
 
@@ -1158,11 +1198,21 @@ export class SocketService {
             take: 100,
           });
 
+          if (targetMessages.length === 0) return;
+          const memberships = await prisma.conversationMember.findMany({
+            where: {
+              conversationId: { in: Array.from(new Set(targetMessages.map((message) => message.conversationId))) },
+              userId,
+            },
+            select: { conversationId: true },
+          });
+          const memberConversationIds = new Set(memberships.map((membership) => membership.conversationId));
+
           const now = new Date();
           const nowIso = now.toISOString();
 
           for (const msg of targetMessages) {
-            if (msg.isRead) continue;
+            if (msg.isRead || !memberConversationIds.has(msg.conversationId)) continue;
             let meta: any = {};
             if (msg.metadata) {
               try {
@@ -1219,12 +1269,14 @@ export class SocketService {
             where: { conversationId: { in: convIds }, userId },
           });
           const userRole = socket.data.user?.role;
+          const hasAdminSupportPermission = userRole === 'ADMIN'
+            && await this.adminHasAnyPermission(userId, ['support:view', 'support:manage']);
           const isSupportAuth = supConv && (
             supConv.requesterId === userId ||
             supConv.assignedAgent?.adminUserId === userId ||
-            userRole === 'ADMIN'
+            hasAdminSupportPermission
           );
-          if (!isMember && !isSupportAuth && userRole !== 'ADMIN') {
+          if (!isMember && !isSupportAuth) {
             console.warn(`[Socket.IO] Unauthorized message:seen attempt from user ${userId} for conversation ${inputId}`);
             return;
           }
@@ -1265,7 +1317,7 @@ export class SocketService {
 
           if (supConv) {
             const userRole = socket.data.user?.role;
-            const isAgent = userRole === 'ADMIN' || (supConv.assignedAgent?.adminUserId === userId);
+            const isAgent = hasAdminSupportPermission || (supConv.assignedAgent?.adminUserId === userId);
             const isSeller = userRole === 'SELLER';
             const updateField = isAgent
               ? { unreadAgentCount: 0 }
@@ -1528,7 +1580,7 @@ export class SocketService {
       });
 
       // Message reaction
-      socket.on('message:reaction', async ({ messageId, emoji, conversationId }: { messageId: string; emoji: string; conversationId?: string }) => {
+      socket.on('message:reaction', async ({ messageId, emoji }: { messageId: string; emoji: string; conversationId?: string }) => {
         try {
           if (!messageId || !emoji) return;
 
@@ -1538,6 +1590,13 @@ export class SocketService {
           });
 
           if (!msg) return;
+
+          const member = await prisma.conversationMember.findUnique({
+            where: {
+              conversationId_userId: { conversationId: msg.conversationId, userId },
+            },
+          });
+          if (!member) return;
 
           let meta: any = {};
           if (msg.metadata) {
@@ -1575,7 +1634,8 @@ export class SocketService {
             data: { metadata: JSON.stringify(meta) },
           });
 
-          const targetConvId = conversationId || msg.conversationId;
+          // The stored conversation is authoritative; never route a reaction to a client-selected room.
+          const targetConvId = msg.conversationId;
           const payload = {
             messageId,
             emoji,
@@ -1657,6 +1717,61 @@ export class SocketService {
     if (this.io) {
       this.io.to(`user:${userId}`).emit(event, data);
       this.io.to(`seller:${userId}`).emit(event, data);
+    }
+  }
+
+  async emitToOrderParticipants(
+    orderId: string,
+    events: Array<{ event: string; data: any; adminPermission?: string }>
+  ): Promise<void> {
+    if (!this.io || !orderId || events.length === 0) return;
+    try {
+      const order = await prisma.order.findFirst({
+        where: { OR: [{ id: orderId }, { orderNumber: orderId }] },
+        select: {
+          userId: true,
+          sellerOrders: { select: { seller: { select: { userId: true } } } },
+        },
+      });
+      if (!order) return;
+
+      const recipients = new Set<string>([
+        order.userId,
+        ...order.sellerOrders.map((sellerOrder) => sellerOrder.seller?.userId).filter((id): id is string => Boolean(id)),
+      ]);
+      const adminRecipients = new Map<string, string[]>();
+      const adminPermissions = new Set(events.map((item) => item.adminPermission).filter((item): item is string => Boolean(item)));
+      for (const permission of adminPermissions) {
+        adminRecipients.set(permission, await AdminRbacService.getAdminUserIdsWithPermission(permission));
+      }
+      for (const { event, data, adminPermission } of events) {
+        for (const recipientId of recipients) this.emitToUser(recipientId, event, data);
+        if (adminPermission) {
+          for (const adminUserId of adminRecipients.get(adminPermission) || []) {
+            this.emitToUser(adminUserId, event, data);
+          }
+        }
+      }
+    } catch {
+      // Failed participant lookup must never fall back to a global broadcast.
+    }
+  }
+
+  disconnectUser(userId: string): void {
+    if (this.io && userId) {
+      this.io.in(`user:${userId}`).disconnectSockets(true);
+    }
+  }
+
+  async emitToAdminsWithPermission(permission: string, event: string, data: any): Promise<void> {
+    if (!this.io) return;
+    try {
+      const adminUserIds = await AdminRbacService.getAdminUserIdsWithPermission(permission);
+      for (const adminUserId of adminUserIds) {
+        this.emitToUser(adminUserId, event, data);
+      }
+    } catch (error) {
+      console.error(`[Socket.IO] Failed to route ${event} to authorized administrators.`);
     }
   }
 
@@ -1793,6 +1908,10 @@ export class SocketService {
 
   emitGlobal(event: string, data: any): void {
     if (this.io) {
+      if (event === 'support:queue:updated' || event === 'support:conversation:created') {
+        this.io.to('room:support_queue').emit(event, data);
+        return;
+      }
       this.io.emit(event, data);
     }
   }

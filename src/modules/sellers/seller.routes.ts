@@ -3065,22 +3065,25 @@ router.post('/me/returns/:id/approve', async (req: Request, res: Response, next:
 
     try {
       const finalOrderId = updated?.orderId || parentOrderId;
-      SocketService.get()?.emitGlobal('order:return_approved', {
+      const socketSvc = SocketService.get();
+      const eventPayload = {
         sellerOrderId,
         orderId: finalOrderId,
-      });
-      SocketService.get()?.emitGlobal('order:status', {
+      };
+      if (updated?.order?.userId) {
+        socketSvc?.emitToUser(updated.order.userId, 'order:return_approved', eventPayload);
+        socketSvc?.emitToUser(updated.order.userId, 'order:status', { orderId: finalOrderId, status: 'REFUNDED' });
+        socketSvc?.emitToUser(updated.order.userId, 'order:refund_updated', { orderId: finalOrderId, status: 'REFUNDED' });
+        socketSvc?.emitToUser(updated.order.userId, 'REFUND_COMPLETED', { orderId: finalOrderId });
+        socketSvc?.emitToUser(updated.order.userId, 'refund:completed', { orderId: finalOrderId });
+        socketSvc?.emitToUser(updated.order.userId, 'wallet:updated', { orderId: finalOrderId });
+      }
+      socketSvc?.emitToUser(req.user!.userId, 'order:return_approved', eventPayload);
+      socketSvc?.emitToUser(req.user!.userId, 'order:status', {
         orderId: finalOrderId,
         status: 'REFUNDED',
       });
-      SocketService.get()?.emitGlobal('REFUND_COMPLETED', {
-        orderId: finalOrderId,
-      });
-      if (updated?.order?.userId) {
-        SocketService.get()?.emitGlobal('wallet:updated', {
-          userId: updated.order.userId,
-        });
-      }
+      socketSvc?.emitToUser(req.user!.userId, 'REFUND_COMPLETED', { orderId: finalOrderId });
     } catch (_) {}
 
     ResponseUtil.success(res, updated, 'تمت الموافقة على طلب الإرجاع واسترداد كامل المبلغ لمحفظة العميل بنجاح');
@@ -3146,18 +3149,17 @@ router.post(['/me/returns/:id/reject', '/me/orders/:id/reject-return'], async (r
     }
 
     try {
-      SocketService.get()?.emitGlobal('order:return_rejected', {
-        sellerOrderId,
-        orderId: targetOrderId || returnReq?.orderId,
-        reason: note,
-      });
-      if (targetOrderId) {
+      const eventOrderId = targetOrderId || returnReq?.orderId;
+      if (eventOrderId) {
         const orderData = await prisma.order.findUnique({
-          where: { id: targetOrderId },
+          where: { id: eventOrderId },
           select: { orderNumber: true, displayOrderNumber: true, userId: true },
         });
+        const returnPayload = { sellerOrderId, orderId: eventOrderId, reason: note };
+        if (orderData?.userId) SocketService.get()?.emitToUser(orderData.userId, 'order:return_rejected', returnPayload);
+        SocketService.get()?.emitToUser(seller.userId, 'order:return_rejected', returnPayload);
         SocketService.get()?.emitOrderStatusUpdate({
-          orderId: targetOrderId,
+          orderId: eventOrderId,
           orderNumber: orderData?.orderNumber || '',
           displayOrderNumber: orderData?.displayOrderNumber || undefined,
           sellerOrderId,
@@ -3175,7 +3177,7 @@ router.post(['/me/returns/:id/reject', '/me/orders/:id/reject-return'], async (r
               recipientId: orderData.userId,
               refundId: returnReq?.id || sellerOrderId,
               refundNumber: `RET-${sellerOrderId.slice(0, 8)}`,
-              orderId: targetOrderId,
+              orderId: eventOrderId,
               orderNumber: orderData.orderNumber,
               reason: note || undefined,
             })
@@ -3844,8 +3846,11 @@ router.post('/me/withdrawals', async (req: Request, res: Response, next: NextFun
 
     SocketService.get()?.emitToUser(req.user!.userId, 'withdrawal:created', withdrawal);
     SocketService.get()?.emitToUser(req.user!.userId, 'seller:finance_updated', { withdrawalId: withdrawal.id });
-    SocketService.get()?.emitGlobal('admin:withdrawal_created', withdrawal);
-    SocketService.get()?.emitGlobal('withdrawal:created', withdrawal);
+    void SocketService.get()?.emitToAdminsWithPermission('finance:withdrawals', 'admin:withdrawal_created', {
+      withdrawalId: withdrawal.id,
+      sellerId: withdrawal.sellerId,
+      status: withdrawal.status,
+    });
 
     ResponseUtil.created(res, withdrawal, 'تم تقديم طلب السحب بنجاح وسيتم معالجته من قبل الإدارة');
     } finally {
@@ -3894,7 +3899,11 @@ router.post('/me/deposits', async (req: Request, res: Response, next: NextFuncti
 
     // Real-time broadcast
     SocketService.get()?.emitToUser(seller.userId, 'seller:deposit_created', deposit);
-    SocketService.get()?.emitGlobal('admin:deposit_created', deposit);
+    void SocketService.get()?.emitToAdminsWithPermission('finance:payments', 'admin:deposit_created', {
+      depositId: deposit.id,
+      amount: deposit.amount,
+      userType: deposit.userType,
+    });
 
     ResponseUtil.created(res, deposit, 'تم إرسال طلب شحن رصيد المتجر بنجاح وهو الآن قيد مراجعة الإدارة');
   } catch (error) {
@@ -4545,20 +4554,21 @@ router.post('/me/orders/:id/approve-return', async (req: Request, res: Response,
 
     // Realtime broadcast to connected clients
     try {
-      SocketService.get()?.emitGlobal('order:return_approved', {
+      const socketSvc = SocketService.get();
+      const payload = {
         orderId: sellerOrder.orderId,
         sellerOrderId: sellerOrder.id,
-      });
-      SocketService.get()?.emitGlobal('order:status', {
-        orderId: sellerOrder.orderId,
-        status: 'REFUNDED',
-      });
-      SocketService.get()?.emitGlobal('REFUND_COMPLETED', {
-        orderId: sellerOrder.orderId,
-      });
-      SocketService.get()?.emitGlobal('wallet:updated', {
-        userId: sellerOrder.order.userId,
-      });
+      };
+      const statusPayload = { orderId: sellerOrder.orderId, status: 'REFUNDED' };
+      socketSvc?.emitToUser(sellerOrder.order.userId, 'order:return_approved', payload);
+      socketSvc?.emitToUser(sellerOrder.order.userId, 'order:status', statusPayload);
+      socketSvc?.emitToUser(sellerOrder.order.userId, 'order:refund_updated', statusPayload);
+      socketSvc?.emitToUser(sellerOrder.order.userId, 'REFUND_COMPLETED', { orderId: sellerOrder.orderId });
+      socketSvc?.emitToUser(sellerOrder.order.userId, 'refund:completed', { orderId: sellerOrder.orderId });
+      socketSvc?.emitToUser(sellerOrder.order.userId, 'wallet:updated', { orderId: sellerOrder.orderId });
+      socketSvc?.emitToUser(req.user!.userId, 'order:return_approved', payload);
+      socketSvc?.emitToUser(req.user!.userId, 'order:status', statusPayload);
+      socketSvc?.emitToUser(req.user!.userId, 'REFUND_COMPLETED', { orderId: sellerOrder.orderId });
     } catch (_) {}
 
     ResponseUtil.success(res, updated, 'تمت الموافقة على طلب الإرجاع وإيداع المبلغ في محفظة العميل بنجاح ✓');
@@ -4655,14 +4665,16 @@ router.post('/me/orders/:id/reject-return', async (req: Request, res: Response, 
     });
 
     try {
-      SocketService.get()?.emitGlobal('order:return_rejected', {
+      const payload = {
         orderId: sellerOrder.orderId,
         sellerOrderId: sellerOrder.id,
-      });
-      SocketService.get()?.emitGlobal('order:status', {
-        orderId: sellerOrder.orderId,
-        status: 'DELIVERED',
-      });
+      };
+      const statusPayload = { orderId: sellerOrder.orderId, status: 'DELIVERED' };
+      SocketService.get()?.emitToUser(sellerOrder.order.userId, 'order:return_rejected', payload);
+      SocketService.get()?.emitToUser(sellerOrder.order.userId, 'order:status', statusPayload);
+      SocketService.get()?.emitToUser(sellerOrder.order.userId, 'order:refund_updated', { orderId: sellerOrder.orderId, status: 'CLOSED' });
+      SocketService.get()?.emitToUser(req.user!.userId, 'order:return_rejected', payload);
+      SocketService.get()?.emitToUser(req.user!.userId, 'order:status', statusPayload);
     } catch (_) {}
 
     ResponseUtil.success(res, updated, 'تم تسجيل رفض طلب الإرجاع بنجاح');

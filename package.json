@@ -16,6 +16,7 @@
     "lint": "tsc --noEmit",
     "security:gate": "ts-node scripts/run-security-gate.ts",
     "security:test": "ts-node tests/security-hardening.test.ts",
+    "security:remediation": "ts-node tests/security-remediation.test.ts",
     "infra:validate": "ts-node scripts/validate-infrastructure.ts",
     "test:infra": "ts-node tests/cloudflare-upstash-infrastructure.test.ts",
     "bootstrap:admin": "ts-node scripts/bootstrap-admin.ts",

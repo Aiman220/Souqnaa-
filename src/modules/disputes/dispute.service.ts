@@ -312,12 +312,13 @@ export class DisputeService {
           createdAt: dispute.createdAt,
         });
 
-        // Update live status for the order
-        socket.emitGlobal('dispute:created', {
-          orderId: order.id,
-          disputeId: dispute.id,
-          refundId: finalRefundReq?.id,
-        });
+        void socket.emitToOrderParticipants(order.id, [
+          {
+            event: 'dispute:created',
+            data: { orderId: order.id, disputeId: dispute.id, refundId: finalRefundReq?.id },
+            adminPermission: 'disputes:resolve',
+          },
+        ]);
 
         // Targeted alerts for seller
         if (targetSeller.userId) {
@@ -1075,16 +1076,18 @@ export class DisputeService {
           status: finalStatus,
         });
 
-        socket.emitGlobal('dispute:resolved', {
-          disputeId: dispute.id,
-          orderId: dispute.orderId,
-          status: finalStatus,
-        });
-
-        socket.emitGlobal('order:status', {
-          orderId: dispute.orderId,
-          status: isRejected ? 'DELIVERED' : 'REFUNDED',
-        });
+        void socket.emitToOrderParticipants(dispute.orderId, [
+          {
+            event: 'dispute:resolved',
+            data: { disputeId: dispute.id, orderId: dispute.orderId, status: finalStatus },
+            adminPermission: 'disputes:resolve',
+          },
+          {
+            event: 'order:status',
+            data: { orderId: dispute.orderId, status: isRejected ? 'DELIVERED' : 'REFUNDED' },
+            adminPermission: 'orders:view',
+          },
+        ]);
       }
     } catch (_) {}
 

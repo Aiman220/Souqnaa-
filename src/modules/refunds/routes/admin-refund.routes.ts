@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { prisma } from '../../../database/prisma';
 import { authenticate, authorize } from '../../../middleware/auth.middleware';
+import { requirePermission } from '../../../middleware/rbac.middleware';
 import { ResponseUtil } from '../../../utils/response.util';
 import { AppError } from '../../../middleware/error.middleware';
 import { RefundService } from '../services/refund.service';
@@ -25,7 +26,7 @@ const upload = multer({
 });
 
 // ── GET /api/v1/admin/refunds/policy ──────────────────────────────────────────
-router.get('/policy', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/policy', requirePermission('disputes:resolve'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     let policy = await prisma.refundPolicyConfig.findFirst();
     if (!policy) {
@@ -51,7 +52,7 @@ router.get('/policy', async (req: Request, res: Response, next: NextFunction) =>
 });
 
 // ── PUT /api/v1/admin/refunds/policy ──────────────────────────────────────────
-router.put('/policy', async (req: Request, res: Response, next: NextFunction) => {
+router.put('/policy', requirePermission('settings:manage'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const adminUserId = req.user!.userId;
     const {
@@ -111,7 +112,7 @@ router.put('/policy', async (req: Request, res: Response, next: NextFunction) =>
 });
 
 // ── GET /api/v1/admin/refunds/reconciliation ──────────────────────────────────
-router.get('/reconciliation', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/reconciliation', requirePermission('finance:view'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const report = await RefundReconciliationService.runReconciliationAudit();
     ResponseUtil.success(res, report);
@@ -121,7 +122,7 @@ router.get('/reconciliation', async (req: Request, res: Response, next: NextFunc
 });
 
 // ── GET /api/v1/admin/refunds/manual-transfers ─────────────────────────────────
-router.get('/manual-transfers', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/manual-transfers', requirePermission('finance:view'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const page = parseInt(req.query.page as string, 10) || 1;
     const limit = parseInt(req.query.limit as string, 10) || 20;
@@ -142,7 +143,7 @@ router.get('/manual-transfers', async (req: Request, res: Response, next: NextFu
 });
 
 // ── GET /api/v1/admin/refunds/manual-transfers/:id/unmask ──────────────────────
-router.get('/manual-transfers/:id/unmask', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/manual-transfers/:id/unmask', requirePermission('finance:payments'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
     const adminUserId = req.user!.userId;
@@ -154,7 +155,7 @@ router.get('/manual-transfers/:id/unmask', async (req: Request, res: Response, n
 });
 
 // ── POST /api/v1/admin/refunds/manual-transfers/:id/proof ─────────────────────
-router.post('/manual-transfers/:id/proof', upload.single('file'), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/manual-transfers/:id/proof', requirePermission('finance:payments'), upload.single('file'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
     const adminUserId = req.user!.userId;
@@ -189,7 +190,7 @@ router.post('/manual-transfers/:id/proof', upload.single('file'), async (req: Re
 });
 
 // ── POST /api/v1/admin/refunds/manual-transfers/:id/complete ──────────────────
-router.post('/manual-transfers/:id/complete', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/manual-transfers/:id/complete', requirePermission('finance:payments'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
     const adminUserId = req.user!.userId;
@@ -209,7 +210,7 @@ router.post('/manual-transfers/:id/complete', async (req: Request, res: Response
 });
 
 // ── POST /api/v1/admin/refunds/manual-transfers/:id/reject ────────────────────
-router.post('/manual-transfers/:id/reject', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/manual-transfers/:id/reject', requirePermission('finance:payments'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
     const adminUserId = req.user!.userId;
@@ -228,7 +229,7 @@ router.post('/manual-transfers/:id/reject', async (req: Request, res: Response, 
 });
 
 // ── GET /api/v1/admin/refunds ─────────────────────────────────────────────────
-router.get('/', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/', requirePermission('disputes:resolve'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const page = parseInt(req.query.page as string, 10) || 1;
     const limit = parseInt(req.query.limit as string, 10) || 20;
@@ -371,7 +372,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 });
 
 // ── GET /api/v1/admin/refunds/:id ─────────────────────────────────────────────
-router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/:id', requirePermission('disputes:resolve'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
 
@@ -455,7 +456,7 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
 });
 
 // ── POST /api/v1/admin/refunds/:id/approve ────────────────────────────────────
-router.post(['/:id/admin/approve', '/:id/approve'], async (req: Request, res: Response, next: NextFunction) => {
+router.post(['/:id/admin/approve', '/:id/approve'], requirePermission('disputes:resolve'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
     const { decisionReason, destination = RefundDestination.CUSTOMER_WALLET, internalNote } = req.body;
@@ -478,7 +479,7 @@ router.post(['/:id/admin/approve', '/:id/approve'], async (req: Request, res: Re
 });
 
 // ── POST /api/v1/admin/refunds/:id/adjust (or partial-approve) ────────────────
-router.post(['/:id/admin/adjust', '/:id/partial-approve'], async (req: Request, res: Response, next: NextFunction) => {
+router.post(['/:id/admin/adjust', '/:id/partial-approve'], requirePermission('disputes:resolve', 'finance:payments'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
     const { approvedAmount, destination = RefundDestination.CUSTOMER_WALLET, decisionReason, internalNote } = req.body;
@@ -506,7 +507,7 @@ router.post(['/:id/admin/adjust', '/:id/partial-approve'], async (req: Request, 
 });
 
 // ── POST /api/v1/admin/refunds/:id/reject ─────────────────────────────────────
-router.post(['/:id/admin/reject', '/:id/reject'], async (req: Request, res: Response, next: NextFunction) => {
+router.post(['/:id/admin/reject', '/:id/reject'], requirePermission('disputes:resolve'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
     const { decisionReason, internalNote } = req.body;
@@ -528,7 +529,7 @@ router.post(['/:id/admin/reject', '/:id/reject'], async (req: Request, res: Resp
 });
 
 // ── POST /api/v1/admin/refunds/wallet/adjust ──────────────────────────────────
-router.post('/wallet/adjust', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/wallet/adjust', requirePermission('finance:payments'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const adminUserId = req.user!.userId;
     const { targetUserId, amount, direction, reason, reference } = req.body;
@@ -549,7 +550,7 @@ router.post('/wallet/adjust', async (req: Request, res: Response, next: NextFunc
 });
 
 // ── POST /api/v1/admin/refunds/:id/messages ──────────────────────────────────
-router.post('/:id/messages', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/:id/messages', requirePermission('disputes:resolve'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
     const { message, isPrivateAdminNote = false } = req.body;
