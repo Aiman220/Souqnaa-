@@ -40,6 +40,7 @@ import { setMaintenanceConfig } from '../../middleware/maintenance.middleware';
 import { SellerFinancialRiskService } from '../commission/seller-financial-risk.service';
 import { AdminRbacService, SYSTEM_PERMISSIONS } from './admin-rbac.service';
 import { resolveRefundAmount } from './refund-amount.policy';
+import { resolveCustomerDepositApprovalAmount } from './deposit-approval.policy';
 import { recommendationService } from '../recommendations/services/recommendation.service';
 
 const router = Router();
@@ -4127,10 +4128,14 @@ router.post('/customer-withdrawals/:id/approve', requirePermission('finance:with
   try {
     const id = req.params.id as string;
     const { adminNote } = req.body;
-    const updated = await prisma.customerWalletWithdrawal.update({
-      where: { id },
+    const transition = await prisma.customerWalletWithdrawal.updateMany({
+      where: { id, status: 'PENDING' },
       data: { status: 'APPROVED', adminNote: adminNote || null, assignedAdminId: req.user!.userId },
     });
+    if (transition.count !== 1) {
+      throw new AppError('طلب السحب لم يعد بانتظار الموافقة.', 409, 'WITHDRAWAL_ALREADY_PROCESSED');
+    }
+    const updated = await prisma.customerWalletWithdrawal.findUniqueOrThrow({ where: { id } });
 
     SocketService.get()?.emitToUser(updated.userId, 'customer:withdrawal_updated', {
       withdrawalId: updated.id,
@@ -4336,7 +4341,6 @@ router.post('/deposits/:id/approve', requirePermission('finance:payments'), asyn
     });
     if (!deposit) throw new AppError('طلب الإيداع غير موجود', 404);
     if (deposit.status !== 'PENDING') throw new AppError('تم البت في هذا الطلب مسبقاً', 400);
-
     const updated = await prisma.$transaction(async (tx) => {
       // 1. Seller deposit approval & financial risk debt settlement
       if (deposit.userType === 'SELLER' && deposit.sellerId) {
@@ -4351,10 +4355,12 @@ router.post('/deposits/:id/approve', requirePermission('finance:payments'), asyn
       }
 
       // 2. Customer deposit approval
+      const effectiveApprovedAmount = resolveCustomerDepositApprovalAmount(deposit.amount, req.body.approvedAmount);
       const lockResult = await tx.walletDeposit.updateMany({
         where: { id: deposit.id, status: 'PENDING' },
         data: {
           status: 'APPROVED',
+          approvedAmount: effectiveApprovedAmount,
           reviewedByAdminId: req.user!.userId,
           reviewedAt: new Date(),
           completedAt: new Date(),
@@ -4380,10 +4386,6 @@ router.post('/deposits/:id/approve', requirePermission('finance:payments'), asyn
           data: { userId: deposit.userId, currency: 'YER', availableBalance: 0, pendingBalance: 0 },
         });
       }
-
-      const effectiveApprovedAmount = req.body.approvedAmount !== undefined && !isNaN(parseFloat(String(req.body.approvedAmount)))
-        ? parseFloat(String(req.body.approvedAmount))
-        : deposit.amount;
 
       const before = account.availableBalance;
       const after = before + effectiveApprovedAmount;
@@ -5605,7 +5607,7 @@ router.get('/settings', async (req: Request, res: Response, next: NextFunction) 
   }
 });
 
-router.put('/settings', async (req: Request, res: Response, next: NextFunction) => {
+router.put('/settings', requirePermission('settings:manage'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { settings } = req.body; // Array of { key, value, type, group }
     if (Array.isArray(settings) && settings.length > 0) {

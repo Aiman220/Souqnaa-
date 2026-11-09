@@ -7,10 +7,16 @@ import { requireProviderVerifiedPayment } from '../src/modules/payments/payment-
 import { buildScopedIdempotencyKey } from '../src/utils/idempotency-key.util';
 import { fetchPublicMedia } from '../src/utils/remote-media-fetch.util';
 import { UrlSecurityUtil, isPrivateOrReservedHost } from '../src/utils/url-security.util';
-import { isRefundEvidenceParticipant, isSellerReportOwnedBy, isStoredObjectMatch } from '../src/utils/storage-access.util';
+import {
+  hasAdminPrivateStoragePermission,
+  isRefundEvidenceParticipant,
+  isSellerReportOwnedBy,
+  isStoredObjectMatch,
+} from '../src/utils/storage-access.util';
 import { assertUploadFolderRole, validatePresignFileSize } from '../src/utils/upload-policy.util';
 import { rotateRefreshTokenAtomically } from '../src/utils/refresh-rotation.util';
 import { resolveRefundAmount } from '../src/modules/admin/refund-amount.policy';
+import { resolveCustomerDepositApprovalAmount } from '../src/modules/admin/deposit-approval.policy';
 import { selectAdminIdsWithPermission } from '../src/modules/admin/admin-rbac-policy';
 
 function expectPolicyError(action: () => unknown, code: string): void {
@@ -144,6 +150,29 @@ async function run() {
   assert.match(adminRoutesSource, /router\.post\('\/payments\/:orderId\/reject-wallet', requirePermission\('finance:payments'\)/);
   assert.match(adminRoutesSource, /router\.post\('\/customer-withdrawals\/:id\/complete', requirePermission\('finance:withdrawals'\)/);
 
+  // SOQ-SEC-002: general settings require the explicit settings permission.
+  assert.match(adminRoutesSource, /router\.put\('\/settings', requirePermission\('settings:manage'\)/);
+
+  // SOQ-SEC-003: wallet withdrawal status and balances use conditional database transitions.
+  const walletServiceSource = remediationSource('modules/wallet/customer-wallet.service.ts');
+  assert.match(walletServiceSource, /customerWalletWithdrawal\.updateMany\(\{\s*where:\s*\{\s*id:\s*withdrawalId,\s*status:\s*\{\s*in:\s*\['PENDING', 'APPROVED'\]\s*\}\s*\}/);
+  assert.ok(walletServiceSource.includes('"availableBalance" >= ${wr.amount}'));
+  assert.ok(walletServiceSource.includes('"pendingBalance" >= ${wr.amount}'));
+  assert.ok(walletServiceSource.includes('("availableBalance" - "pendingBalance") >= ${amount}'));
+
+  // SOQ-SEC-004: private storage access for admins is scoped by existing RBAC permissions.
+  assert.strictEqual(hasAdminPrivateStoragePermission(new Set(['support:view']), 'chat/thread-1/file.png'), true);
+  assert.strictEqual(hasAdminPrivateStoragePermission(new Set(['support:view']), 'finance_proofs/proof-1.png'), false);
+  assert.strictEqual(hasAdminPrivateStoragePermission(new Set(['finance:view']), 'finance_proofs/proof-1.png'), true);
+  assert.strictEqual(hasAdminPrivateStoragePermission(new Set(), 'documents/seller-id.png'), false);
+
+  // SOQ-SEC-005: customer deposit approval cannot mint funds beyond the submitted deposit.
+  assert.strictEqual(resolveCustomerDepositApprovalAmount(500, undefined), 500);
+  assert.strictEqual(resolveCustomerDepositApprovalAmount(500, '250'), 250);
+  for (const invalid of [-1, 0, 'Infinity', '500.01', '250xyz']) {
+    expectPolicyError(() => resolveCustomerDepositApprovalAmount(500, invalid), 'INVALID_APPROVED_DEPOSIT_AMOUNT');
+  }
+
   // F-03: support, order, and dispute room access uses the existing permission model.
   const socketSource = remediationSource('services/websocket/socket.service.ts');
   assert.ok(socketSource.includes("adminPermissions.has('support:view') || adminPermissions.has('support:manage')"));
@@ -184,7 +213,16 @@ async function run() {
   assert.ok(socketSource.includes('conversationId_userId: { conversationId: msg.conversationId, userId }'));
   assert.ok(socketSource.includes('const targetConvId = msg.conversationId;'));
 
-  console.log('Security remediation regression tests passed (VULN-001 through VULN-009 and F-01 through F-08).');
+  // SOQ-SEC-001: production cannot use the log SMS provider or claim a failed OTP was delivered.
+  const smsProviderSource = remediationSource('modules/notifications/providers/sms.provider.ts');
+  const otpSource = remediationSource('modules/auth/otp.service.ts');
+  assert.match(smsProviderSource, /case 'LOG':[\s\S]*NODE_ENV === 'production'[\s\S]*LOG SMS provider is disabled in production/);
+  assert.doesNotMatch(smsProviderSource, /Text: "\$\{text\}"/);
+  assert.match(otpSource, /if \(!delivery\.success\)[\s\S]*OTP_DELIVERY_FAILED/);
+  const storageSource = remediationSource('modules/storage/storage.routes.ts');
+  assert.match(storageSource, /hasAdminPrivateStoragePermission\(await AdminRbacService\.getUserPermissions\(user\.userId\), key\)/);
+
+  console.log('Security remediation regression tests passed (existing checks plus SOQ-SEC-001 through SOQ-SEC-005).');
 }
 
 run().catch((error) => {

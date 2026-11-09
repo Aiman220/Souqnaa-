@@ -122,7 +122,8 @@ export class SmsNotificationProvider implements NotificationProvider {
         messageId,
       };
     } catch (error: any) {
-      console.error(`[SMS Provider] Delivery error to ${phone}:`, error.message);
+      const safePhone = String(phone).replace(/\d(?=\d{3})/g, '*');
+      console.error(`[SMS Provider] Delivery error to ${safePhone}:`, error.message);
       return {
         success: false,
         provider: this.providerName,
@@ -269,13 +270,19 @@ export class SmsNotificationProvider implements NotificationProvider {
           return data.id || `yemensms_${timestamp}`;
         }
         // Fallback to simulated log
-        console.log(`[Yemen SMS Gateway (Simulated)] To: ${phone} | Content: "${text}"`);
+        if (process.env.NODE_ENV === 'production') {
+          throw new Error('YEMEN_SMS credentials are required in production');
+        }
+        console.log(`[Yemen SMS Gateway (Simulated)] To: ${String(phone).replace(/\d(?=\d{3})/g, '*')} | UseCase: ${useCase} | Content: [REDACTED]`);
         return `yemensms_sim_${timestamp}`;
       }
 
       case 'LOG':
       default: {
-        console.log(`[SMS Gateway (${this.providerType})] To: ${phone} | UseCase: ${useCase} | Text: "${text}"`);
+        if (process.env.NODE_ENV === 'production') {
+          throw new Error('The LOG SMS provider is disabled in production');
+        }
+        console.log(`[SMS Gateway (${this.providerType})] Simulated delivery to ${String(phone).replace(/\d(?=\d{3})/g, '*')} | UseCase: ${useCase} | Content: [REDACTED]`);
         return `sms_sim_${timestamp}_${Math.random().toString(36).substring(7)}`;
       }
     }

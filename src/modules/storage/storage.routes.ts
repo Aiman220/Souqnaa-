@@ -7,7 +7,12 @@ import { AppError } from '../../middleware/error.middleware';
 import { ImageProcessorService, ImageVariantName, IMAGE_VARIANTS } from '../../services/storage/image-processor.service';
 import { imageMetricsService } from '../../services/storage/image-metrics.service';
 import { prisma } from '../../database/prisma';
-import { isRefundEvidenceParticipant, isSellerReportOwnedBy, isStoredObjectMatch } from '../../utils/storage-access.util';
+import {
+  hasAdminPrivateStoragePermission,
+  isRefundEvidenceParticipant,
+  isSellerReportOwnedBy,
+  isStoredObjectMatch,
+} from '../../utils/storage-access.util';
 
 const router = Router();
 
@@ -55,7 +60,11 @@ const PRIVATE_FOLDER_PREFIXES = [
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif', '.gif']);
 
 async function canReadPrivateObject(key: string, user: { userId: string; role: string }): Promise<boolean> {
-  if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') return true;
+  if (user.role === 'SUPER_ADMIN') return true;
+  if (user.role === 'ADMIN') {
+    const { AdminRbacService } = await import('../admin/admin-rbac.service');
+    return hasAdminPrivateStoragePermission(await AdminRbacService.getUserPermissions(user.userId), key);
+  }
   if (key.startsWith('reports/')) return user.role === 'SELLER' && isSellerReportOwnedBy(user.userId, key);
 
   // Normalize key to base key and filename stem for DB contains queries

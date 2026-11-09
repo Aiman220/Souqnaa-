@@ -65,7 +65,18 @@ export class OtpService {
       });
     } else {
       // Send localized SMS via SMS Provider Gateway
-      await smsNotificationProvider.sendOtpSms(cleanTarget, code, locale);
+      const delivery = await smsNotificationProvider.sendOtpSms(cleanTarget, code, locale);
+      if (!delivery.success) {
+        await Promise.all([
+          redis.del(`otp:${type}:${cleanTarget}`),
+          redis.del(cooldownKey),
+        ]);
+        throw new AppError(
+          locale === 'ar' ? 'تعذر إرسال رمز التحقق حالياً. يرجى المحاولة لاحقاً.' : 'Unable to send the verification code right now. Please try again later.',
+          503,
+          'OTP_DELIVERY_FAILED'
+        );
+      }
     }
 
     return { sent: true, cooldownSeconds };

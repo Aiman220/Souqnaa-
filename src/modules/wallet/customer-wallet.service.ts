@@ -467,7 +467,7 @@ export class CustomerWalletService {
 
   static async requestWithdrawal(params: { userId: string; savedWalletId: string; amount: number }) {
     const { userId, savedWalletId, amount } = params;
-    if (!amount || amount <= 0) throw new AppError('مبلغ السحب يجب أن يكون أكبر من الصفر', 400);
+    if (!Number.isFinite(amount) || amount <= 0) throw new AppError('مبلغ السحب يجب أن يكون أكبر من الصفر', 400);
     if (amount < 100) throw new AppError('الحد الأدنى للسحب هو 100 ريال يمني', 400);
     return await prisma.$transaction(async (tx) => {
       const account = await tx.walletAccount.findUnique({ where: { userId } });
@@ -477,7 +477,17 @@ export class CustomerWalletService {
       const savedWallet = await tx.customerSavedWallet.findFirst({ where: { id: savedWalletId, userId } });
       if (!savedWallet) throw new AppError('المحفظة الرقمية المحددة غير موجودة أو لا تخصك', 404);
       if (!savedWallet.walletNumberFull) throw new AppError('يرجى حذف هذه المحفظة وإعادة إضافتها لتفعيل السحب', 400);
-      await tx.walletAccount.update({ where: { userId }, data: { pendingBalance: { increment: amount } } });
+      const reservations: any[] = await tx.$queryRaw`
+        UPDATE "WalletAccount"
+        SET "pendingBalance" = "pendingBalance" + ${amount},
+            "updatedAt" = NOW()
+        WHERE "id" = ${account.id}
+          AND ("availableBalance" - "pendingBalance") >= ${amount}
+        RETURNING "id";
+      `;
+      if (!reservations || reservations.length !== 1) {
+        throw new AppError('الرصيد المتاح تغير أثناء معالجة الطلب. يرجى المحاولة مجدداً.', 409, 'INSUFFICIENT_WALLET_BALANCE');
+      }
       const withdrawal = await tx.customerWalletWithdrawal.create({
         data: {
           userId, savedWalletId: savedWallet.id, amount, currency: account.currency || 'YER',
@@ -518,33 +528,55 @@ export class CustomerWalletService {
       const wr = await tx.customerWalletWithdrawal.findUnique({ where: { id: withdrawalId } });
       if (!wr) throw new AppError('طلب السحب غير موجود', 404);
       if (wr.status !== 'PENDING' && wr.status !== 'APPROVED') throw new AppError(`لا يمكن إتمام طلب بحالة [${wr.status}]`, 400);
-      const account = await tx.walletAccount.findUnique({ where: { userId: wr.userId } });
-      if (!account) throw new AppError('حساب المحفظة غير موجود', 404);
-      const balanceBefore = account.availableBalance;
-      const balanceAfter = parseFloat((balanceBefore - wr.amount).toFixed(2));
-      if (balanceAfter < 0) throw new AppError('الرصيد المتاح غير كافٍ', 400);
+      const completedAt = new Date();
+      const claim = await tx.customerWalletWithdrawal.updateMany({
+        where: { id: withdrawalId, status: { in: ['PENDING', 'APPROVED'] } },
+        data: {
+          status: 'COMPLETED',
+          proofImageUrl,
+          externalRef: externalRef || null,
+          adminNote: adminNote || null,
+          assignedAdminId: adminUserId,
+          completedAt,
+        },
+      });
+      if (claim.count !== 1) {
+        throw new AppError('تمت معالجة طلب السحب مسبقاً.', 409, 'WITHDRAWAL_ALREADY_PROCESSED');
+      }
+
+      const accountRows: any[] = await tx.$queryRaw`
+        UPDATE "WalletAccount"
+        SET "availableBalance" = "availableBalance" - ${wr.amount},
+            "pendingBalance" = "pendingBalance" - ${wr.amount},
+            "updatedAt" = NOW()
+        WHERE "userId" = ${wr.userId}
+          AND "availableBalance" >= ${wr.amount}
+          AND "pendingBalance" >= ${wr.amount}
+        RETURNING "id", "availableBalance";
+      `;
+      if (!accountRows || accountRows.length !== 1) {
+        throw new AppError('الرصيد المحجوز غير كافٍ لإتمام طلب السحب.', 409, 'INSUFFICIENT_WALLET_BALANCE');
+      }
+      const accountId = accountRows[0].id as string;
+      const balanceAfter = Number(accountRows[0].availableBalance);
+      const balanceBefore = parseFloat((balanceAfter + wr.amount).toFixed(2));
       await tx.walletLedgerEntry.create({
         data: {
-          walletAccountId: account.id, type: WalletTxType.WITHDRAWAL_COMPLETED, direction: 'DEBIT',
+          walletAccountId: accountId, type: WalletTxType.WITHDRAWAL_COMPLETED, direction: 'DEBIT',
           amount: wr.amount, currency: wr.currency, balanceBefore, balanceAfter,
           referenceType: 'WITHDRAWAL', referenceId: wr.id, status: WalletTxStatus.COMPLETED,
           description: `سحب مكتمل لمحفظة ${wr.walletProvider} (${wr.walletNumberMasked})`, createdBy: adminUserId,
         },
       });
-      await tx.walletTransaction.updateMany({
+      const transactionUpdate = await tx.walletTransaction.updateMany({
         where: { metadata: { contains: wr.id }, type: WalletTxType.WITHDRAWAL_REQUEST, status: WalletTxStatus.PENDING },
-        data: { status: WalletTxStatus.COMPLETED, completedAt: new Date(), externalReference: externalRef || null,
+        data: { status: WalletTxStatus.COMPLETED, completedAt, externalReference: externalRef || null,
           description: `سحب مكتمل — المرجع: ${externalRef || 'غير محدد'}` },
       });
-      await tx.walletAccount.update({
-        where: { userId: wr.userId },
-        data: { availableBalance: balanceAfter, pendingBalance: { decrement: wr.amount } },
-      });
-      const updated = await tx.customerWalletWithdrawal.update({
-        where: { id: withdrawalId },
-        data: { status: 'COMPLETED', proofImageUrl, externalRef: externalRef || null,
-          adminNote: adminNote || null, assignedAdminId: adminUserId, completedAt: new Date() },
-      });
+      if (transactionUpdate.count !== 1) {
+        throw new AppError('تعذر مطابقة معاملة طلب السحب.', 409, 'WITHDRAWAL_TRANSACTION_STATE_INVALID');
+      }
+      const updated = await tx.customerWalletWithdrawal.findUniqueOrThrow({ where: { id: withdrawalId } });
       try {
         notificationEventBus.publish(
           NotificationEventFactory.walletEvent({
@@ -567,15 +599,31 @@ export class CustomerWalletService {
       const wr = await tx.customerWalletWithdrawal.findUnique({ where: { id: withdrawalId } });
       if (!wr) throw new AppError('طلب السحب غير موجود', 404);
       if (wr.status !== 'PENDING' && wr.status !== 'APPROVED') throw new AppError(`لا يمكن رفض طلب بحالة [${wr.status}]`, 400);
-      await tx.walletAccount.update({ where: { userId: wr.userId }, data: { pendingBalance: { decrement: wr.amount } } });
-      await tx.walletTransaction.updateMany({
+      const claim = await tx.customerWalletWithdrawal.updateMany({
+        where: { id: withdrawalId, status: { in: ['PENDING', 'APPROVED'] } },
+        data: { status: 'REJECTED', rejectionReason: reason, adminNote: reason, assignedAdminId: adminUserId },
+      });
+      if (claim.count !== 1) {
+        throw new AppError('تمت معالجة طلب السحب مسبقاً.', 409, 'WITHDRAWAL_ALREADY_PROCESSED');
+      }
+      const released = await tx.$executeRaw`
+        UPDATE "WalletAccount"
+        SET "pendingBalance" = "pendingBalance" - ${wr.amount},
+            "updatedAt" = NOW()
+        WHERE "userId" = ${wr.userId}
+          AND "pendingBalance" >= ${wr.amount};
+      `;
+      if (released !== 1) {
+        throw new AppError('تعذر تحرير الرصيد المحجوز لطلب السحب.', 409, 'WITHDRAWAL_RESERVATION_STATE_INVALID');
+      }
+      const transactionUpdate = await tx.walletTransaction.updateMany({
         where: { metadata: { contains: wr.id }, type: WalletTxType.WITHDRAWAL_REQUEST, status: WalletTxStatus.PENDING },
         data: { status: WalletTxStatus.FAILED },
       });
-      const updated = await tx.customerWalletWithdrawal.update({
-        where: { id: withdrawalId },
-        data: { status: 'REJECTED', rejectionReason: reason, adminNote: reason, assignedAdminId: adminUserId },
-      });
+      if (transactionUpdate.count !== 1) {
+        throw new AppError('تعذر مطابقة معاملة طلب السحب.', 409, 'WITHDRAWAL_TRANSACTION_STATE_INVALID');
+      }
+      const updated = await tx.customerWalletWithdrawal.findUniqueOrThrow({ where: { id: withdrawalId } });
       try {
         notificationEventBus.publish(
           NotificationEventFactory.walletEvent({
@@ -615,9 +663,9 @@ export class CustomerWalletService {
     const runner = async (tx: any) => {
       const account = await this.getOrCreateAccount(customerId, tx);
 
-      if (account.availableBalance < amount) {
+      if (account.availableBalance - account.pendingBalance < amount) {
         throw new AppError(
-          `رصيد محفظتك الحالي (${account.availableBalance.toFixed(0)} ${account.currency}) غير كافٍ لإتمام الطلب بقيمة (${amount.toFixed(0)} ${currency})`,
+          `رصيد محفظتك المتاح للسحب والشراء (${(account.availableBalance - account.pendingBalance).toFixed(0)} ${account.currency}) غير كافٍ لإتمام الطلب بقيمة (${amount.toFixed(0)} ${currency})`,
           400
         );
       }
@@ -685,7 +733,8 @@ export class CustomerWalletService {
         UPDATE "WalletAccount"
         SET "availableBalance" = "availableBalance" - ${amount},
             "updatedAt" = NOW()
-        WHERE "id" = ${account.id} AND "availableBalance" >= ${amount}
+        WHERE "id" = ${account.id}
+          AND ("availableBalance" - "pendingBalance") >= ${amount}
         RETURNING "id", "userId", "availableBalance", "pendingBalance", "currency";
       `;
 

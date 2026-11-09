@@ -33,3 +33,27 @@ export function isSellerReportOwnedBy(userId: string, objectKey: string): boolea
 export function isRefundEvidenceParticipant(userId: string, customerId: string, sellerUserId: string): boolean {
   return userId === customerId || userId === sellerUserId;
 }
+
+const ADMIN_PRIVATE_STORAGE_PERMISSIONS: Record<string, readonly string[]> = {
+  'chat/': ['support:view', 'support:manage'],
+  'support/': ['support:view', 'support:manage'],
+  'refunds/': ['disputes:resolve'],
+  'refund-evidence/': ['disputes:resolve'],
+  'disputes/': ['disputes:resolve'],
+  'documents/': ['sellers:view', 'sellers:approve'],
+  'seller-verification/': ['sellers:view', 'sellers:approve'],
+  'customer-deposits/': ['finance:view', 'finance:payments'],
+  'finance_proofs/': ['finance:view', 'finance:payments', 'finance:withdrawals'],
+  'withdrawals/': ['finance:view', 'finance:withdrawals'],
+  'reports/': ['reports:view'],
+};
+
+/** Admins may read private storage only when their RBAC grants access to its data class. */
+export function hasAdminPrivateStoragePermission(
+  userPermissions: ReadonlySet<string>,
+  objectKey: string,
+): boolean {
+  const prefix = Object.keys(ADMIN_PRIVATE_STORAGE_PERMISSIONS).find((candidate) => objectKey.startsWith(candidate));
+  if (!prefix) return false;
+  return ADMIN_PRIVATE_STORAGE_PERMISSIONS[prefix].some((permission) => userPermissions.has(permission));
+}
