@@ -57,13 +57,22 @@ const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif', '.g
 async function canReadPrivateObject(key: string, user: { userId: string; role: string }): Promise<boolean> {
   if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') return true;
   if (key.startsWith('reports/')) return user.role === 'SELLER' && isSellerReportOwnedBy(user.userId, key);
+
+  // Normalize key to base key and filename stem for DB contains queries
+  const cleanKey = key.replace(/^\/+/, '').split('?')[0];
+  const baseKey = cleanKey
+    .replace('/variants/', '/')
+    .replace(/_(thumbnail|small|medium|large)\.[a-z0-9]+$/i, '');
+  const fileStem = path.basename(baseKey, path.extname(baseKey));
+  const querySearch = fileStem.length > 5 ? fileStem : baseKey;
+
   if (key.startsWith('documents/') || key.startsWith('seller-verification/')) {
     const seller = await prisma.seller.findFirst({
       where: {
         userId: user.userId,
         OR: [
-          { idFrontUrl: { contains: key } }, { idBackUrl: { contains: key } },
-          { idSelfieUrl: { contains: key } }, { businessDocUrl: { contains: key } },
+          { idFrontUrl: { contains: querySearch } }, { idBackUrl: { contains: querySearch } },
+          { idSelfieUrl: { contains: querySearch } }, { businessDocUrl: { contains: querySearch } },
         ],
       },
       select: { id: true, idFrontUrl: true, idBackUrl: true, idSelfieUrl: true, businessDocUrl: true },
@@ -73,7 +82,7 @@ async function canReadPrivateObject(key: string, user: { userId: string; role: s
   }
   if (key.startsWith('refunds/') || key.startsWith('disputes/') || key.startsWith('refund-evidence/')) {
     const evidence = await prisma.refundEvidence.findMany({
-      where: { fileUrl: { contains: key } },
+      where: { fileUrl: { contains: querySearch } },
       select: { fileUrl: true, refundRequest: { select: { customerId: true, seller: { select: { userId: true } } } } },
     });
     return evidence.some((item) => isStoredObjectMatch(item.fileUrl, key) &&
@@ -81,7 +90,7 @@ async function canReadPrivateObject(key: string, user: { userId: string; role: s
   }
   if (key.startsWith('support/') || key.startsWith('chat/')) {
     const messages = await prisma.message.findMany({
-      where: { attachmentUrl: { contains: key }, conversation: { members: { some: { userId: user.userId } } } },
+      where: { attachmentUrl: { contains: querySearch }, conversation: { members: { some: { userId: user.userId } } } },
       select: { attachmentUrl: true },
     });
     return messages.some((item) => isStoredObjectMatch(item.attachmentUrl, key));
@@ -89,7 +98,7 @@ async function canReadPrivateObject(key: string, user: { userId: string; role: s
   if (key.startsWith('customer-deposits/') || key.startsWith('finance_proofs/')) {
     const deposit = await prisma.walletDeposit.findFirst({
       where: {
-        proofImageUrl: { contains: key },
+        proofImageUrl: { contains: querySearch },
         OR: [{ userId: user.userId }, { seller: { userId: user.userId } }]
       },
       select: { id: true }
@@ -99,7 +108,7 @@ async function canReadPrivateObject(key: string, user: { userId: string; role: s
   if (key.startsWith('withdrawals/') || key.startsWith('finance_proofs/')) {
     const withdrawal = await prisma.withdrawal.findFirst({
       where: {
-        proofImageUrl: { contains: key },
+        proofImageUrl: { contains: querySearch },
         seller: { userId: user.userId }
       },
       select: { id: true }
@@ -108,7 +117,7 @@ async function canReadPrivateObject(key: string, user: { userId: string; role: s
 
     const customerWithdrawal = await prisma.customerWalletWithdrawal.findFirst({
       where: {
-        proofImageUrl: { contains: key },
+        proofImageUrl: { contains: querySearch },
         userId: user.userId
       },
       select: { id: true }
