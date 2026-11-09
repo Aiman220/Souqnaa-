@@ -81,6 +81,7 @@ const FOLDER_MAX_SIZES: Record<string, number> = {
   'refund-evidence': 25 * 1024 * 1024,
   'review-images': 15 * 1024 * 1024,
   'review-videos': 50 * 1024 * 1024,
+  videos: 50 * 1024 * 1024,
   'customer-deposits': 25 * 1024 * 1024,
   finance_proofs: 25 * 1024 * 1024,
   withdrawals: 25 * 1024 * 1024,
@@ -315,32 +316,31 @@ router.post('/by-url', uploadByUrlLimiter, async (req: Request, res: Response, n
     try {
       const maxSize = FOLDER_MAX_SIZES[folder] || 10 * 1024 * 1024;
       const response = await fetchPublicMedia(cleanUrl, maxSize, 10000);
-      const rawContentType = response.contentType || '';
+      const rawContentType = (response.contentType || '').split(';')[0].trim().toLowerCase();
+      const buffer = response.body;
 
-      if (!ALLOWED_MIME_TYPES.has(rawContentType)) {
+      // Deep magic-bytes validation (§7: Verify actual content format, not just remote headers)
+      const detected = ImageProcessorService.detectMimeFromBuffer(buffer);
+
+      if (!ALLOWED_MIME_TYPES.has(rawContentType) && !ALLOWED_MIME_TYPES.has(detected.mime)) {
         throw new AppError('نوع محتوى الملف المسترد غير مدعوم أو غير آمن.', 400, 'UNSUPPORTED_MEDIA_TYPE');
       }
 
-      const buffer = response.body;
+      const mockFile: Express.Multer.File = {
+        fieldname: 'file',
+        originalname: `download-${Date.now()}${detected.ext}`,
+        encoding: '7bit',
+        mimetype: detected.mime,
+        buffer,
+        size: buffer.length,
+        destination: '',
+        filename: '',
+        path: '',
+        stream: null as any,
+      };
 
-        // Verify buffer magic bytes
-        const detected = ImageProcessorService.detectMimeFromBuffer(buffer);
-
-        const mockFile: Express.Multer.File = {
-          fieldname: 'file',
-          originalname: `download-${Date.now()}${detected.ext}`,
-          encoding: '7bit',
-          mimetype: detected.mime,
-          buffer,
-          size: buffer.length,
-          destination: '',
-          filename: '',
-          path: '',
-          stream: null as any,
-        };
-
-        const result = await storageService.uploadFile(mockFile, folder);
-        ResponseUtil.created(res, result, 'تم تحميل وحفظ الملف بنجاح');
+      const result = await storageService.uploadFile(mockFile, folder);
+      ResponseUtil.created(res, result, 'تم تحميل وحفظ الملف بنجاح');
       return;
     } catch (fetchErr: any) {
       if (fetchErr instanceof AppError) throw fetchErr;
