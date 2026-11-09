@@ -65,6 +65,7 @@ export interface IStorageService {
   }>;
   putObject(key: string, body: Buffer, contentType: string, cacheControl?: string): Promise<void>;
   objectExists(key: string): Promise<boolean>;
+  createPresignedDownloadUrl(key: string, expiresIn?: number): Promise<string>;
   getPublicUrl(key: string): string;
   getVariantUrl(key: string, variant: ImageVariantName): string;
   normalizeUrl(rawUrl: string | null | undefined): string;
@@ -136,6 +137,35 @@ class CloudflareR2StorageService implements IStorageService {
     return `${serverBase.replace(/\/+$/, '')}${config.apiPrefix}/storage/file`;
   }
 
+  cleanKey(key: string): string {
+    let k = (key || '').trim().replace(/^\/+/, '');
+    if (k.includes('?')) {
+      k = k.split('?')[0];
+    }
+    if (k.startsWith(`${this.bucket}/`)) {
+      k = k.substring(this.bucket.length + 1);
+    } else if (k.startsWith('sogana/')) {
+      k = k.substring('sogana/'.length);
+    }
+    // Also remove any duplicate storage/file path prefix if accidentally passed as key
+    k = k.replace(/^(api\/v1\/)?storage\/file\//, '');
+    return k.replace(/^\/+/, '');
+  }
+
+  isPrivatePrefix(key: string): boolean {
+    const k = this.cleanKey(key);
+    return /^(chat|refunds|support|disputes|documents|reports|customer-deposits|finance_proofs|refund-evidence|seller-verification|withdrawals)\//.test(k);
+  }
+
+  async createPresignedDownloadUrl(key: string, expiresIn = 3600): Promise<string> {
+    const clean = this.cleanKey(key);
+    const command = new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: clean,
+    });
+    return getSignedUrl(this.s3, command, { expiresIn });
+  }
+
   private resolveAuthenticatedStorageBaseUrl(): string {
     const serverBase = process.env.RENDER_EXTERNAL_URL || process.env.BACKEND_PUBLIC_URL ||
       process.env.API_BASE_URL || config.domains?.backendPublicUrl || `http://localhost:${config.port || 3000}`;
@@ -143,37 +173,49 @@ class CloudflareR2StorageService implements IStorageService {
   }
 
   getPublicUrl(key: string): string {
-    const cleanKey = key.replace(/^\/+/, '');
-    if (/^(chat|refunds|support|disputes|documents|reports)\//.test(cleanKey)) {
-      return `${this.resolveAuthenticatedStorageBaseUrl()}/${cleanKey}`;
+    const clean = this.cleanKey(key);
+    if (this.isPrivatePrefix(clean)) {
+      return `${this.resolveAuthenticatedStorageBaseUrl()}/${clean}`;
     }
-    return `${this.resolveBaseUrl()}/${cleanKey}`;
+    return `${this.resolveBaseUrl()}/${clean}`;
   }
 
   getVariantUrl(key: string, variant: ImageVariantName): string {
-    const cleanKey = key.replace(/^\/+/, '');
-    if (variant === 'original') return this.getPublicUrl(cleanKey);
-    const variantKey = ImageProcessorService.getVariantKey(cleanKey, variant, 'webp');
+    const clean = this.cleanKey(key);
+    if (variant === 'original') return this.getPublicUrl(clean);
+    const variantKey = ImageProcessorService.getVariantKey(clean, variant, 'webp');
     return this.getPublicUrl(variantKey);
   }
 
   normalizeUrl(rawUrl: string | null | undefined): string {
     if (!rawUrl) return '';
-    const trimmed = rawUrl.trim();
+    let trimmed = rawUrl.trim();
+
+    // 0. Unwrap duplicate or embedded URLs (e.g. ".../storage/file/https://...")
+    if (trimmed.includes('https://') || trimmed.includes('http://')) {
+      const lastHttpIndex = Math.max(trimmed.lastIndexOf('https://'), trimmed.lastIndexOf('http://'));
+      if (lastHttpIndex > 0) {
+        trimmed = trimmed.substring(lastHttpIndex);
+      }
+    }
 
     // 1. If rawUrl is a private R2 endpoint, convert to public streaming URL
     if (trimmed.includes('r2.cloudflarestorage.com')) {
       const match = trimmed.match(/r2\.cloudflarestorage\.com\/[^/]+\/(.+)$/);
       if (match && match[1]) {
-        return this.getPublicUrl(match[1]);
+        return this.getPublicUrl(this.cleanKey(match[1]));
       }
     }
 
-    // 1b. If rawUrl contains assets.souqnaa.com (missing DNS record), convert to public streaming URL
-    if (trimmed.includes('assets.souqnaa.com')) {
-      const match = trimmed.match(/assets\.souqnaa\.com\/(.+)$/);
-      if (match && match[1]) {
-        return this.getPublicUrl(match[1]);
+    // 1b. If rawUrl contains assets.souqnaa.com, dev-assets, or staging-assets
+    if (
+      trimmed.includes('assets.souqnaa.com') ||
+      trimmed.includes('dev-assets.souqnaa.com') ||
+      trimmed.includes('staging-assets.souqnaa.com')
+    ) {
+      const match = trimmed.match(/(assets|dev-assets|staging-assets)\.souqnaa\.com\/(.+)$/);
+      if (match && match[2]) {
+        return this.getPublicUrl(this.cleanKey(match[2]));
       }
     }
 
@@ -184,31 +226,27 @@ class CloudflareR2StorageService implements IStorageService {
     ) {
       const filePart = trimmed.match(/\/(api\/v1\/)?storage\/file\/(.+)$/);
       if (filePart && filePart[2]) {
-        return this.getPublicUrl(filePart[2]);
+        return this.getPublicUrl(this.cleanKey(filePart[2]));
       }
     }
 
     // 3. If it's a relative path starting with /api/v1/storage/file or /storage/file
-    if (trimmed.startsWith('/api/v1/storage/file/')) {
-      const cleanKey = trimmed.replace('/api/v1/storage/file/', '');
-      return this.getPublicUrl(cleanKey);
+    if (trimmed.includes('/api/v1/storage/file/')) {
+      const cleanKey = trimmed.substring(trimmed.lastIndexOf('/api/v1/storage/file/') + '/api/v1/storage/file/'.length);
+      return this.getPublicUrl(this.cleanKey(cleanKey));
     }
-    if (trimmed.startsWith('/storage/file/')) {
-      const cleanKey = trimmed.replace('/storage/file/', '');
-      return this.getPublicUrl(cleanKey);
+    if (trimmed.includes('/storage/file/')) {
+      const cleanKey = trimmed.substring(trimmed.lastIndexOf('/storage/file/') + '/storage/file/'.length);
+      return this.getPublicUrl(this.cleanKey(cleanKey));
     }
 
-    // 4. If it's an external absolute URL (HTTP/HTTPS), return intact
+    // 4. If it's an external absolute URL (HTTP/HTTPS) that is NOT one of our domains, return intact
     if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
       return trimmed;
     }
 
-    // 5. If it's a relative key like "products/..." or "categories/...", resolve to public storage URL
-    if (!trimmed.startsWith('/') && trimmed.includes('/')) {
-      return this.getPublicUrl(trimmed);
-    }
-
-    return trimmed;
+    // 5. If it's a relative key like "products/..." or "sogana/products/..."
+    return this.getPublicUrl(this.cleanKey(trimmed));
   }
 
   async objectExists(key: string): Promise<boolean> {

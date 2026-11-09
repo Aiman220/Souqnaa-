@@ -33,6 +33,7 @@ export const ALLOWED_UPLOAD_FOLDERS = new Set([
   'campaigns',
   'campaign-badges',
   'branding',
+  'seller-banners',
   'seller-promotions',
   'seller-verification',
   'refund-evidence',
@@ -41,20 +42,16 @@ export const ALLOWED_UPLOAD_FOLDERS = new Set([
   'proofs',
   'finance_proofs',
   'customer-deposits',
+  'withdrawals',
+  'test-chat',
+  'visual-search-temp',
   'videos',
 ]);
 
 const FOLDER_ALIASES: Record<string, string> = {
-  'banners': 'banners',
-  'campaigns': 'campaigns',
   'seller-promotions': 'promotions',
-  'seller-verification': 'documents',
-  'refund-evidence': 'refunds',
-  'review-images': 'reviews',
   'review-videos': 'reviews',
   'proofs': 'disputes',
-  'finance_proofs': 'documents',
-  'customer-deposits': 'documents',
   'videos': 'products',
 };
 
@@ -68,10 +65,12 @@ const FOLDER_MAX_SIZES: Record<string, number> = {
   products: 15 * 1024 * 1024,
   promotions: 15 * 1024 * 1024,
   banners: 15 * 1024 * 1024,
+  'seller-banners': 15 * 1024 * 1024,
   campaigns: 15 * 1024 * 1024,
   general: 15 * 1024 * 1024,
   reviews: 25 * 1024 * 1024,
   chat: 50 * 1024 * 1024,
+  'test-chat': 10 * 1024 * 1024,
   support: 50 * 1024 * 1024,
   refunds: 25 * 1024 * 1024,
   disputes: 25 * 1024 * 1024,
@@ -82,6 +81,10 @@ const FOLDER_MAX_SIZES: Record<string, number> = {
   'refund-evidence': 25 * 1024 * 1024,
   'review-images': 15 * 1024 * 1024,
   'review-videos': 50 * 1024 * 1024,
+  'customer-deposits': 25 * 1024 * 1024,
+  finance_proofs: 25 * 1024 * 1024,
+  withdrawals: 25 * 1024 * 1024,
+  'visual-search-temp': 15 * 1024 * 1024,
 };
 
 function enforceFolderFileSizeLimit(file: Express.Multer.File, folder: string) {

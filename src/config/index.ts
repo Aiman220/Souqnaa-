@@ -51,16 +51,12 @@ export const config = {
       process.env.BACKEND_PUBLIC_URL ||
       process.env.API_BASE_URL ||
       process.env.RENDER_EXTERNAL_URL ||
-      (process.env.NODE_ENV === 'production'
-        ? 'https://api.souqnaa.com'
-        : 'https://dev-api.souqnaa.com'),
+      'https://souqnaa.onrender.com',
     apiBaseUrl:
       process.env.API_BASE_URL ||
       (process.env.RENDER_EXTERNAL_URL
         ? `${process.env.RENDER_EXTERNAL_URL.replace(/\/+$/, '')}${process.env.API_PREFIX || '/api/v1'}`
-        : process.env.NODE_ENV === 'production'
-          ? 'https://api.souqnaa.com/api/v1'
-          : 'https://dev-api.souqnaa.com/api/v1'),
+        : 'https://souqnaa.onrender.com/api/v1'),
     webBaseUrl:
       process.env.WEB_BASE_URL ||
       (process.env.NODE_ENV === 'production'

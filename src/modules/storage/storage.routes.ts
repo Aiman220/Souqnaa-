@@ -41,9 +41,14 @@ const MIME_MAP: Record<string, string> = {
 const PRIVATE_FOLDER_PREFIXES = [
   'chat/',
   'refunds/',
+  'refund-evidence/',
   'support/',
   'disputes/',
   'documents/',
+  'seller-verification/',
+  'customer-deposits/',
+  'finance_proofs/',
+  'withdrawals/',
   'reports/',
 ];
 
@@ -52,7 +57,7 @@ const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif', '.g
 async function canReadPrivateObject(key: string, user: { userId: string; role: string }): Promise<boolean> {
   if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') return true;
   if (key.startsWith('reports/')) return user.role === 'SELLER' && isSellerReportOwnedBy(user.userId, key);
-  if (key.startsWith('documents/')) {
+  if (key.startsWith('documents/') || key.startsWith('seller-verification/')) {
     const seller = await prisma.seller.findFirst({
       where: {
         userId: user.userId,
@@ -66,7 +71,7 @@ async function canReadPrivateObject(key: string, user: { userId: string; role: s
     return !!seller && [seller.idFrontUrl, seller.idBackUrl, seller.idSelfieUrl, seller.businessDocUrl]
       .some((url) => isStoredObjectMatch(url, key));
   }
-  if (key.startsWith('refunds/') || key.startsWith('disputes/')) {
+  if (key.startsWith('refunds/') || key.startsWith('disputes/') || key.startsWith('refund-evidence/')) {
     const evidence = await prisma.refundEvidence.findMany({
       where: { fileUrl: { contains: key } },
       select: { fileUrl: true, refundRequest: { select: { customerId: true, seller: { select: { userId: true } } } } },
@@ -80,6 +85,35 @@ async function canReadPrivateObject(key: string, user: { userId: string; role: s
       select: { attachmentUrl: true },
     });
     return messages.some((item) => isStoredObjectMatch(item.attachmentUrl, key));
+  }
+  if (key.startsWith('customer-deposits/') || key.startsWith('finance_proofs/')) {
+    const deposit = await prisma.walletDeposit.findFirst({
+      where: {
+        proofImageUrl: { contains: key },
+        OR: [{ userId: user.userId }, { seller: { userId: user.userId } }]
+      },
+      select: { id: true }
+    });
+    if (deposit) return true;
+  }
+  if (key.startsWith('withdrawals/') || key.startsWith('finance_proofs/')) {
+    const withdrawal = await prisma.withdrawal.findFirst({
+      where: {
+        proofImageUrl: { contains: key },
+        seller: { userId: user.userId }
+      },
+      select: { id: true }
+    });
+    if (withdrawal) return true;
+
+    const customerWithdrawal = await prisma.customerWalletWithdrawal.findFirst({
+      where: {
+        proofImageUrl: { contains: key },
+        userId: user.userId
+      },
+      select: { id: true }
+    });
+    if (customerWithdrawal) return true;
   }
   return false;
 }
@@ -391,12 +425,58 @@ async function handleFileRequest(req: Request, res: Response, next: NextFunction
   }
 }
 
+router.options('/file/*', (_req: Request, res: Response) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.status(204).end();
+});
+
 router.get('/file/*', (req: Request, res: Response, next: NextFunction) => {
   handleFileRequest(req, res, next, false);
 });
 
 router.head('/file/*', (req: Request, res: Response, next: NextFunction) => {
   handleFileRequest(req, res, next, true);
+});
+
+/**
+ * GET /api/v1/storage/signed-url
+ * Generates a direct short-lived presigned GET URL directly from Cloudflare R2 (§5, §10).
+ * Prevents streaming bytes through Render for authorized clients.
+ */
+router.get('/signed-url', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const rawKey = (req.query.key || req.query.url) as string;
+    if (!rawKey || typeof rawKey !== 'string') {
+      throw new AppError('File key or URL is required', 400);
+    }
+
+    const key = (storageService as any).cleanKey ? (storageService as any).cleanKey(rawKey) : rawKey.replace(/^\/+/, '');
+    const user = (req as any).user;
+
+    const isPrivate = PRIVATE_FOLDER_PREFIXES.some((prefix) => key.startsWith(prefix));
+    if (isPrivate) {
+      if (!user || !(await canReadPrivateObject(key, user))) {
+        throw new AppError('Forbidden: You do not have access to this file', 403);
+      }
+    }
+
+    const expiresIn = parseInt(req.query.expiresIn as string, 10) || 3600;
+    const signedUrl = await storageService.createPresignedDownloadUrl(key, Math.min(expiresIn, 86400));
+
+    res.json({
+      success: true,
+      data: {
+        key,
+        signedUrl,
+        expiresIn: Math.min(expiresIn, 86400),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 export const storageRoutes = router;
