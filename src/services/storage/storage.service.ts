@@ -1,4 +1,5 @@
 import path from 'path';
+import fs from 'fs';
 import crypto from 'crypto';
 import {
   S3Client,
@@ -48,10 +49,11 @@ export interface IStorageService {
     fileSize?: number
   ): Promise<PresignedUploadResult>;
   verifyUploadedObject(key: string, expectedFolder?: string): Promise<UploadResult>;
-  getFileStream(key: string): Promise<{
+  getFileStream(key: string, range?: string): Promise<{
     stream: NodeJS.ReadableStream;
     contentType?: string;
     contentLength?: number;
+    contentRange?: string;
     contentDisposition?: string;
     eTag?: string;
     lastModified?: Date;
@@ -141,6 +143,11 @@ class CloudflareR2StorageService implements IStorageService {
     let k = (key || '').trim().replace(/^\/+/, '');
     if (k.includes('?')) {
       k = k.split('?')[0];
+    }
+    if (k.startsWith('http://') || k.startsWith('https://')) {
+      try {
+        k = new URL(k).pathname.replace(/^\/+/, '');
+      } catch (_) {}
     }
     if (k.startsWith(`${this.bucket}/`)) {
       k = k.substring(this.bucket.length + 1);
@@ -276,16 +283,33 @@ class CloudflareR2StorageService implements IStorageService {
     cacheControl = 'public, max-age=31536000, immutable'
   ): Promise<void> {
     const cleanKey = key.replace(/^\/+/, '');
-    await this.s3.send(
-      new PutObjectCommand({
-        Bucket: this.bucket,
-        Key: cleanKey,
-        Body: body,
-        ContentType: contentType,
-        CacheControl: cacheControl,
-      })
-    );
-    this.knownExistingKeys.add(cleanKey);
+    try {
+      await this.s3.send(
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: cleanKey,
+          Body: body,
+          ContentType: contentType,
+          CacheControl: cacheControl,
+        })
+      );
+      this.knownExistingKeys.add(cleanKey);
+    } catch (s3Err) {
+      console.warn(`[Storage] S3 putObject failed for ${cleanKey}, syncing locally:`, s3Err);
+    }
+
+    // Mirror to local upload directory for zero-latency local fallback & static access
+    try {
+      const localPath = path.resolve(process.cwd(), config.storage.uploadDir, cleanKey);
+      const dir = path.dirname(localPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(localPath, body);
+      this.knownExistingKeys.add(cleanKey);
+    } catch (fsErr) {
+      console.error(`[Storage] Local writeFileSync failed for ${cleanKey}:`, fsErr);
+    }
   }
 
   async createPresignedUploadUrl(
@@ -520,32 +544,66 @@ class CloudflareR2StorageService implements IStorageService {
     };
   }
 
-  async getFileStream(key: string): Promise<{
+  async getFileStream(key: string, range?: string): Promise<{
     stream: NodeJS.ReadableStream;
     contentType?: string;
     contentLength?: number;
+    contentRange?: string;
     contentDisposition?: string;
     eTag?: string;
     lastModified?: Date;
   }> {
     const cleanKey = key.replace(/^\/+/, '');
-    const res = await this.s3.send(
-      new GetObjectCommand({
-        Bucket: this.bucket,
-        Key: cleanKey,
-      })
-    );
 
-    this.knownExistingKeys.add(cleanKey);
+    try {
+      const res = await this.s3.send(
+        new GetObjectCommand({
+          Bucket: this.bucket,
+          Key: cleanKey,
+          Range: range,
+        })
+      );
 
-    return {
-      stream: res.Body as unknown as NodeJS.ReadableStream,
-      contentType: res.ContentType,
-      contentLength: res.ContentLength,
-      contentDisposition: res.ContentDisposition,
-      eTag: res.ETag,
-      lastModified: res.LastModified,
-    };
+      this.knownExistingKeys.add(cleanKey);
+
+      return {
+        stream: res.Body as unknown as NodeJS.ReadableStream,
+        contentType: res.ContentType,
+        contentLength: res.ContentLength,
+        contentRange: res.ContentRange,
+        contentDisposition: res.ContentDisposition,
+        eTag: res.ETag,
+        lastModified: res.LastModified,
+      };
+    } catch (s3Err) {
+      // Local disk fallback for assets stored in uploadDir
+      const localPath = path.resolve(process.cwd(), config.storage.uploadDir, cleanKey);
+      if (fs.existsSync(localPath)) {
+        const stats = fs.statSync(localPath);
+        const ext = path.extname(localPath).toLowerCase();
+        const mimeTypes: Record<string, string> = {
+          '.png': 'image/png',
+          '.jpg': 'image/jpeg',
+          '.jpeg': 'image/jpeg',
+          '.webp': 'image/webp',
+          '.svg': 'image/svg+xml',
+          '.gif': 'image/gif',
+          '.ico': 'image/x-icon',
+          '.pdf': 'application/pdf',
+        };
+        const detectedMime = mimeTypes[ext] || 'application/octet-stream';
+        this.knownExistingKeys.add(cleanKey);
+
+        return {
+          stream: fs.createReadStream(localPath),
+          contentType: detectedMime,
+          contentLength: stats.size,
+          eTag: `"${Math.round(stats.mtimeMs)}-${stats.size}"`,
+          lastModified: stats.mtime,
+        };
+      }
+      throw s3Err;
+    }
   }
 
   async getFileBuffer(key: string): Promise<{

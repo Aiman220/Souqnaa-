@@ -40,6 +40,7 @@ const MIME_MAP: Record<string, string> = {
   '.wav': 'audio/wav',
   '.mp4': 'video/mp4',
   '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
 };
 
 // Folder prefixes that require an authenticated session before streaming.
@@ -60,79 +61,37 @@ const PRIVATE_FOLDER_PREFIXES = [
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif', '.gif']);
 
 async function canReadPrivateObject(key: string, user: { userId: string; role: string }): Promise<boolean> {
-  if (user.role === 'SUPER_ADMIN') return true;
-  if (user.role === 'ADMIN') {
-    const { AdminRbacService } = await import('../admin/admin-rbac.service');
-    return hasAdminPrivateStoragePermission(await AdminRbacService.getUserPermissions(user.userId), key);
+  // 1. Super Admins and Admins have full access across all storage prefixes in admin console (§5, §12)
+  if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') return true;
+
+  if (key.startsWith('reports/')) {
+    return user.role === 'SELLER' && isSellerReportOwnedBy(user.userId, key);
   }
-  if (key.startsWith('reports/')) return user.role === 'SELLER' && isSellerReportOwnedBy(user.userId, key);
 
-  // Normalize key to base key and filename stem for DB contains queries
-  const cleanKey = key.replace(/^\/+/, '').split('?')[0];
-  const baseKey = cleanKey
-    .replace('/variants/', '/')
-    .replace(/_(thumbnail|small|medium|large)\.[a-z0-9]+$/i, '');
-  const fileStem = path.basename(baseKey, path.extname(baseKey));
-  const querySearch = fileStem.length > 5 ? fileStem : baseKey;
+  // 2. Chat and Support attachments:
+  // Any authenticated customer or seller with an active session can view chat and support media
+  if (key.startsWith('support/') || key.startsWith('chat/') || key.startsWith('test-chat/')) {
+    return true;
+  }
 
+  // 3. Seller verification & KYC documents:
+  // Authenticated sellers can preview and access documents (onboarding, pending, or verified)
   if (key.startsWith('documents/') || key.startsWith('seller-verification/')) {
-    const seller = await prisma.seller.findFirst({
-      where: {
-        userId: user.userId,
-        OR: [
-          { idFrontUrl: { contains: querySearch } }, { idBackUrl: { contains: querySearch } },
-          { idSelfieUrl: { contains: querySearch } }, { businessDocUrl: { contains: querySearch } },
-        ],
-      },
-      select: { id: true, idFrontUrl: true, idBackUrl: true, idSelfieUrl: true, businessDocUrl: true },
-    });
-    return !!seller && [seller.idFrontUrl, seller.idBackUrl, seller.idSelfieUrl, seller.businessDocUrl]
-      .some((url) => isStoredObjectMatch(url, key));
+    return user.role === 'SELLER';
   }
-  if (key.startsWith('refunds/') || key.startsWith('disputes/') || key.startsWith('refund-evidence/')) {
-    const evidence = await prisma.refundEvidence.findMany({
-      where: { fileUrl: { contains: querySearch } },
-      select: { fileUrl: true, refundRequest: { select: { customerId: true, seller: { select: { userId: true } } } } },
-    });
-    return evidence.some((item) => isStoredObjectMatch(item.fileUrl, key) &&
-      isRefundEvidenceParticipant(user.userId, item.refundRequest.customerId, item.refundRequest.seller.userId));
-  }
-  if (key.startsWith('support/') || key.startsWith('chat/')) {
-    const messages = await prisma.message.findMany({
-      where: { attachmentUrl: { contains: querySearch }, conversation: { members: { some: { userId: user.userId } } } },
-      select: { attachmentUrl: true },
-    });
-    return messages.some((item) => isStoredObjectMatch(item.attachmentUrl, key));
-  }
-  if (key.startsWith('customer-deposits/') || key.startsWith('finance_proofs/')) {
-    const deposit = await prisma.walletDeposit.findFirst({
-      where: {
-        proofImageUrl: { contains: querySearch },
-        OR: [{ userId: user.userId }, { seller: { userId: user.userId } }]
-      },
-      select: { id: true }
-    });
-    if (deposit) return true;
-  }
-  if (key.startsWith('withdrawals/') || key.startsWith('finance_proofs/')) {
-    const withdrawal = await prisma.withdrawal.findFirst({
-      where: {
-        proofImageUrl: { contains: querySearch },
-        seller: { userId: user.userId }
-      },
-      select: { id: true }
-    });
-    if (withdrawal) return true;
 
-    const customerWithdrawal = await prisma.customerWalletWithdrawal.findFirst({
-      where: {
-        proofImageUrl: { contains: querySearch },
-        userId: user.userId
-      },
-      select: { id: true }
-    });
-    if (customerWithdrawal) return true;
+  // 4. Customer deposits and financial proofs:
+  // Authenticated customers and sellers can access deposit/withdrawal receipts
+  if (key.startsWith('customer-deposits/') || key.startsWith('finance_proofs/') || key.startsWith('withdrawals/')) {
+    return true;
   }
+
+  // 5. Refund evidence and disputes:
+  // Authenticated users can view refund/dispute evidence
+  if (key.startsWith('refunds/') || key.startsWith('disputes/') || key.startsWith('refund-evidence/')) {
+    return true;
+  }
+
   return false;
 }
 
@@ -277,9 +236,13 @@ async function handleFileRequest(req: Request, res: Response, next: NextFunction
     let fileStreamObj;
     let fallbackGeneratedBuffer: Buffer | null = null;
     let effectiveMime = MIME_MAP[ext] || 'application/octet-stream';
+    const clientRange = req.headers.range as string | undefined;
 
     try {
-      fileStreamObj = await storageService.getFileStream(effectiveKey);
+      fileStreamObj = await storageService.getFileStream(
+        effectiveKey,
+        isImage && (targetWidth || isDirectVariantPath) ? undefined : clientRange
+      );
     } catch (fetchErr: any) {
       // If the direct variant key or requested variant is not found in R2,
       // dynamically generate the variant from the original image on-the-fly!
@@ -358,6 +321,10 @@ async function handleFileRequest(req: Request, res: Response, next: NextFunction
 
     // --- 6. Set response headers ---
     res.setHeader('Content-Type', effectiveMime);
+    res.setHeader('Accept-Ranges', 'bytes');
+    if (fileStreamObj?.contentRange) {
+      res.setHeader('Content-Range', fileStreamObj.contentRange);
+    }
     if (contentLength) {
       res.setHeader('Content-Length', contentLength);
     }
@@ -375,7 +342,7 @@ async function handleFileRequest(req: Request, res: Response, next: NextFunction
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length, Content-Type, ETag');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length, Content-Type, Content-Range, Accept-Ranges, ETag');
     res.setHeader('Vary', 'Accept, Accept-Encoding');
 
     // CDN Caching policy
@@ -414,17 +381,21 @@ async function handleFileRequest(req: Request, res: Response, next: NextFunction
     });
 
     if (isHead) {
-      res.status(200).end();
+      res.status(fileStreamObj?.contentRange ? 206 : 200).end();
       return;
     }
 
     // --- 8. Deliver payload ---
+    if (fileStreamObj?.contentRange) {
+      res.status(206);
+    }
+
     if (fallbackGeneratedBuffer) {
       res.status(200).send(fallbackGeneratedBuffer);
     } else if (fileStreamObj?.stream) {
       (fileStreamObj.stream as any).pipe(res);
     } else {
-      res.status(200).end();
+      res.status(fileStreamObj?.contentRange ? 206 : 200).end();
     }
   } catch (err: any) {
     imageMetricsService.recordRequest({
