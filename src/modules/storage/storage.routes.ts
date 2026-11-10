@@ -61,8 +61,12 @@ const PRIVATE_FOLDER_PREFIXES = [
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif', '.gif']);
 
 async function canReadPrivateObject(key: string, user: { userId: string; role: string }): Promise<boolean> {
-  // 1. Super Admins and Admins have full access across all storage prefixes in admin console (§5, §12)
-  if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') return true;
+  // 1. Super Admins have full access across all storage prefixes in admin console (§5, §12)
+  if (user.role === 'SUPER_ADMIN') return true;
+  if (user.role === 'ADMIN') {
+    const { AdminRbacService } = await import('../admin/admin-rbac.service');
+    return hasAdminPrivateStoragePermission(await AdminRbacService.getUserPermissions(user.userId), key);
+  }
 
   if (key.startsWith('reports/')) {
     return user.role === 'SELLER' && isSellerReportOwnedBy(user.userId, key);

@@ -88,15 +88,41 @@ export class ImageProcessorService {
       return { mime: 'image/gif', ext: '.gif', isImage: true };
     }
 
-    // AVIF / HEIF: ftypavif or ftypavis or ftypmif1
+    // AVIF / HEIF / MP4 / MOV / 3GP (ISO Base Media File Format: ftyp brand)
     if (buffer.length >= 12 && buffer.toString('ascii', 4, 8) === 'ftyp') {
       const brand = buffer.toString('ascii', 8, 12).toLowerCase();
       if (brand === 'avif' || brand === 'avis') {
         return { mime: 'image/avif', ext: '.avif', isImage: true };
       }
-      if (brand === 'mp42' || brand === 'isom' || brand === 'mp41') {
-        return { mime: 'video/mp4', ext: '.mp4', isImage: false };
+      if (brand.startsWith('hei') || brand === 'mif1' || brand === 'msf1') {
+        return { mime: 'image/heic', ext: '.heic', isImage: true };
       }
+      if (brand.startsWith('qt')) {
+        return { mime: 'video/quicktime', ext: '.mov', isImage: false };
+      }
+      // Any other ftyp brand is ISO BMFF video (mp4, isom, iso2, 3gp, dash, etc.)
+      return { mime: 'video/mp4', ext: '.mp4', isImage: false };
+    }
+
+    // QuickTime MOV without ftyp (moov, mdat, wide, free)
+    if (
+      buffer.length >= 8 &&
+      (buffer.toString('ascii', 4, 8) === 'moov' ||
+        buffer.toString('ascii', 4, 8) === 'mdat' ||
+        buffer.toString('ascii', 4, 8) === 'wide')
+    ) {
+      return { mime: 'video/quicktime', ext: '.mov', isImage: false };
+    }
+
+    // WebM / Matroska (MKV): EBML header 1A 45 DF A3
+    if (
+      buffer.length >= 4 &&
+      buffer[0] === 0x1a &&
+      buffer[1] === 0x45 &&
+      buffer[2] === 0xdf &&
+      buffer[3] === 0xa3
+    ) {
+      return { mime: 'video/webm', ext: '.webm', isImage: false };
     }
 
     // PDF: %PDF

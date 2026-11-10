@@ -123,6 +123,18 @@ export class RemoteConfigService {
               updatedBy: 'SYSTEM_BOOTSTRAP',
             },
           });
+        } else if (['scheduled_delivery', 'express_delivery', 'free_delivery_campaigns', 'city_based_product_discovery'].includes(def.key)) {
+          let existingDeps: string[] = [];
+          try {
+            existingDeps = typeof existing.dependencies === 'string' ? JSON.parse(existing.dependencies) : (existing.dependencies || []);
+          } catch (_) {}
+          if (existingDeps.includes('standard_delivery')) {
+            const updatedDeps = existingDeps.filter((d: string) => d !== 'standard_delivery');
+            await prisma.featureFlag.update({
+              where: { key: def.key },
+              data: { dependencies: JSON.stringify(updatedDeps) },
+            });
+          }
         }
       }
 

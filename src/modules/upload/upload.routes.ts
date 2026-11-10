@@ -52,7 +52,6 @@ const FOLDER_ALIASES: Record<string, string> = {
   'seller-promotions': 'promotions',
   'review-videos': 'reviews',
   'proofs': 'disputes',
-  'videos': 'products',
 };
 
 /** Folder specific file-size limits (§7) */
@@ -89,7 +88,10 @@ const FOLDER_MAX_SIZES: Record<string, number> = {
 };
 
 function enforceFolderFileSizeLimit(file: Express.Multer.File, folder: string) {
-  const maxSize = FOLDER_MAX_SIZES[folder] || 15 * 1024 * 1024;
+  const ext = path.extname(file.originalname || '').toLowerCase();
+  const isVideo = (file.mimetype || '').startsWith('video/') || ext === '.mp4' || ext === '.mov' || ext === '.webm';
+  // Allow videos up to 50MB across video/product folders
+  const maxSize = isVideo ? (50 * 1024 * 1024) : (FOLDER_MAX_SIZES[folder] || 15 * 1024 * 1024);
   if (file.size > maxSize) {
     const mb = Math.round(maxSize / (1024 * 1024));
     throw new AppError(

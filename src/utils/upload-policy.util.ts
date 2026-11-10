@@ -9,7 +9,7 @@ export function validatePresignFileSize(fileSize: unknown, maxSize: number): num
 }
 
 const ADMIN_ONLY_UPLOAD_FOLDERS = new Set(['branding', 'categories', 'banners', 'campaign-badges']);
-const SELLER_UPLOAD_FOLDERS = new Set(['products', 'stores', 'seller-promotions', 'seller-verification', 'seller-banners']);
+const SELLER_UPLOAD_FOLDERS = new Set(['products', 'stores', 'videos', 'seller-promotions', 'seller-verification', 'seller-banners']);
 
 export function assertUploadFolderRole(userRole: unknown, folder: string): void {
   if (userRole === 'ADMIN' || userRole === 'SUPER_ADMIN') return;

@@ -77,6 +77,8 @@ export interface FullQuoteResponse {
   slotWarning?: string;
   // Store operational availability
   storesStatus: StoreAvailabilityStatus[];
+  standardAvailable?: boolean;
+  scheduledAvailable?: boolean;
   expressAvailable: boolean;
   expressDisabledReason?: string;
   storeWarning?: string;
@@ -401,19 +403,38 @@ export class DeliveryQuoteService {
     const anyDistanceUnavailable = sellerQuotes.some((q) => !q.deliveryAvailable);
     const outsideAreaQuote = sellerQuotes.find((q) => q.reason === 'OUTSIDE_DELIVERY_AREA');
 
-    // Check if requested method violates store constraints
-    let isAvailable = !anyDistanceUnavailable;
+    // Query feature flags in parallel to evaluate isolated method availability
+    const [isStandardActive, isScheduledActive, isExpressActive] = await Promise.all([
+      RemoteConfigService.getInstance().isFeatureActive('standard_delivery').catch(() => true),
+      RemoteConfigService.getInstance().isFeatureActive('scheduled_delivery').catch(() => true),
+      RemoteConfigService.getInstance().isFeatureActive('express_delivery').catch(() => true),
+    ]);
+
+    const firstInterQuote = sellerQuotes.find((q) => q.isInterGovernorate);
+    const isInterGov = Boolean(firstInterQuote);
+
+    // Isolated method availabilities
+    const isStandardMethodAvailable = !anyDistanceUnavailable && isStandardActive;
+    const isScheduledMethodAvailable = !anyDistanceUnavailable && isScheduledActive && storesStatusList.every((s) => s.acceptsScheduled !== false);
+    const isExpressMethodAvailable = !anyDistanceUnavailable && isExpressActive && allStoresExpressAvailable;
+
+    // Delivery is available overall as long as address is within service radius
+    // and at least one delivery option (or inter-gov route) is available
+    const isAvailable = isInterGov
+      ? !anyDistanceUnavailable
+      : (!anyDistanceUnavailable && (isStandardMethodAvailable || isScheduledMethodAvailable || isExpressMethodAvailable));
+
     let unavailableReason: string | undefined;
 
     if (anyDistanceUnavailable) {
       unavailableReason = outsideAreaQuote?.reason || sellerQuotes.find((q) => !q.deliveryAvailable)?.reason || 'DELIVERY_UNAVAILABLE';
-    } else if (deliveryScheduleType === 'EXPRESS' && !allStoresExpressAvailable) {
-      isAvailable = false;
-      unavailableReason = 'EXPRESS_UNAVAILABLE';
+    } else if (deliveryScheduleType === 'EXPRESS' && !isExpressMethodAvailable) {
+      unavailableReason = overallExpressDisabledReason || 'EXPRESS_UNAVAILABLE';
+    } else if (deliveryScheduleType === 'SCHEDULED' && !isScheduledMethodAvailable) {
+      unavailableReason = 'SCHEDULED_UNAVAILABLE';
+    } else if (!isAvailable) {
+      unavailableReason = 'NO_DELIVERY_METHODS_AVAILABLE';
     }
-
-    const firstInterQuote = sellerQuotes.find((q) => q.isInterGovernorate);
-    const isInterGov = Boolean(firstInterQuote);
 
     return {
       deliveryAvailable: isAvailable,
@@ -423,6 +444,8 @@ export class DeliveryQuoteService {
       totalDeliveryFee: multiResult.totalDeliveryFee,
       currency: multiResult.currency,
       policy: multiResult.policy,
+      standardAvailable: isStandardMethodAvailable,
+      scheduledAvailable: isScheduledMethodAvailable,
       // Inter-Governorate top-level metadata
       isInterGovernorate: isInterGov,
       routeKey: firstInterQuote?.routeKey,
@@ -447,7 +470,7 @@ export class DeliveryQuoteService {
       slotWarning,
       // Store operational availability metadata
       storesStatus: storesStatusList,
-      expressAvailable: allStoresExpressAvailable,
+      expressAvailable: isExpressMethodAvailable,
       expressDisabledReason: overallExpressDisabledReason,
       storeWarning: combinedStoreWarning,
     };
