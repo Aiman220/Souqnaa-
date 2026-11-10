@@ -41,10 +41,10 @@ export const authLimiter = rateLimit({
   },
 });
 
-/** File upload: 10 uploads per 10 minutes per authenticated user. */
+/** File upload: Generous limit per authenticated user/seller (300 uploads per 10 minutes). */
 export const uploadFileLimiter = rateLimit({
   windowMs: 10 * 60 * 1000, // 10 minutes
-  max: config.env === 'development' ? 10000 : 10,
+  max: config.env === 'development' ? 10000 : (config.rateLimits.uploadFilesPer10Min || 300),
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => (req as any).user?.userId || req.ip || 'anonymous',
@@ -56,16 +56,16 @@ export const uploadFileLimiter = rateLimit({
   handler: (req, res) => {
     ResponseUtil.error(
       res,
-      'Upload limit reached. Maximum 10 file uploads per 10 minutes.',
+      `Upload limit reached. Maximum ${config.rateLimits.uploadFilesPer10Min || 300} file uploads per 10 minutes.`,
       429
     );
   },
 });
 
-/** Upload-by-URL (remote fetch): 5 per 10 minutes per user — tighter due to SSRF risk surface. */
+/** Upload-by-URL (remote fetch): 120 per 10 minutes per user. */
 export const uploadByUrlLimiter = rateLimit({
   windowMs: 10 * 60 * 1000, // 10 minutes
-  max: config.env === 'development' ? 10000 : 5,
+  max: config.env === 'development' ? 10000 : (config.rateLimits.uploadUrlsPer10Min || 120),
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => (req as any).user?.userId || req.ip || 'anonymous',
@@ -77,7 +77,7 @@ export const uploadByUrlLimiter = rateLimit({
   handler: (req, res) => {
     ResponseUtil.error(
       res,
-      'Remote URL import limit reached. Maximum 5 URL imports per 10 minutes.',
+      `Remote URL import limit reached. Maximum ${config.rateLimits.uploadUrlsPer10Min || 120} URL imports per 10 minutes.`,
       429
     );
   },

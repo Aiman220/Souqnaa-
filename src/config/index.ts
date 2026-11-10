@@ -213,8 +213,10 @@ export const config = {
   rateLimits: {
     chatMessagesPerMinute: parseInt(process.env.CHAT_RATE_LIMIT_MESSAGES_PER_MIN || '60', 10),
     conversationsPerHour: parseInt(process.env.CHAT_RATE_LIMIT_CONVERSATIONS_PER_HOUR || '30', 10),
-    uploadsPerHour: parseInt(process.env.CHAT_RATE_LIMIT_UPLOADS_PER_HOUR || '50', 10),
+    uploadsPerHour: parseInt(process.env.CHAT_RATE_LIMIT_UPLOADS_PER_HOUR || '300', 10),
     reportsPerHour: parseInt(process.env.CHAT_RATE_LIMIT_REPORTS_PER_HOUR || '15', 10),
+    uploadFilesPer10Min: parseInt(process.env.UPLOAD_RATE_LIMIT_PER_10_MIN || '300', 10),
+    uploadUrlsPer10Min: parseInt(process.env.UPLOAD_BY_URL_RATE_LIMIT_PER_10_MIN || '120', 10),
   },
 
   appVersion: {
