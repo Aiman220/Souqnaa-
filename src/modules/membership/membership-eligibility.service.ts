@@ -23,12 +23,27 @@ export class MembershipEligibilityService {
     const cached = await MembershipCacheService.getActiveTiers();
     if (cached && Array.isArray(cached) && cached.length > 0) return cached;
 
-    const tiers = await prisma.membershipTier.findMany({
+    let tiers = await prisma.membershipTier.findMany({
       where: { isActive: true },
       orderBy: [{ level: 'desc' }, { priority: 'desc' }],
     });
 
-    await MembershipCacheService.setActiveTiers(tiers);
+    if (tiers.length === 0) {
+      try {
+        const { seedMembershipTiers } = await import('../../database/seed_membership_tiers');
+        await seedMembershipTiers();
+        tiers = await prisma.membershipTier.findMany({
+          where: { isActive: true },
+          orderBy: [{ level: 'desc' }, { priority: 'desc' }],
+        });
+      } catch (err) {
+        console.warn('[Membership] Failed to self-seed membership tiers:', err);
+      }
+    }
+
+    if (tiers.length > 0) {
+      await MembershipCacheService.setActiveTiers(tiers);
+    }
     return tiers;
   }
 
@@ -187,10 +202,12 @@ export class MembershipEligibilityService {
     const metrics = await MembershipMetricsService.computeAuthoritativeMetrics(userId);
 
     // 3. Evaluate Tiers from Highest level down to Lowest level (activeTiers sorted DESC)
-    const baselineTier = activeTiers[activeTiers.length - 1]; // Fallback baseline (Level 1)
+    const baselineTier = activeTiers.slice().reverse().find((t) => t.level === 1) || activeTiers[activeTiers.length - 1];
     let targetTier = baselineTier;
 
     for (const tier of activeTiers) {
+      if (tier.level <= 1) continue; // Baseline starting tier (Level 1) is fallback
+
       let rulesConfig: any = { logic: 'ALL', rules: [] };
       try {
         rulesConfig = JSON.parse(tier.qualificationRules);
@@ -518,6 +535,62 @@ export class MembershipEligibilityService {
     } catch (err) {
       console.error(`[Membership] Failed to re-evaluate on refund completion for ${userId}:`, err);
     }
+  }
+
+  /**
+   * Event hook: Triggered upon Successful Payment Confirmation (Idempotent).
+   */
+  public static async onPaymentCompleted(params: {
+    userId: string;
+    orderId: string;
+    paymentId?: string;
+  }): Promise<void> {
+    const { userId, orderId, paymentId } = params;
+    const eventKey = `payment_${orderId}_${paymentId || 'paid'}`;
+
+    const now = Date.now();
+    const lastProcessed = this.recentProcessedEvents.get(eventKey);
+    if (lastProcessed && now - lastProcessed < 60000) {
+      return;
+    }
+    this.recentProcessedEvents.set(eventKey, now);
+
+    try {
+      await this.evaluateCustomerTier(userId, {
+        forceAuthoritativeRecalculation: true,
+        correlationId: `payment_completed_${orderId}`,
+      });
+    } catch (err) {
+      console.error(`[Membership] Failed to evaluate on payment completion for ${userId}:`, err);
+    }
+  }
+
+  /**
+   * Admin hook: Triggered when membership tiers, thresholds, or rules change.
+   * Invalidates all caches and triggers background recalculation of all active customer memberships.
+   */
+  public static async onTierConfigurationChanged(): Promise<void> {
+    await MembershipCacheService.invalidateAll();
+
+    setImmediate(async () => {
+      try {
+        const activeMemberships = await prisma.customerMembership.findMany({
+          where: { status: MembershipStatus.ACTIVE },
+          select: { userId: true },
+        });
+
+        for (const m of activeMemberships) {
+          try {
+            await this.evaluateCustomerTier(m.userId, {
+              forceAuthoritativeRecalculation: true,
+              correlationId: `tier_config_change_${Date.now()}`,
+            });
+          } catch (_) {}
+        }
+      } catch (err) {
+        console.error('[Membership] Recalculation on tier change error:', err);
+      }
+    });
   }
 
   /**

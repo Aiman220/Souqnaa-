@@ -19,8 +19,8 @@ function parseParams(req: Request) {
   return { period, from, to };
 }
 
-// 1. GET /admin/analytics/overview (and / for aliases)
-adminAnalyticsRouter.get(['/', '/overview'], async (req: Request, res: Response, next: NextFunction) => {
+// 1. GET /admin/analytics/overview (and aliases)
+adminAnalyticsRouter.get(['/', '/overview', '/analytics'], async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { period, from, to } = parseParams(req);
     const result = await AdminAnalyticsService.getOverview(period, from, to);
@@ -199,7 +199,7 @@ adminAnalyticsRouter.get('/quality', async (req: Request, res: Response, next: N
 });
 
 // 16. GET /admin/analytics/export
-adminAnalyticsRouter.get('/export', async (req: Request, res: Response, next: NextFunction) => {
+adminAnalyticsRouter.get(['/export', '/export-csv'], async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { period, from, to } = parseParams(req);
     const format = (req.query.format as 'csv' | 'html') || 'csv';

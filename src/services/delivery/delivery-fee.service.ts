@@ -66,6 +66,7 @@ export interface DeliveryQuoteResult {
   currency: string;
   pricingVersion: string;
   isExpress: boolean;
+  isDigital?: boolean;
 
   // Inter-Governorate route & pricing details
   isInterGovernorate?: boolean;

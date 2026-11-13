@@ -13,6 +13,7 @@ import { requireAdmin, requirePermission } from '../../middleware/rbac.middlewar
 import { SellerFinancialRiskService } from '../commission/seller-financial-risk.service';
 import { SellerReserveService } from '../commission/seller-reserve.service';
 import { SellerReconciliationService } from '../commission/seller-reconciliation.service';
+import { SellerCodSettlementService } from '../commission/seller-cod-settlement.service';
 
 const router = Router();
 
@@ -30,6 +31,23 @@ router.get(
       res.json({
         success: true,
         data: kpis,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ── GET /marketplace-exposure ──────────────────────────────────────────────────
+router.get(
+  '/marketplace-exposure',
+  requirePermission('seller_financial_risk:view'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const exposure = await SellerFinancialRiskService.getMarketplaceRiskExposure();
+      res.json({
+        success: true,
+        data: exposure,
       });
     } catch (error) {
       next(error);
@@ -419,6 +437,142 @@ router.post(
         success: true,
         data: result,
         message: `تمت معالجة ${result.processedCount} احتياطيات منتهية فترة الحجز`,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ── GET /cod-obligations ───────────────────────────────────────────────────────
+router.get(
+  '/cod-obligations',
+  requirePermission('seller_financial_risk:view'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const sellerId = typeof req.query.sellerId === 'string' ? req.query.sellerId : undefined;
+      const summary = await SellerCodSettlementService.getSellerCodSummary(sellerId);
+      res.json({
+        success: true,
+        data: summary,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ── GET /cod-obligations/:id ───────────────────────────────────────────────────
+router.get(
+  '/cod-obligations/:id',
+  requirePermission('seller_financial_risk:view'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id);
+      const obligation = await prisma.codFinancialObligation.findUnique({
+        where: { id },
+        include: {
+          seller: {
+            include: {
+              stores: true,
+              user: { select: { firstName: true, lastName: true, phone: true, email: true } },
+              balance: true,
+            },
+          },
+          deposit: true,
+          outstanding: true,
+        },
+      });
+
+      if (!obligation) {
+        throw new AppError('التزام الدفع عند الاستلام غير موجود', 404);
+      }
+
+      res.json({
+        success: true,
+        data: obligation,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ── POST /cod-obligations/:id/verify-payment ───────────────────────────────────
+router.post(
+  '/cod-obligations/:id/verify-payment',
+  requirePermission('finance:payments'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id);
+      const { approvedAmount, adminNote } = req.body;
+      const adminUserId = req.user!.userId;
+
+      const result = await SellerCodSettlementService.verifyPayment({
+        obligationId: id,
+        adminUserId,
+        approvedAmount: approvedAmount !== undefined ? parseFloat(String(approvedAmount)) : undefined,
+        adminNote: adminNote || 'تم التحقق من الحوالة وتأكيد السداد بنجاح',
+      });
+
+      res.json({
+        success: true,
+        data: result,
+        message: 'تم التحقق من الحوالة واعتماد سداد التزام COD بنجاح',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ── POST /cod-obligations/:id/reject-payment ───────────────────────────────────
+router.post(
+  '/cod-obligations/:id/reject-payment',
+  requirePermission('finance:payments'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id);
+      const { rejectionReason } = req.body;
+      const adminUserId = req.user!.userId;
+
+      const result = await SellerCodSettlementService.rejectPayment({
+        obligationId: id,
+        adminUserId,
+        rejectionReason: rejectionReason || 'تم رفض الإشعار لعدم مطابقة بيانات الحوالة',
+      });
+
+      res.json({
+        success: true,
+        data: result,
+        message: 'تم رفض إشعار السداد بنجاح مع إبقاء الالتزام المالي معلقاً',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ── POST /cod-obligations/:id/reverse ──────────────────────────────────────────
+router.post(
+  '/cod-obligations/:id/reverse',
+  requirePermission('finance:payments'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id);
+      const { reason } = req.body;
+      const adminUserId = req.user!.userId;
+
+      const result = await SellerCodSettlementService.reverseObligation({
+        obligationId: id,
+        adminUserId,
+        reason: reason || 'تسوية عكسية تعويضية من قبل الإدارة المالية',
+      });
+
+      res.json({
+        success: true,
+        data: result,
+        message: 'تم تنفيذ العملية العكسية التعويضية وتوثيقها محاسبياً بنجاح',
       });
     } catch (error) {
       next(error);

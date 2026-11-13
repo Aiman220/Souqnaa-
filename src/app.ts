@@ -599,6 +599,10 @@ export const createApp = (): Application => {
   app.use(`${p}/disputes`, disputeRoutes);
   app.use(`${p}/integrity`, integrityRoutes);
 
+  // Production-Grade Advanced Analytics Engine (Admin Marketplace & Seller BI) (§39)
+  app.use(`${p}/admin/reports/analytics`, adminAnalyticsRouter);
+  app.use(`${p}/admin/analytics`, adminAnalyticsRouter);
+
   app.use(`${p}/admin`, adminRoutes);
   // Authoritative Seller Financial Risk & Reserves Engine
   app.use(`${p}/admin/finance/risk`, sellerFinancialRiskAdminRoutes);

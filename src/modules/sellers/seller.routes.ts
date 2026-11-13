@@ -28,8 +28,11 @@ import { WalletProviderRegistry } from '../payments/adapters/wallet-provider.ada
 import { OrderInvoiceService } from '../../services/orders/order-invoice.service';
 import { SellerOrderPrintService, PrintDocumentType, PrintFormat } from '../../services/orders/seller-order-print.service';
 import { remoteConfigService } from '../remote-config/remote-config.service';
+import { DigitalFulfillmentService } from '../../services/digital/digital-fulfillment.service';
+import { UrlSecurityUtil } from '../../utils/url-security.util';
 import { AnalyticsCacheService } from '../analytics/services/analytics-cache.service';
 import { SellerFinancialRiskService } from '../commission/seller-financial-risk.service';
+import { SellerCodSettlementService } from '../commission/seller-cod-settlement.service';
 import { RefundService } from '../refunds/services/refund.service';
 import { notificationDispatcher } from '../notifications/services/notification-dispatcher';
 import { NotificationEventFactory } from '../notifications/events/domain-events';
@@ -347,6 +350,7 @@ router.patch('/me', async (req: Request, res: Response, next: NextFunction) => {
       lastName,
       email,
       phone,
+      avatar,
       businessType,
       crNumber,
       taxNumber,
@@ -442,6 +446,12 @@ router.patch('/me', async (req: Request, res: Response, next: NextFunction) => {
           }
         }
       }
+    }
+
+    if (avatar !== undefined) {
+      userUpdateData.avatar = (typeof avatar === 'string' && avatar.trim().length > 0)
+          ? avatar.trim()
+          : null;
     }
 
     const sellerUpdateData: Record<string, any> = {
@@ -1441,6 +1451,10 @@ async function createSellerProduct(userId: string, body: any) {
     stock,
     images = [],
     variants = [],
+    fulfillmentType,
+    digitalDeliveryType,
+    digitalInstructions,
+    digitalFileUrl,
   } = body;
 
   let targetCategoryId = categoryId;
@@ -1459,6 +1473,22 @@ async function createSellerProduct(userId: string, body: any) {
       });
       targetCategoryId = defaultCat.id;
     }
+  }
+
+  let finalFulfillmentType: 'PHYSICAL' | 'DIGITAL' = 'PHYSICAL';
+  let finalDigitalDeliveryType = digitalDeliveryType || 'CODE';
+  let finalDigitalInstructions = digitalInstructions || null;
+  let finalDigitalFileUrl = digitalFileUrl || null;
+
+  if (fulfillmentType === 'DIGITAL') {
+    const isEligible = await DigitalFulfillmentService.isCategoryEligibleForDigital(targetCategoryId);
+    if (!isEligible) {
+      throw new AppError('القسم المحدد غير مؤهل للمنتجات الرقمية والتسليم الفوري', 400);
+    }
+    if (finalDigitalFileUrl && !UrlSecurityUtil.isSafeUrl(finalDigitalFileUrl)) {
+      throw new AppError('رابط الملف الرقمي غير صالح أو غير آمن', 400);
+    }
+    finalFulfillmentType = 'DIGITAL';
   }
 
   const baseSlug = (nameEn ? nameEn.toLowerCase().replace(/[^a-z0-9]+/g, '-') : 'prod').replace(/^-+|-+$/g, '') || 'prod';
@@ -1508,6 +1538,10 @@ async function createSellerProduct(userId: string, body: any) {
         warrantyPolicy: warrantyPolicy || null,
         videoUrl: videoUrl || null,
         isActive: true,
+        fulfillmentType: finalFulfillmentType,
+        digitalDeliveryType: finalFulfillmentType === 'DIGITAL' ? finalDigitalDeliveryType : null,
+        digitalInstructions: finalFulfillmentType === 'DIGITAL' ? finalDigitalInstructions : null,
+        digitalFileUrl: finalFulfillmentType === 'DIGITAL' ? finalDigitalFileUrl : null,
       },
     });
 
@@ -1612,7 +1646,36 @@ async function updateSellerProduct(userId: string, productId: string, body: any)
     stock,
     images,
     variants,
+    fulfillmentType,
+    digitalDeliveryType,
+    digitalInstructions,
+    digitalFileUrl,
   } = body;
+
+  const targetCat = categoryId !== undefined ? categoryId : product.categoryId;
+  let updatedFulfillmentType = product.fulfillmentType;
+  let updatedDigitalDeliveryType = product.digitalDeliveryType;
+  let updatedDigitalInstructions = product.digitalInstructions;
+  let updatedDigitalFileUrl = product.digitalFileUrl;
+
+  if (fulfillmentType === 'DIGITAL') {
+    const isEligible = await DigitalFulfillmentService.isCategoryEligibleForDigital(targetCat);
+    if (!isEligible) {
+      throw new AppError('القسم المحدد غير مؤهل للمنتجات الرقمية والتسليم الفوري', 400);
+    }
+    if (digitalFileUrl && !UrlSecurityUtil.isSafeUrl(digitalFileUrl)) {
+      throw new AppError('رابط الملف الرقمي غير صالح أو غير آمن', 400);
+    }
+    updatedFulfillmentType = 'DIGITAL';
+    updatedDigitalDeliveryType = digitalDeliveryType || product.digitalDeliveryType || 'CODE';
+    updatedDigitalInstructions = digitalInstructions !== undefined ? digitalInstructions : product.digitalInstructions;
+    updatedDigitalFileUrl = digitalFileUrl !== undefined ? digitalFileUrl : product.digitalFileUrl;
+  } else if (fulfillmentType === 'PHYSICAL') {
+    updatedFulfillmentType = 'PHYSICAL';
+    updatedDigitalDeliveryType = null;
+    updatedDigitalInstructions = null;
+    updatedDigitalFileUrl = null;
+  }
 
   const updatedProduct = await prisma.$transaction(async (tx) => {
     const prod = await tx.product.update({
@@ -1633,6 +1696,10 @@ async function updateSellerProduct(userId: string, productId: string, body: any)
         warrantyPolicy: warrantyPolicy !== undefined ? (warrantyPolicy || null) : product.warrantyPolicy,
         videoUrl: videoUrl !== undefined ? (videoUrl || null) : product.videoUrl,
         isActive: isActive !== undefined ? isActive : product.isActive,
+        fulfillmentType: updatedFulfillmentType,
+        digitalDeliveryType: updatedDigitalDeliveryType,
+        digitalInstructions: updatedDigitalInstructions,
+        digitalFileUrl: updatedDigitalFileUrl,
       },
     });
 
@@ -3795,11 +3862,10 @@ router.post('/me/withdrawals', async (req: Request, res: Response, next: NextFun
     const currency = (seller.balance?.currency && seller.balance?.currency !== 'SAR') ? seller.balance?.currency : 'YER';
 
     const withdrawal = await prisma.$transaction(async (tx) => {
-      // Atomic conditional update ensuring non-negative balance invariant
+      // Atomic conditional update ensuring non-negative balance invariant without polluting order settlement pendingBalance
       const updatedBalanceRows: any = await tx.$queryRaw`
         UPDATE "SellerBalance"
         SET "availableBalance" = "availableBalance" - ${withdrawAmount},
-            "pendingBalance" = "pendingBalance" + ${withdrawAmount},
             "updatedAt" = NOW()
         WHERE "id" = ${seller.balance!.id} AND "availableBalance" >= ${withdrawAmount}
         RETURNING "id", "availableBalance", "pendingBalance";
@@ -3932,6 +3998,59 @@ router.get('/me/platform-deposit-accounts', async (req: Request, res: Response, 
   try {
     const accounts = await remoteConfigService.getPlatformWalletAccounts('SELLER_DEPOSIT');
     ResponseUtil.success(res, accounts, 'تم استرجاع حسابات منصة سوقناا لإيداع رصيد المتجر بنجاح');
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── GET /me/cod-obligations ─────────────────────────────────────────────────────
+router.get('/me/cod-obligations', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const seller = await getSeller(req.user!.userId);
+    const summary = await SellerCodSettlementService.getSellerCodSummary(seller.id);
+    ResponseUtil.success(res, summary, 'تم استرجاع سجل التزامات الدفع عند الاستلام بنجاح');
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── GET /me/cod-obligations/:id ─────────────────────────────────────────────────
+router.get('/me/cod-obligations/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const seller = await getSeller(req.user!.userId);
+    const id = String(req.params.id);
+    const obligation = await prisma.codFinancialObligation.findFirst({
+      where: { id, sellerId: seller.id },
+      include: { deposit: true, outstanding: true },
+    });
+    if (!obligation) {
+      throw new AppError('التزام الدفع عند الاستلام غير موجود', 404);
+    }
+    ResponseUtil.success(res, obligation);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── POST /me/cod-obligations/:id/pay ────────────────────────────────────────────
+router.post('/me/cod-obligations/:id/pay', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const seller = await getSeller(req.user!.userId);
+    const id = String(req.params.id);
+    const { amount, walletProvider, transferReference, proofImageUrl, senderName, senderPhone } = req.body;
+
+    const result = await SellerCodSettlementService.submitPaymentProof({
+      obligationId: id,
+      sellerUserId: seller.userId,
+      amount: parseFloat(String(amount)),
+      walletProvider: String(walletProvider),
+      transferReference: String(transferReference),
+      proofImageUrl: String(proofImageUrl),
+      senderName,
+      senderPhone,
+    });
+
+    ResponseUtil.created(res, result, 'تم تقديم إشعار سداد التزام COD بنجاح وهو الآن قيد المراجعة الإدارية');
   } catch (error) {
     next(error);
   }

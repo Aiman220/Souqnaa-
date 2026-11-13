@@ -1,11 +1,13 @@
 import { Request } from 'express';
 import crypto from 'crypto';
 import { prisma } from '../../database/prisma';
+import { redis } from '../../database/redis';
 import { AppError } from '../../middleware/error.middleware';
 import { SocketService } from '../../services/websocket/socket.service';
 import { supportedAreasService } from '../locations/supported-areas.service';
 import {
   AppBrandingConfig,
+  APPROVED_CUSTOMER_APP_ICONS,
   DEFAULT_APP_BRANDING,
   DEFAULT_FEATURE_FLAGS,
   DEFAULT_WALLET_PROVIDERS,
@@ -169,10 +171,15 @@ export class RemoteConfigService {
   }
 
   /**
-   * Invalidate memory cache on any update.
+   * Invalidate memory cache and Redis keys on any update.
    */
   public invalidateCache(): void {
     this.memoryCache = null;
+    try {
+      redis.del('app_branding_config').catch(() => {});
+      redis.del('customer_app_icon').catch(() => {});
+      redis.delPattern('remote_config:*').catch(() => {});
+    } catch (_) {}
   }
 
   /**
@@ -220,15 +227,14 @@ export class RemoteConfigService {
       orderBy: { createdAt: 'asc' },
     });
 
-    const versionSetting = await prisma.systemSetting.findUnique({
-      where: { key: 'remote_config_version' },
-    });
+    const [versionSetting, brandingSetting, customerIconSetting, platformWalletsSetting] = await Promise.all([
+      prisma.systemSetting.findUnique({ where: { key: 'remote_config_version' } }),
+      prisma.systemSetting.findUnique({ where: { key: 'app_branding_config' } }),
+      prisma.systemSetting.findUnique({ where: { key: 'customer_app_icon' } }),
+      prisma.systemSetting.findUnique({ where: { key: 'platform_wallet_accounts' } }),
+    ]);
 
     const version = versionSetting ? parseInt(versionSetting.value, 10) || 1 : 1;
-
-    const brandingSetting = await prisma.systemSetting.findUnique({
-      where: { key: 'app_branding_config' },
-    });
 
     let branding: AppBrandingConfig = { ...DEFAULT_APP_BRANDING };
     if (brandingSetting && brandingSetting.value) {
@@ -249,9 +255,11 @@ export class RemoteConfigService {
       } catch (_) {}
     }
 
-    const platformWalletsSetting = await prisma.systemSetting.findUnique({
-      where: { key: 'platform_wallet_accounts' },
-    });
+    if (customerIconSetting && customerIconSetting.value) {
+      branding.customerAppIcon = customerIconSetting.value;
+    } else if (!branding.customerAppIcon) {
+      branding.customerAppIcon = 'default';
+    }
 
     let platformWallets: PlatformWalletAccountConfig[] = DEFAULT_PLATFORM_WALLETS;
     if (platformWalletsSetting && platformWalletsSetting.value) {
@@ -272,6 +280,9 @@ export class RemoteConfigService {
     }
     if (brandingSetting && brandingSetting.updatedAt > latestUpdate) {
       latestUpdate = brandingSetting.updatedAt;
+    }
+    if (customerIconSetting && customerIconSetting.updatedAt > latestUpdate) {
+      latestUpdate = customerIconSetting.updatedAt;
     }
     if (platformWalletsSetting && platformWalletsSetting.updatedAt > latestUpdate) {
       latestUpdate = platformWalletsSetting.updatedAt;
@@ -958,6 +969,20 @@ export class RemoteConfigService {
       },
     });
 
+    // Reset customer app icon to factory default
+    await prisma.systemSetting.upsert({
+      where: { key: 'customer_app_icon' },
+      create: {
+        key: 'customer_app_icon',
+        value: 'default',
+        type: 'string',
+        group: 'remote_config',
+      },
+      update: {
+        value: 'default',
+      },
+    });
+
     // Reset platform wallet accounts to factory defaults
     await prisma.systemSetting.upsert({
       where: { key: 'platform_wallet_accounts' },
@@ -980,29 +1005,43 @@ export class RemoteConfigService {
    * Admin: Get current App Branding, Icons & Deep-linking configuration.
    */
   public async getBrandingConfig(): Promise<AppBrandingConfig> {
-    const setting = await prisma.systemSetting.findUnique({
-      where: { key: 'app_branding_config' },
-    });
-    if (!setting || !setting.value) {
-      return { ...DEFAULT_APP_BRANDING };
+    const [setting, customerIconSetting] = await Promise.all([
+      prisma.systemSetting.findUnique({
+        where: { key: 'app_branding_config' },
+      }),
+      prisma.systemSetting.findUnique({
+        where: { key: 'customer_app_icon' },
+      }),
+    ]);
+
+    let branding: AppBrandingConfig = { ...DEFAULT_APP_BRANDING };
+    if (setting && setting.value) {
+      try {
+        const parsed = JSON.parse(setting.value);
+        branding = {
+          ...DEFAULT_APP_BRANDING,
+          ...parsed,
+          platforms: {
+            ...DEFAULT_APP_BRANDING.platforms,
+            ...(parsed.platforms || {}),
+          },
+          seasonalIcon: {
+            ...DEFAULT_APP_BRANDING.seasonalIcon,
+            ...(parsed.seasonalIcon || {}),
+          },
+        };
+      } catch (_) {
+        branding = { ...DEFAULT_APP_BRANDING };
+      }
     }
-    try {
-      const parsed = JSON.parse(setting.value);
-      return {
-        ...DEFAULT_APP_BRANDING,
-        ...parsed,
-        platforms: {
-          ...DEFAULT_APP_BRANDING.platforms,
-          ...(parsed.platforms || {}),
-        },
-        seasonalIcon: {
-          ...DEFAULT_APP_BRANDING.seasonalIcon,
-          ...(parsed.seasonalIcon || {}),
-        },
-      };
-    } catch (_) {
-      return { ...DEFAULT_APP_BRANDING };
+
+    if (customerIconSetting && customerIconSetting.value) {
+      branding.customerAppIcon = customerIconSetting.value;
+    } else if (!branding.customerAppIcon) {
+      branding.customerAppIcon = 'default';
     }
+
+    return branding;
   }
 
   /**
@@ -1013,10 +1052,43 @@ export class RemoteConfigService {
     adminUser: { id: string; email?: string },
     req?: Request
   ): Promise<AppBrandingConfig> {
+    // Validate candidate customer app icon identifier if provided
+    const rawCandidate =
+      updates.customerAppIcon ||
+      updates.platforms?.android?.iconUrl ||
+      updates.defaultIconUrl;
+
+    let canonicalIcon: string | undefined = undefined;
+    if (rawCandidate) {
+      const trimmed = rawCandidate.trim();
+      const lower = trimmed.toLowerCase();
+
+      const matched = APPROVED_CUSTOMER_APP_ICONS.find(
+        (id) => lower === id || lower.includes(`app_icon_${id}`) || lower.includes(`_${id}.`)
+      );
+
+      if (matched) {
+        canonicalIcon = matched;
+      } else if (
+        trimmed.startsWith('http://') ||
+        trimmed.startsWith('https://') ||
+        trimmed.startsWith('/uploads/') ||
+        trimmed.startsWith('/storage/')
+      ) {
+        canonicalIcon = trimmed;
+      } else {
+        throw new AppError(
+          'معرّف أيقونة التطبيق غير معتمد. المعرفات المعتمدة: default, orange, modern, minimal, seasonal',
+          400
+        );
+      }
+    }
+
     const current = await this.getBrandingConfig();
     const updated: AppBrandingConfig = {
       ...current,
       ...updates,
+      ...(canonicalIcon ? { customerAppIcon: canonicalIcon } : {}),
       platforms: {
         ...current.platforms,
         ...(updates.platforms || {}),
@@ -1045,6 +1117,22 @@ export class RemoteConfigService {
       },
     });
 
+    // Synchronize customer_app_icon in SystemSetting
+    if (canonicalIcon) {
+      await prisma.systemSetting.upsert({
+        where: { key: 'customer_app_icon' },
+        create: {
+          key: 'customer_app_icon',
+          value: canonicalIcon,
+          type: 'string',
+          group: 'remote_config',
+        },
+        update: {
+          value: canonicalIcon,
+        },
+      });
+    }
+
     // Increment global system configuration version
     const versionSetting = await prisma.systemSetting.findUnique({
       where: { key: 'remote_config_version' },
@@ -1071,6 +1159,21 @@ export class RemoteConfigService {
         userAgent: req?.headers ? (req.headers['user-agent'] as string) : null,
       },
     });
+
+    if (canonicalIcon && current.customerAppIcon !== canonicalIcon) {
+      await prisma.featureFlagAuditLog.create({
+        data: {
+          featureKey: 'customer_app_icon',
+          action: 'UPDATE',
+          oldValue: current.customerAppIcon || 'default',
+          newValue: canonicalIcon,
+          reason: 'تغيير أيقونة تطبيق العملاء',
+          changedBy: adminUser.email || adminUser.id,
+          ipAddress: req?.ip || req?.socket?.remoteAddress || null,
+          userAgent: req?.headers ? (req.headers['user-agent'] as string) : null,
+        },
+      });
+    }
 
     // If appVersion was updated, sync active AppVersionPolicy in database
     if (updates.appVersion) {

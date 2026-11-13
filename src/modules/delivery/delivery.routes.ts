@@ -195,16 +195,21 @@ router.post('/quote', authenticate, async (req: Request, res: Response, next: Ne
       destinationAreaId,
     } = req.body;
 
-    if (!customerAddressId) throw new AppError('customerAddressId is required', 400);
+    const isDigitalOnly = Boolean(req.body.isDigitalOnly);
+
     if (!Array.isArray(sellerOrders) || sellerOrders.length === 0) {
       throw new AppError('sellerOrders must be a non-empty array of { sellerId, storeId }', 400);
     }
 
-    // Validate address belongs to the requesting user
-    const address = await prisma.address.findFirst({
-      where: { id: customerAddressId, userId: req.user!.userId },
-    });
-    if (!address) throw new AppError('Address not found or does not belong to you', 404);
+    if (!isDigitalOnly) {
+      if (!customerAddressId) throw new AppError('customerAddressId is required', 400);
+
+      // Validate address belongs to the requesting user
+      const address = await prisma.address.findFirst({
+        where: { id: customerAddressId, userId: req.user!.userId },
+      });
+      if (!address) throw new AppError('Address not found or does not belong to you', 404);
+    }
 
     const rawSellerMethodOverrides = (req.body.sellerDeliveryMethods && typeof req.body.sellerDeliveryMethods === 'object')
       ? req.body.sellerDeliveryMethods
@@ -225,6 +230,7 @@ router.post('/quote', authenticate, async (req: Request, res: Response, next: Ne
 
     const result = await deliveryQuoteService.createQuote({
       customerAddressId,
+      isDigitalOnly,
       sellerOrders: enrichedSellerOrders,
       deliveryMethod,
       isExpress,

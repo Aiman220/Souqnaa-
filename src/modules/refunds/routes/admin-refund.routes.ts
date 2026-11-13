@@ -528,6 +528,66 @@ router.post(['/:id/admin/reject', '/:id/reject'], requirePermission('disputes:re
   }
 });
 
+// ── POST /api/v1/admin/refunds/:id/fund-exceptional ────────────────────────────
+router.post(
+  '/:id/fund-exceptional',
+  requirePermission('finance:payments'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id);
+      const adminUserId = req.user!.userId;
+      const { authorizationReason } = req.body;
+
+      if (!authorizationReason || authorizationReason.trim().length < 5) {
+        throw new AppError('سبب وتبرير اعتماد التمويل الاستثنائي إلزامي ومطلوب للتدقيق المالي', 400);
+      }
+
+      const updated = await prisma.$transaction(async (tx) => {
+        const refund = await tx.refundRequest.findUnique({
+          where: { id },
+          include: { order: true, seller: true },
+        });
+
+        if (!refund) throw new AppError('طلب الاسترجاع غير موجود', 404);
+
+        if (refund.status !== RefundStatus.REFUND_PENDING && refund.status !== RefundStatus.ADMIN_REVIEW) {
+          throw new AppError(`لا يمكن اعتماد التمويل الاستثنائي في حالة الطلب الحالية [${refund.status}]`, 400);
+        }
+
+        // Audit log entry
+        await tx.auditLog.create({
+          data: {
+            userId: adminUserId,
+            action: 'EXCEPTIONAL_MARKETPLACE_FUNDING_APPROVED',
+            resource: 'refund_requests',
+            details: JSON.stringify({
+              refundId: refund.id,
+              orderId: refund.orderId,
+              sellerId: refund.sellerId,
+              amount: refund.approvedAmount || refund.requestedAmount,
+              authorizationReason,
+              adminUserId,
+              timestamp: new Date().toISOString(),
+            }),
+          },
+        });
+
+        // Execute financial refund with bypassExposureLimit: true
+        await (RefundService as any).executeFinancialRefundInternal(refund, tx, adminUserId);
+
+        return await tx.refundRequest.findUnique({
+          where: { id },
+          include: { items: true, statusHistory: true, order: true },
+        });
+      });
+
+      ResponseUtil.success(res, updated, 'تم اعتماد التمويل الاستثنائي وتنفيذ الاسترجاع بنجاح');
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 // ── POST /api/v1/admin/refunds/wallet/adjust ──────────────────────────────────
 router.post('/wallet/adjust', requirePermission('finance:payments'), async (req: Request, res: Response, next: NextFunction) => {
   try {

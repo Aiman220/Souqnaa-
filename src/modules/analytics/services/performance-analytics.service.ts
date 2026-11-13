@@ -7,13 +7,16 @@ export interface SellerPerformanceRow {
   ownerName: string;
   grossSales: number;
   totalOrders: number;
+  ordersCount?: number;
   unitsSold: number;
   aov: number;
   cancellationRate: number;
   refundRate: number;
   customerRating: number;
+  averageRating?: number;
   fulfillmentRate: number;
   commissionGenerated: number;
+  commissionAmount?: number;
   settlementVolume: number;
 }
 
@@ -145,13 +148,16 @@ export class PerformanceAnalyticsService {
         ownerName,
         grossSales: Number(grossSales.toFixed(2)),
         totalOrders,
+        ordersCount: totalOrders,
         unitsSold,
         aov: Number(aov.toFixed(2)),
         cancellationRate,
         refundRate,
         customerRating,
+        averageRating: customerRating,
         fulfillmentRate,
         commissionGenerated: Number(stats.commission.toFixed(2)),
+        commissionAmount: Number(stats.commission.toFixed(2)),
         settlementVolume: Number(settlementVolume.toFixed(2)),
       });
     }

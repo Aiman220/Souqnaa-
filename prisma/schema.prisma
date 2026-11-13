@@ -178,6 +178,27 @@ enum PaymentStatus {
   REFUNDED
 }
 
+enum FulfillmentType {
+  PHYSICAL
+  DIGITAL
+}
+
+enum DigitalDeliveryType {
+  CODE
+  LICENSE_KEY
+  MANUAL_OR_EXTERNAL_API
+  SUBSCRIPTION
+  FILE_DOWNLOAD
+}
+
+enum DigitalFulfillmentStatus {
+  PENDING
+  PROCESSING
+  FULFILLED
+  FAILED
+  REVOKED
+}
+
 enum CancellationRequestStatus {
   PENDING
   APPROVED
@@ -598,6 +619,7 @@ model User {
   adminCustomerWithdrawals   CustomerWalletWithdrawal[] @relation("AdminCustomerWithdrawals")
   deposits                   WalletDeposit[]            @relation("UserDeposits")
   adminReviewedDeposits      WalletDeposit[]            @relation("AdminReviewedDeposits")
+  adminVerifiedCodObligations CodFinancialObligation[]  @relation("AdminVerifiedCodObligations")
 
   // Recommendation Engine Relations
   recommendationProfile      UserRecommendationProfile?
@@ -753,6 +775,7 @@ model Seller {
   reserveAllocations    SellerReserveAllocation[]
   debtRecoveryAllocations DebtRecoveryAllocation[]
   financialRestrictions FinancialRestriction[]
+  codObligations        CodFinancialObligation[]
   recommendationEvents  RecommendationEvent[]
   // SOUQNAA Coins & Rewards Relations
   coinCampaigns         CoinCampaign[]
@@ -1361,6 +1384,10 @@ model Product {
   warrantyPeriod String?
   warrantyPolicy String?
   videoUrl       String?
+  fulfillmentType     FulfillmentType       @default(PHYSICAL)
+  digitalDeliveryType DigitalDeliveryType?
+  digitalFileUrl      String?
+  digitalInstructions String?
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
 
@@ -1386,6 +1413,8 @@ model Product {
   similarToProducts    ProductSimilarity[]   @relation("ProductSimilarityTarget")
   associations         ProductAssociation[]  @relation("ProductAssociationSource")
   associatedWith       ProductAssociation[]  @relation("ProductAssociationTarget")
+  digitalCodes         DigitalProductCode[]
+  digitalFulfillments  DigitalFulfillment[]
 
   @@index([storeId])
   @@index([categoryId])
@@ -1572,6 +1601,8 @@ model Order {
   deliveryTimeSlotId   String?
   deliveryTimeSlot     DeliveryTimeSlot?      @relation(fields: [deliveryTimeSlotId], references: [id])
   deliveredAt          DateTime?              // Server-authoritative delivery timestamp for 14-day refund window
+  isDigitalOnly        Boolean                @default(false)
+  hasDigitalItems      Boolean                @default(false)
   // SOUQNAA Coins Snapshot (§82)
   coinsUsed            Int                    @default(0)
   coinDiscount         Float                  @default(0.0)
@@ -1597,6 +1628,7 @@ model Order {
   refundTaxRecords     RefundTaxRecord[]
   promotionUsages      PromotionUsage[]
   promotionReservations PromotionReservation[]
+  codObligations       CodFinancialObligation[]
 
   @@index([userId])
   @@index([orderNumber])
@@ -1652,6 +1684,8 @@ model SellerOrder {
   carrierName                 String?
   pickupPointId               String?
   deliveredAt          DateTime?              // Server-authoritative delivery timestamp
+  isDigitalOnly        Boolean                @default(false)
+  hasDigitalItems      Boolean                @default(false)
   createdAt            DateTime               @default(now())
   updatedAt            DateTime               @updatedAt
 
@@ -1668,6 +1702,7 @@ model SellerOrder {
   printLogs            SellerOrderPrintLog[]
   taxSnapshots         OrderTaxSnapshot[]
   settlementItems      SettlementItem[]
+  codObligations       CodFinancialObligation[]
 
   @@index([orderId])
   @@index([sellerId])
@@ -1726,8 +1761,11 @@ model OrderItem {
   discountAmount Float?
   allocatedStock             Int?
   voucherDiscountAmount      Float                  @default(0.0)
+  fulfillmentType            FulfillmentType        @default(PHYSICAL)
+  digitalFulfillmentStatus   DigitalFulfillmentStatus?
   createdAt                  DateTime               @default(now())
 
+  digitalFulfillment         DigitalFulfillment?
   productReviews             ProductReview[]
   voucherDiscountAllocations VoucherDiscountAllocation[]
   refundRequestItems         RefundRequestItem[]
@@ -1738,6 +1776,75 @@ model OrderItem {
   @@index([variantId])
   @@index([flashSaleItemId])
   @@index([productId, createdAt(sort: Desc)])
+}
+
+model DigitalProductCode {
+  id             String      @id @default(uuid())
+  productId      String
+  product        Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  encryptedCode  String      @db.Text
+  codeMasked     String
+  isUsed         Boolean     @default(false)
+  usedAt         DateTime?
+  orderItemId    String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@index([productId, isUsed])
+  @@index([orderItemId])
+}
+
+model DigitalFulfillment {
+  id                 String                   @id @default(uuid())
+  orderItemId        String                   @unique
+  orderItem          OrderItem                @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  orderId            String
+  sellerOrderId      String
+  productId          String
+  product            Product                  @relation(fields: [productId], references: [id])
+  customerId         String
+  deliveryType       DigitalDeliveryType
+  status             DigitalFulfillmentStatus @default(PENDING)
+  idempotencyKey     String?                  @unique
+  encryptedPayload   String?                  @db.Text
+  maskedPayload      String?
+  downloadUrl        String?                  @db.Text
+  downloadExpiresAt  DateTime?
+  downloadCount      Int                      @default(0)
+  maxDownloads       Int                      @default(5)
+  failureReason      String?
+  providerRef        String?
+  fulfilledAt        DateTime?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  auditLogs          DigitalFulfillmentAuditLog[]
+
+  @@index([orderId])
+  @@index([sellerOrderId])
+  @@index([productId])
+  @@index([customerId])
+  @@index([status])
+}
+
+model DigitalFulfillmentAuditLog {
+  id                   String              @id @default(uuid())
+  digitalFulfillmentId String?
+  digitalFulfillment   DigitalFulfillment? @relation(fields: [digitalFulfillmentId], references: [id], onDelete: SetNull)
+  orderId              String
+  orderItemId          String?
+  action               String              // ATTEMPTED, FULFILLED, FAILED, ACCESSED, REVOKED
+  actorId              String
+  actorRole            String              // CUSTOMER, SELLER, ADMIN, SYSTEM
+  ipAddress            String?
+  userAgent            String?
+  details              String?             @db.Text
+  createdAt            DateTime            @default(now())
+
+  @@index([digitalFulfillmentId])
+  @@index([orderId])
+  @@index([actorId])
+  @@index([createdAt])
 }
 
 model OrderStatusHistory {
@@ -3111,6 +3218,7 @@ model WalletDeposit {
   updatedAt         DateTime       @updatedAt
 
   debtRecoveryAllocations DebtRecoveryAllocation[]
+  codObligations          CodFinancialObligation[]
 
   @@index([userId])
   @@index([sellerId])
@@ -3145,9 +3253,67 @@ model SellerOutstanding {
   updatedAt       DateTime          @updatedAt
 
   recoveryAllocations DebtRecoveryAllocation[]
+  codObligations      CodFinancialObligation[]
 
   @@index([sellerId])
   @@index([status])
+  @@index([createdAt])
+  @@index([sellerId, status])
+}
+
+enum CodObligationStatus {
+  PENDING_PAYMENT
+  PAYMENT_SUBMITTED
+  UNDER_REVIEW
+  PAYMENT_VERIFIED
+  PARTIALLY_SETTLED
+  SETTLED
+  PAYMENT_REJECTED
+  CANCELLED
+  REVERSED
+}
+
+model CodFinancialObligation {
+  id                    String              @id @default(uuid())
+  obligationNumber      String              @unique // COD-OBL-YYYY-XXXXXX
+  sellerId              String
+  seller                Seller              @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  sellerOrderId         String?
+  sellerOrder           SellerOrder?        @relation(fields: [sellerOrderId], references: [id], onDelete: SetNull)
+  orderId               String?
+  order                 Order?              @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  orderNumber           String
+  obligationAmount      Float
+  walletDeduction       Float               @default(0.0)
+  remainingObligation   Float
+  verifiedPaymentAmount Float               @default(0.0)
+  outstandingAmount     Float
+  currency              String              @default("YER")
+  status                CodObligationStatus @default(PENDING_PAYMENT)
+  walletTransactionId   String?
+  depositId             String?
+  deposit               WalletDeposit?      @relation(fields: [depositId], references: [id], onDelete: SetNull)
+  outstandingId         String?
+  outstanding           SellerOutstanding?  @relation(fields: [outstandingId], references: [id], onDelete: SetNull)
+  paymentMethod         String?
+  paymentReference      String?
+  proofImageUrl         String?
+  rejectionReason       String?
+  adminNote             String?
+  verifiedByAdminId     String?
+  verifiedByAdmin       User?               @relation("AdminVerifiedCodObligations", fields: [verifiedByAdminId], references: [id], onDelete: SetNull)
+  verifiedAt            DateTime?
+  settledAt             DateTime?
+  reversedAt            DateTime?
+  metadata              String?             // JSON
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  @@index([sellerId])
+  @@index([sellerOrderId])
+  @@index([orderNumber])
+  @@index([status])
+  @@index([obligationNumber])
   @@index([createdAt])
   @@index([sellerId, status])
 }

@@ -1,6 +1,7 @@
 import { prisma } from '../../../database/prisma';
 import { AppError } from '../../../middleware/error.middleware';
 import { RefundStatus, OrderStatus, PaymentStatus, DisputeStatus, ReturnRequestStatus, SellerOrderStatus } from '@prisma/client';
+import { RemoteConfigService } from '../../remote-config/remote-config.service';
 
 export interface RefundableItemCheck {
   orderItemId: string;
@@ -75,6 +76,32 @@ export class RefundEligibilityService {
 
     if (!order) {
       throw new AppError('الطلب غير موجود أو لا تملك صلاحية الوصول إليه', 404);
+    }
+
+    // 0. Check platform-wide feature flag for refunds & returns
+    const isRefundsActive = await RemoteConfigService.getInstance().isFeatureActive('refunds', {
+      userId: customerId,
+    });
+    if (!isRefundsActive) {
+      return {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        orderStatus: order.status,
+        paymentStatus: order.payment?.status,
+        isEligible: false,
+        ineligibilityReason: 'خدمة طلبات الإرجاع واسترداد المبالغ معطلة مؤقتاً لأعمال الصيانة والرقابة من إدارة المنصة.',
+        remainingDays: 0,
+        remainingHours: 0,
+        remainingSeconds: 0,
+        currency: order.currency || 'YER',
+        orderTotal: Number(order.total || 0),
+        capturedAmount: Number(order.total || 0),
+        alreadyRefundedTotal: 0,
+        pendingRefundTotal: 0,
+        remainingRefundableTotal: 0,
+        allowedRefundTypes: [],
+        items: [],
+      };
     }
 
     // 1. Fetch Refund Policy Config

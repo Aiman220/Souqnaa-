@@ -125,6 +125,10 @@ export class AdminAnalyticsService {
         byStatus: statusBreakdown,
         byPayment: paymentBreakdown,
         byDelivery: deliveryBreakdown,
+        category: categoryBreakdown,
+        orderStatus: statusBreakdown,
+        paymentMethod: paymentBreakdown,
+        deliveryMethod: deliveryBreakdown,
       },
       deliveryAnalytics,
       inventoryOverview: {
@@ -304,7 +308,7 @@ export class AdminAnalyticsService {
     period: AnalyticsPeriod = '30d',
     customStart?: string,
     customEnd?: string,
-    type: 'sales' | 'commission' | 'leaderboard' = 'sales'
+    type: 'sales' | 'commission' | 'leaderboard' | 'products' = 'sales'
   ) {
     const overview: any = await this.getOverview(period, customStart, customEnd);
 
@@ -312,7 +316,7 @@ export class AdminAnalyticsService {
       return AnalyticsExportService.generateHtmlReport({
         title: type === 'commission'
           ? 'تقرير العمولات والتحصيلات والتسويات - سوقناا'
-          : (type === 'leaderboard' ? 'تقرير صدارة وتصنيف المتاجر - سوقناا' : 'تقرير المبيعات والطلبات - سوقناا'),
+          : (type === 'leaderboard' ? 'تقرير صدارة وتصنيف المتاجر - سوقناا' : (type === 'products' ? 'تقرير أداء وصدارة المنتجات - سوقناا' : 'تقرير المبيعات والطلبات - سوقناا')),
         periodLabel: overview.range.label,
         generatedAt: new Date().toLocaleDateString('ar-YE'),
         currency: 'YER',
@@ -322,37 +326,67 @@ export class AdminAnalyticsService {
           { label: 'عمولات المنصة', value: `${overview.kpis.marketplaceCommission.currentValue} ر.ي`, change: `${overview.kpis.marketplaceCommission.percentageChange}%` },
           { label: 'التجار النشطون', value: `${overview.kpis.activeSellersCount.currentValue}` },
         ],
-        tableHeaders: type === 'commission'
-          ? ['المتجر', 'التاجر', 'إجمالي المبيعات', 'العمولة المستحقة', 'الرصيد المعلق']
-          : (type === 'leaderboard'
-              ? ['الترتيب', 'المتجر', 'المبيعات', 'الطلبات', 'الوحدات', 'نسبة الإلغاء', 'التقييم']
-              : ['التاريخ', 'إجمالي المبيعات', 'صافي المبيعات', 'الطلبات', 'الوحدات المباعة']),
-        tableRows: type === 'commission'
-          ? overview.sellerLeaderboard.map((s: any) => [
-              s.storeName,
-              s.ownerName || s.sellerName || '',
-              `${s.grossSales} ر.ي`,
-              `${s.commissionAmount || s.commissionGenerated || 0} ر.ي`,
-              `${s.pendingSettlement || 0} ر.ي`,
+        tableHeaders: type === 'products'
+          ? ['المعرف', 'اسم المنتج', 'SKU', 'الوحدات المباعة', 'الإيرادات', 'الطلبات', 'المخزون']
+          : (type === 'commission'
+              ? ['المتجر', 'التاجر', 'إجمالي المبيعات', 'العمولة المستحقة', 'الرصيد المعلق']
+              : (type === 'leaderboard'
+                  ? ['الترتيب', 'المتجر', 'المبيعات', 'الطلبات', 'الوحدات', 'نسبة الإلغاء', 'التقييم']
+                  : ['التاريخ', 'إجمالي المبيعات', 'صافي المبيعات', 'الطلبات', 'الوحدات المباعة'])),
+        tableRows: type === 'products'
+          ? (overview.topProducts || []).map((p: any) => [
+              p.productId,
+              p.nameAr,
+              p.sku || '',
+              p.unitsSold || 0,
+              `${p.grossRevenue || 0} ر.ي`,
+              p.ordersCount || 0,
+              p.currentStock || 0,
             ])
-          : (type === 'leaderboard'
-              ? overview.sellerLeaderboard.map((s: any, idx: number) => [
-                  idx + 1,
+          : (type === 'commission'
+              ? overview.sellerLeaderboard.map((s: any) => [
                   s.storeName,
+                  s.ownerName || s.sellerName || '',
                   `${s.grossSales} ر.ي`,
-                  s.totalOrders || s.ordersCount,
-                  s.unitsSold || 0,
-                  `${s.cancellationRate}%`,
-                  `★ ${s.averageRating || 5.0}`,
+                  `${s.commissionAmount || s.commissionGenerated || 0} ر.ي`,
+                  `${s.pendingSettlement || 0} ر.ي`,
                 ])
-              : overview.timeSeries.map((t: any) => [
-                  t.date,
-                  `${t.grossSales} ر.ي`,
-                  `${t.netSales || (t.grossSales * 0.95)} ر.ي`,
-                  t.ordersCount || t.orders,
-                  t.unitsSold || 0,
-                ])),
+              : (type === 'leaderboard'
+                  ? overview.sellerLeaderboard.map((s: any, idx: number) => [
+                      idx + 1,
+                      s.storeName,
+                      `${s.grossSales} ر.ي`,
+                      s.totalOrders || s.ordersCount,
+                      s.unitsSold || 0,
+                      `${s.cancellationRate}%`,
+                      `★ ${s.averageRating || 5.0}`,
+                    ])
+                  : overview.timeSeries.map((t: any) => [
+                      t.date,
+                      `${t.grossSales} ر.ي`,
+                      `${t.netSales || (t.grossSales * 0.95)} ر.ي`,
+                      t.ordersCount || t.orders,
+                      t.unitsSold || 0,
+                    ]))),
       });
+    }
+
+    if (type === 'products') {
+      const topProducts = overview.topProducts || [];
+      const headers = ['معرف المنتج', 'اسم المنتج بالعربية', 'رمز التخزين (SKU)', 'الوحدات المباعة', 'إجمالي الإيرادات (ر.ي)', 'عدد الطلبات', 'المخزون المتوفر', 'معدل التحويل %', 'معدل الاسترجاع %', 'العملة'];
+      const rows = topProducts.map((p: any) => [
+        p.productId,
+        p.nameAr,
+        p.sku || 'بدون SKU',
+        p.unitsSold || 0,
+        p.grossRevenue || 0,
+        p.ordersCount || 0,
+        p.currentStock || 0,
+        `${p.conversionRate || 0}%`,
+        `${p.refundRate || 0}%`,
+        'YER',
+      ]);
+      return AnalyticsExportService.generateCsv(headers, rows);
     }
 
     if (type === 'sales') {

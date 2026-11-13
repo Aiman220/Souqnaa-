@@ -27,6 +27,9 @@ import { notificationDispatcher } from '../../notifications/services/notificatio
 import { TaxEngine } from '../../tax/tax.service';
 import { MembershipEligibilityService } from '../../membership/membership-eligibility.service';
 import { SellerFinancialRiskService } from '../../commission/seller-financial-risk.service';
+import { RefundAmountCalculator } from './refund-amount-calculator.service';
+import { RefundFundingWaterfallService } from './refund-funding-waterfall.service';
+import { RefundFraudDetectionService } from './refund-fraud-detector.service';
 
 export interface CreateRefundInput {
   orderId: string;
@@ -88,6 +91,22 @@ export class RefundService {
       throw new AppError('سبب وتفاصيل طلب الاسترجاع مطلوبة', 400);
     }
 
+    // 1. Authoritative Backend Calculation via RefundAmountCalculator
+    const calculatedRefund = await RefundAmountCalculator.calculateRefund({
+      orderId,
+      customerId,
+      items,
+    });
+
+    // 2. Behavioral Abuse & Fraud Risk Assessment
+    const fraudAssessment = await RefundFraudDetectionService.assessRefundRisk({
+      orderId: calculatedRefund.orderId,
+      customerId,
+      sellerId: calculatedRefund.sellerId,
+      items,
+      evidence,
+    });
+
     // Validate requested items and compute authoritative refundable amounts
     const { order, sellerId, sellerOrderId, validatedItems, totalAuthoritativeAmount } =
       await RefundEligibilityService.validateRequestedItems(orderId, customerId, items);
@@ -98,16 +117,20 @@ export class RefundService {
       throw new AppError(`لا يمكن إرفاق أكثر من ${maxFiles} ملفات كأدلة`, 400);
     }
 
-    // Check policy auto-escalate threshold
+    // Check policy auto-escalate threshold & fraud escalation
     let initialStatus: RefundStatus = RefundStatus.UNDER_SELLER_REVIEW;
-    try {
-      const policy = await prisma.refundPolicyConfig.findFirst();
-      if (policy && policy.adminEscalationEnabled && policy.dualApprovalThresholdYER) {
-        if (totalAuthoritativeAmount >= policy.dualApprovalThresholdYER) {
-          initialStatus = RefundStatus.ADMIN_REVIEW;
+    if (fraudAssessment.requiresAdminReview) {
+      initialStatus = RefundStatus.ADMIN_REVIEW;
+    } else {
+      try {
+        const policy = await prisma.refundPolicyConfig.findFirst();
+        if (policy && policy.adminEscalationEnabled && policy.dualApprovalThresholdYER) {
+          if (totalAuthoritativeAmount >= policy.dualApprovalThresholdYER) {
+            initialStatus = RefundStatus.ADMIN_REVIEW;
+          }
         }
-      }
-    } catch (_) {}
+      } catch (_) {}
+    }
 
     const refundNumber = `RF-${Date.now().toString(36).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
 
@@ -256,15 +279,18 @@ export class RefundService {
 
     // Notify seller and customer via centralized SOUQNAA Notification Platform
     try {
+      let targetSellerUserId: string | undefined;
       const sellerUser = await prisma.seller.findUnique({
         where: { id: sellerId },
         select: { userId: true },
       });
-      if (sellerUser) {
+      targetSellerUserId = sellerUser?.userId;
+
+      if (targetSellerUserId) {
         notificationDispatcher.dispatch(
           NotificationEventFactory.refundEvent({
-            eventType: 'REFUND_REQUESTED',
-            recipientId: sellerUser.userId,
+            eventType: 'SELLER_REFUND_REQUEST',
+            recipientId: targetSellerUserId,
             refundId: refund.id,
             refundNumber: refund.refundNumber,
             orderId: order.id,
@@ -273,6 +299,26 @@ export class RefundService {
             isSeller: true,
           })
         ).catch(() => {});
+
+        const socketSvc = SocketService.get();
+        if (socketSvc) {
+          socketSvc.emitToUser(targetSellerUserId, 'refund:requested', {
+            refundId: refund.id,
+            refundNumber: refund.refundNumber,
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            amount: Number(totalAuthoritativeAmount),
+            status: refund.status,
+          });
+          socketSvc.emitToUser(targetSellerUserId, 'refund:created', {
+            refundId: refund.id,
+            refundNumber: refund.refundNumber,
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            amount: Number(totalAuthoritativeAmount),
+            status: refund.status,
+          });
+        }
       }
 
       notificationDispatcher.dispatch(
@@ -289,8 +335,9 @@ export class RefundService {
       ).catch(() => {});
 
       void SocketService.get()?.emitToOrderParticipants(order.id, [
-        { event: 'REFUND_CREATED', data: { refundId: refund.id, orderId: order.id, status: refund.status }, adminPermission: 'disputes:resolve' },
-        { event: 'order:return_requested', data: { orderId: order.id, refundId: refund.id }, adminPermission: 'disputes:resolve' },
+        { event: 'REFUND_CREATED', data: { refundId: refund.id, orderId: order.id, orderNumber: order.orderNumber, status: refund.status }, adminPermission: 'disputes:resolve' },
+        { event: 'refund:created', data: { refundId: refund.id, orderId: order.id, orderNumber: order.orderNumber, status: refund.status }, adminPermission: 'disputes:resolve' },
+        { event: 'order:return_requested', data: { orderId: order.id, orderNumber: order.orderNumber, refundId: refund.id }, adminPermission: 'disputes:resolve' },
         { event: 'order:status', data: { orderId: order.id, status: order.status }, adminPermission: 'orders:view' },
       ]);
     } catch (_) {}
@@ -807,11 +854,21 @@ export class RefundService {
       return res;
     });
 
-    if (updated.seller?.userId) {
+    let targetSellerUserId: string | undefined = updated.seller?.userId;
+    if (!targetSellerUserId && updated.sellerId) {
+      const sellerRecord = await prisma.seller.findUnique({
+        where: { id: updated.sellerId },
+        select: { userId: true },
+      });
+      targetSellerUserId = sellerRecord?.userId;
+    }
+
+    if (targetSellerUserId) {
+      const safeSellerUserId: string = targetSellerUserId;
       await notificationDispatcher.dispatch(
         NotificationEventFactory.disputeEvent({
           eventType: 'DISPUTE_SELLER_NOTIFIED',
-          recipientId: updated.seller.userId,
+          recipientId: safeSellerUserId,
           disputeId: updated.id,
           orderId: updated.orderId,
           orderNumber: updated.order?.orderNumber || updated.refundNumber,
@@ -825,7 +882,7 @@ export class RefundService {
       // Targeted socket alerts for seller
       const socketSvc = SocketService.get();
       if (socketSvc) {
-        socketSvc.emitToUser(updated.seller.userId, 'dispute:created', {
+        socketSvc.emitToUser(safeSellerUserId, 'dispute:created', {
           disputeId: updated.id,
           refundId: updated.id,
           orderId: updated.orderId,
@@ -833,7 +890,8 @@ export class RefundService {
           disputeReason,
           status: updated.status,
         });
-        socketSvc.emitToUser(updated.seller.userId, 'refund:disputed', {
+        socketSvc.emitToUser(safeSellerUserId, 'refund:disputed', {
+          disputeId: updated.id,
           refundId: updated.id,
           orderId: updated.orderId,
           status: updated.status,
@@ -1172,6 +1230,38 @@ export class RefundService {
       },
     });
 
+    // 1. Authoritative Refund Funding Waterfall Allocation (Priority 1-6)
+    const waterfallResult = await RefundFundingWaterfallService.allocateRefundFunding(tx, {
+      refundId: refund.id,
+      orderId: refund.orderId,
+      sellerId: refund.sellerId,
+      approvedAmount,
+      currency: refund.currency || 'YER',
+      orderNumber: refund.order?.orderNumber || refund.refundNumber,
+      sellerOrderNumber: refund.sellerOrder?.sellerOrderNumber,
+      bypassExposureLimit: !!adminUserId,
+      adminUserId,
+    });
+
+    // If funding requires marketplace escalation (e.g. seller insolvent & exposure cap breached without admin override)
+    if (waterfallResult.requiresMarketplaceEscalation && !adminUserId) {
+      await tx.refundRequest.update({
+        where: { id: refund.id },
+        data: { status: RefundStatus.REFUND_PENDING },
+      });
+      await tx.refundStatusHistory.create({
+        data: {
+          refundRequestId: refund.id,
+          fromStatus: refund.status,
+          toStatus: RefundStatus.REFUND_PENDING,
+          changedBy: refund.customerId,
+          actorType: RefundActorType.SYSTEM,
+          reason: `بانتظار موافقة الإدارة المالية على التمويل الاستثنائي: ${waterfallResult.escalationReason}`,
+        },
+      });
+      return;
+    }
+
     // Destination 1: Internal Customer Wallet
     if (destination === RefundDestination.CUSTOMER_WALLET) {
       // 1. Credit Customer Wallet via Ledger
@@ -1187,9 +1277,6 @@ export class RefundService {
         },
         tx
       );
-
-      // 2. Adjust Seller Balance & Create Seller Transaction
-      await this.adjustSellerSettlement(refund, approvedAmount, tx);
 
       // 2.05 Tax-Aware Refund Calculation & Immutable Recording (Section 13)
       try {
@@ -1363,8 +1450,7 @@ export class RefundService {
         },
       });
 
-      // Adjust Seller Settlement immediately upon refund commitment
-      await this.adjustSellerSettlement(refund, approvedAmount, tx);
+      // Funding was already allocated and reserved via RefundFundingWaterfallService above
     } else {
       // Destination 3: ORIGINAL_PAYMENT_METHOD, BANK_TRANSFER, etc.
       const orderPayment = refund.orderId ? await tx.payment.findUnique({ where: { orderId: refund.orderId } }) : null;
@@ -1384,8 +1470,7 @@ export class RefundService {
         );
       }
 
-      // 1. Adjust Seller Settlement immediately upon refund commitment
-      await this.adjustSellerSettlement(refund, approvedAmount, tx);
+      // Funding was already allocated and reserved via RefundFundingWaterfallService above
 
       // 2. Mark Refund as REFUND_COMPLETED
       await tx.refundRequest.update({

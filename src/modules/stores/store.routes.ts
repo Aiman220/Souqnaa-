@@ -68,6 +68,89 @@ async function resolveStore(idOrSlug: string) {
   });
 }
 
+// Helper: fetch categories & subcategories hierarchy for store products
+async function getStoreCategoriesHierarchy(storeId: string) {
+  const activeCategories = await prisma.category.findMany({
+    where: { products: { some: { storeId, isActive: true, isSuspended: false } } },
+    include: {
+      _count: { select: { products: { where: { storeId, isActive: true, isSuspended: false } } } },
+    },
+    orderBy: { sortOrder: 'asc' },
+  });
+
+  const activeCatIds = new Set(activeCategories.map(c => c.id));
+  const neededParentIds = Array.from(
+    new Set(
+      activeCategories
+        .map(c => c.parentId)
+        .filter((pid): pid is string => !!pid && !activeCatIds.has(pid))
+    )
+  );
+
+  let parentCategories: any[] = [];
+  if (neededParentIds.length > 0) {
+    parentCategories = await prisma.category.findMany({
+      where: { id: { in: neededParentIds }, isActive: true },
+      include: {
+        _count: { select: { products: { where: { storeId, isActive: true, isSuspended: false } } } },
+      },
+      orderBy: { sortOrder: 'asc' },
+    });
+  }
+
+  const allCategories = [...activeCategories, ...parentCategories];
+  const categoryMap = new Map<string, any>();
+  for (const cat of allCategories) {
+    categoryMap.set(cat.id, cat);
+  }
+
+  const rootCategories: any[] = [];
+  const childrenByParent = new Map<string, any[]>();
+
+  for (const cat of categoryMap.values()) {
+    const mapped = {
+      id: cat.id,
+      name: cat.nameAr || cat.nameEn,
+      nameAr: cat.nameAr,
+      nameEn: cat.nameEn,
+      slug: cat.slug,
+      icon: cat.icon,
+      image: cat.image,
+      parentId: cat.parentId,
+      sortOrder: cat.sortOrder,
+      isActive: cat.isActive,
+      productCount: (cat as any)._count?.products ?? 0,
+      children: [] as any[],
+    };
+
+    if (cat.parentId) {
+      if (!childrenByParent.has(cat.parentId)) {
+        childrenByParent.set(cat.parentId, []);
+      }
+      childrenByParent.get(cat.parentId)!.push(mapped);
+    } else {
+      rootCategories.push(mapped);
+    }
+  }
+
+  for (const root of rootCategories) {
+    const children = childrenByParent.get(root.id) || [];
+    children.sort((a, b) => a.sortOrder - b.sortOrder);
+    root.children = children;
+    const childrenProductCount = children.reduce((sum: number, ch: any) => sum + (ch.productCount || 0), 0);
+    root.productCount = (root.productCount || 0) + childrenProductCount;
+  }
+
+  for (const [parentId, children] of childrenByParent.entries()) {
+    if (!categoryMap.has(parentId)) {
+      rootCategories.push(...children);
+    }
+  }
+
+  rootCategories.sort((a, b) => a.sortOrder - b.sortOrder);
+  return rootCategories;
+}
+
 // ── List active stores ────────────────────────────────────────────────────────
 
 // GET /api/v1/stores
@@ -187,13 +270,7 @@ router.get('/:slug/storefront', optionalAuth, storefrontLimiter, async (req: Req
               select: { id: true },
             })
           : Promise.resolve(null),
-        prisma.category.findMany({
-          where: { products: { some: { storeId, isActive: true, isSuspended: false } } },
-          include: {
-            _count: { select: { products: { where: { storeId, isActive: true, isSuspended: false } } } },
-          },
-          orderBy: { sortOrder: 'asc' },
-        }),
+        getStoreCategoriesHierarchy(storeId),
         SellerPerformanceService.getPublicSellerPerformance(sellerId).catch(() => null),
       ]);
 
@@ -265,19 +342,7 @@ router.get('/:slug/storefront', optionalAuth, storefrontLimiter, async (req: Req
       },
       ratingBreakdown: ratingMap,
       popularProducts,
-      categories: storeCategories.map(c => ({
-        id: c.id,
-        name: c.nameAr || c.nameEn,
-        nameAr: c.nameAr,
-        nameEn: c.nameEn,
-        slug: c.slug,
-        icon: c.icon,
-        image: c.image,
-        parentId: c.parentId,
-        sortOrder: c.sortOrder,
-        isActive: c.isActive,
-        productCount: (c as any)._count?.products ?? 0,
-      })),
+      categories: storeCategories,
       vouchers: activeVouchers,
       flashSaleItems,
       performance,
@@ -307,6 +372,7 @@ router.get('/:slug/products', storefrontLimiter, async (req: Request, res: Respo
     const limit = Math.min(parseInt(String(req.query.limit ?? '24'), 10), 48);
     const cursor = req.query.cursor as string | undefined;
     const categoryId = (req.query.category ?? req.query.categoryId) as string | undefined;
+    const subcategoryId = (req.query.subcategory ?? req.query.subcategoryId) as string | undefined;
     const searchQuery = String(req.query.search ?? req.query.q ?? '').trim();
     const minPrice = req.query.minPrice ? parseFloat(String(req.query.minPrice)) : undefined;
     const maxPrice = req.query.maxPrice ? parseFloat(String(req.query.maxPrice)) : undefined;
@@ -315,10 +381,26 @@ router.get('/:slug/products', storefrontLimiter, async (req: Request, res: Respo
     const inStock = req.query.inStock === 'true';
     const sort = (req.query.sort as string) ?? 'recommended';
 
+    let categoryCondition: any = undefined;
+    if (subcategoryId) {
+      categoryCondition = subcategoryId;
+    } else if (categoryId) {
+      const targetCategory = await prisma.category.findUnique({
+        where: { id: categoryId },
+        select: { id: true, children: { select: { id: true } } },
+      });
+      if (targetCategory && targetCategory.children.length > 0) {
+        const ids = [targetCategory.id, ...targetCategory.children.map(c => c.id)];
+        categoryCondition = { in: ids };
+      } else {
+        categoryCondition = categoryId;
+      }
+    }
+
     const where: any = {
       storeId: store.id,
       isActive: true,
-      ...(categoryId && { categoryId }),
+      ...(categoryCondition ? { categoryId: categoryCondition } : {}),
       ...(searchQuery
         ? {
             OR: [
@@ -380,7 +462,7 @@ router.get('/:slug/products', storefrontLimiter, async (req: Request, res: Respo
 
 /**
  * GET /api/v1/stores/:slug/categories
- * Categories of this store's products with product counts.
+ * Categories & subcategories of this store's products with product counts.
  */
 router.get('/:slug/categories', storefrontLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -391,29 +473,8 @@ router.get('/:slug/categories', storefrontLimiter, async (req: Request, res: Res
     });
     if (!store) throw new AppError('Store not found', 404);
 
-    const categories = await prisma.category.findMany({
-      where: { products: { some: { storeId: store.id, isActive: true, isSuspended: false } } },
-      include: {
-        _count: { select: { products: { where: { storeId: store.id, isActive: true, isSuspended: false } } } },
-      },
-      orderBy: { sortOrder: 'asc' },
-    });
-
-    const mapped = categories.map(c => ({
-      id: c.id,
-      name: c.nameAr || c.nameEn,
-      nameAr: c.nameAr,
-      nameEn: c.nameEn,
-      slug: c.slug,
-      icon: c.icon,
-      image: c.image,
-      parentId: c.parentId,
-      sortOrder: c.sortOrder,
-      isActive: c.isActive,
-      productCount: (c as any)._count?.products ?? 0,
-    }));
-
-    ResponseUtil.success(res, mapped);
+    const categories = await getStoreCategoriesHierarchy(store.id);
+    ResponseUtil.success(res, categories);
   } catch (error) {
     next(error);
   }

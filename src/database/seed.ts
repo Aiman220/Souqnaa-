@@ -16,6 +16,8 @@ import { recomputeRatingSummary } from '../modules/reviews/reviews.service';
 import { seedMegaBanners } from './seed_mega_banners';
 import { seedSupportData } from './seed_support';
 import { seedNotificationData } from './seed_notifications';
+import { seedCategoriesCatalog } from './seed_categories';
+import { seedMembershipTiers } from './seed_membership_tiers';
 
 const prisma = new PrismaClient();
 
@@ -224,68 +226,8 @@ async function main() {
     },
   });
 
-  // 6. Categories
-  const categoriesData = [
-    { nameAr: 'إلكترونيات', nameEn: 'Electronics', slug: 'electronics' },
-    { nameAr: 'ملابس وأزياء', nameEn: 'Fashion', slug: 'fashion' },
-    { nameAr: 'المنزل والمطبخ', nameEn: 'Home & Kitchen', slug: 'home-kitchen' },
-    { nameAr: 'عطور وجمال', nameEn: 'Beauty & Perfumes', slug: 'beauty' },
-    { nameAr: 'رياضة ولياقة', nameEn: 'Sports', slug: 'sports' },
-    { nameAr: 'أغذية وسوبرماركت', nameEn: 'Groceries', slug: 'groceries' },
-  ];
-
-  for (const cat of categoriesData) {
-    const createdCat = await prisma.category.upsert({
-      where: { slug: cat.slug },
-      update: {},
-      create: {
-        nameAr: cat.nameAr,
-        nameEn: cat.nameEn,
-        slug: cat.slug,
-      },
-    });
-
-    // Add demo products for electronics
-    if (cat.slug === 'electronics') {
-      const demoProduct = await prisma.product.upsert({
-        where: { slug: 'wireless-noise-cancelling-headphones' },
-        update: {
-          rating: 0,
-          reviewCount: 0,
-          soldCount: 0,
-          isFeatured: false,
-        },
-        create: {
-          storeId: demoStore.id,
-          categoryId: createdCat.id,
-          nameAr: 'سماعات رأس لاسلكية عازلة للضوضاء برو',
-          nameEn: 'Wireless Noise Cancelling Headphones Pro',
-          slug: 'wireless-noise-cancelling-headphones',
-          descriptionAr: 'سماعات صوتية عالية النقاء تدعم الشحن السريع وتقنية البلوتوث 5.3 وبطارية تدوم 40 ساعة',
-          descriptionEn: 'High fidelity audio headphones with fast charging, BT 5.3, and 40-hour battery life',
-          price: 199.99,
-          compareAtPrice: 299.99,
-          sku: 'TECH-HEADPHONE-01',
-          isFeatured: false,
-          rating: 0,
-          reviewCount: 0,
-          soldCount: 0,
-          images: {
-            create: [
-              { url: 'https://picsum.photos/seed/headphones1/800/800', isPrimary: true, sortOrder: 0 },
-              { url: 'https://picsum.photos/seed/headphones2/800/800', isPrimary: false, sortOrder: 1 },
-            ],
-          },
-        },
-      });
-
-      await prisma.inventory.upsert({
-        where: { productId: demoProduct.id },
-        update: {},
-        create: { productId: demoProduct.id, quantity: 50 },
-      });
-    }
-  }
+  // 6. Categories (Full Catalog Seeding)
+  const categoryMap = await seedCategoriesCatalog(prisma);
 
   // 7. Coupons
   await prisma.coupon.upsert({
@@ -831,6 +773,9 @@ async function main() {
 
   // 19. Seed Production-Grade Centralized Tax Engine Configuration & Rules
   await seedTaxData();
+
+  // 20. Seed SOUQNAA Production-Grade Customer Membership & VIP Tiers
+  await seedMembershipTiers();
 
   console.log('✅ Database seeded successfully.');
 }

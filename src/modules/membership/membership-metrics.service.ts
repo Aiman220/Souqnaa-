@@ -38,21 +38,26 @@ export class MembershipMetricsService {
     const periodStartDate = new Date(now.getTime() - periodDays * 24 * 60 * 60 * 1000);
 
     // 1. Authoritative Delivered, Verified, and Paid Orders
+    // Unpaid, pending payment, and failed payment orders are strictly excluded
     const qualifyingOrders = await prisma.order.findMany({
       where: {
         userId,
         status: OrderStatus.DELIVERED,
         payment: {
-          status: { not: PaymentStatus.FAILED },
+          NOT: {
+            status: { in: [PaymentStatus.FAILED, PaymentStatus.PENDING] },
+          },
           OR: [
             { status: PaymentStatus.PAID },
+            { status: PaymentStatus.PARTIALLY_REFUNDED },
             { paidAt: { not: null } },
-            { method: PaymentMethodType.CASH_ON_DELIVERY },
           ],
         },
       },
       select: {
         id: true,
+        orderNumber: true,
+        notes: true,
         subtotal: true,
         createdAt: true,
         deliveredAt: true,
@@ -77,38 +82,55 @@ export class MembershipMetricsService {
       },
     });
 
+    const toIntegerCents = (val: any): number => {
+      const num = Number(val || 0);
+      if (isNaN(num) || num <= 0) return 0;
+      return Math.round(num * 100);
+    };
+
     const seenOrderIds = new Set<string>();
     let lifetimeOrdersCount = 0;
-    let lifetimeSpendGross = 0;
+    let lifetimeSpendCents = 0;
     let periodOrdersCount = 0;
-    let periodSpendGross = 0;
+    let periodSpendCents = 0;
 
     for (const order of qualifyingOrders) {
       if (seenOrderIds.has(order.id)) continue;
       seenOrderIds.add(order.id);
 
-      const orderSubtotal = Number(order.subtotal || 0);
-
-      // Compute total refunds against this specific order
-      const orderRefundsTotal = order.refundRequests.reduce((sum, r) => {
-        return sum + Number(r.approvedAmount || r.requestedAmount || 0);
-      }, 0);
-
-      // If fully refunded, order does not qualify as a completed order and contributes 0 spend
-      if (orderRefundsTotal >= orderSubtotal || orderSubtotal <= 0) {
+      // Exclude test orders (orderNumber starting with TEST_ / test_, or [TEST] notes tag)
+      if (
+        (order.orderNumber && /^test[_-]/i.test(order.orderNumber)) ||
+        (order.notes && /\[test\]/i.test(order.notes))
+      ) {
         continue;
       }
 
-      // Net eligible spend for this order
-      const netEligibleAmount = Math.max(0, orderSubtotal - orderRefundsTotal);
+      // Integer-safe monetary calculations in cents/fils
+      const orderSubtotalCents = toIntegerCents(order.subtotal);
+
+      // Compute total refunds against this specific order in integer cents
+      let orderRefundsCents = 0;
+      for (const r of order.refundRequests) {
+        const refAmount = r.approvedAmount != null ? r.approvedAmount : r.requestedAmount;
+        orderRefundsCents += toIntegerCents(refAmount);
+      }
+
+      // If fully refunded, order does not qualify as a completed order and contributes 0 spend
+      if (orderRefundsCents >= orderSubtotalCents || orderSubtotalCents <= 0) {
+        continue;
+      }
+
+      // Net eligible spend for this order (in integer cents)
+      const netEligibleCents = Math.max(0, orderSubtotalCents - orderRefundsCents);
 
       lifetimeOrdersCount += 1;
-      lifetimeSpendGross += netEligibleAmount;
+      lifetimeSpendCents += netEligibleCents;
 
       const orderDate = order.deliveredAt || order.createdAt;
       if (orderDate >= periodStartDate) {
         periodOrdersCount += 1;
-        periodSpendGross += netEligibleAmount;
+        periodSpendCents += netEligibleCents;
       }
     }
 
@@ -125,8 +147,8 @@ export class MembershipMetricsService {
       userId,
       completedOrders: lifetimeOrdersCount,
       periodCompletedOrders: periodOrdersCount,
-      lifetimeSpend: Math.round(lifetimeSpendGross * 100) / 100,
-      periodSpend: Math.round(periodSpendGross * 100) / 100,
+      lifetimeSpend: Math.round(lifetimeSpendCents) / 100,
+      periodSpend: Math.round(periodSpendCents) / 100,
       pointsBalance,
       accountAgeDays,
       evaluationTimestamp: now.toISOString(),

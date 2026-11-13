@@ -28,6 +28,8 @@ import { OrderInvoiceService } from '../../services/orders/order-invoice.service
 import { notificationDispatcher } from '../notifications/services/notification-dispatcher';
 import { NotificationEventFactory } from '../notifications/events/domain-events';
 import { redis } from '../../database/redis';
+import { AdminAnalyticsService } from '../analytics/services/admin-analytics.service';
+import { AnalyticsPeriod } from '../analytics/types/analytics.types';
 import { config } from '../../config';
 
 import { adminDeliveryRoutes } from './delivery-zones.routes';
@@ -1171,15 +1173,29 @@ router.get('/products', async (req: Request, res: Response, next: NextFunction) 
         include: {
           category: { select: { id: true, nameAr: true, nameEn: true } },
           store: { select: { id: true, name: true, slug: true } },
-          images: { take: 1, orderBy: { sortOrder: 'asc' } },
+          images: { take: 4, orderBy: { sortOrder: 'asc' }, select: { url: true, isPrimary: true } },
+          inventory: { select: { quantity: true, lowStockAlert: true, reserved: true } },
           _count: { select: { productReviews: true, orderItems: true, reports: true } },
         },
         orderBy: { createdAt: 'desc' },
       }),
     ]);
 
+    const formattedProducts = products.map((p) => {
+      const primaryImg = p.images.find((img) => img.isPrimary) || p.images[0];
+      const imageUrl = primaryImg ? storageService.normalizeUrl(primaryImg.url) : null;
+      return {
+        ...p,
+        imageUrl,
+        stock: p.inventory?.quantity ?? 0,
+        reportsCount: p._count?.reports ?? 0,
+        reviewsCount: p._count?.productReviews ?? p.reviewCount ?? 0,
+        ordersCount: p._count?.orderItems ?? 0,
+      };
+    });
+
     ResponseUtil.success(res, {
-      products,
+      products: formattedProducts,
       pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
     });
   } catch (error) {
@@ -1194,24 +1210,42 @@ router.get('/products/:id', async (req: Request, res: Response, next: NextFuncti
       where: { id },
       include: {
         category: true,
-        store: { include: { seller: { include: { user: true } } } },
+        store: { include: { seller: { include: { user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } } } } } },
         images: { orderBy: { sortOrder: 'asc' } },
         variants: true,
+        inventory: { select: { quantity: true, lowStockAlert: true, reserved: true } },
         reports: {
-          take: 10,
+          take: 20,
           orderBy: { createdAt: 'desc' },
-          include: { user: { select: { firstName: true, lastName: true, email: true } } },
+          include: { user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } } },
         },
         productReviews: {
-          take: 5,
+          take: 10,
           orderBy: { createdAt: 'desc' },
-          select: { id: true, rating: true, title: true, body: true, status: true, user: { select: { firstName: true, lastName: true } } },
+          select: { id: true, rating: true, title: true, body: true, status: true, createdAt: true, user: { select: { id: true, firstName: true, lastName: true } } },
         },
         _count: { select: { productReviews: true, orderItems: true, reports: true } },
       },
     });
     if (!product) throw new AppError('المنتج غير موجود', 404);
-    ResponseUtil.success(res, product);
+
+    const normalizedImages = product.images.map((img) => ({
+      ...img,
+      url: storageService.normalizeUrl(img.url),
+    }));
+
+    const formatted = {
+      ...product,
+      images: normalizedImages,
+      imageUrl: normalizedImages[0]?.url || null,
+      stock: product.inventory?.quantity ?? 0,
+      reportsCount: product._count?.reports ?? 0,
+      reviewsCount: product._count?.productReviews ?? product.reviewCount ?? 0,
+      ordersCount: product._count?.orderItems ?? 0,
+      reviews: product.productReviews, // alias for compatibility
+    };
+
+    ResponseUtil.success(res, formatted);
   } catch (error) {
     next(error);
   }
@@ -1253,21 +1287,29 @@ router.put('/products/:id', async (req: Request, res: Response, next: NextFuncti
     const id = String(req.params.id);
     const { nameAr, nameEn, price, stock, categoryId, isActive } = req.body;
 
-    const updated = await prisma.product.update({
-      where: { id },
-      data: {
-        ...(nameAr ? { nameAr } : {}),
-        ...(nameEn ? { nameEn } : {}),
-        ...(price !== undefined ? { price: Number(price) } : {}),
-        ...(stock !== undefined ? { stock: Number(stock) } : {}),
-        ...(categoryId ? { categoryId } : {}),
-        ...(isActive !== undefined ? { isActive: Boolean(isActive) } : {}),
-      },
-    });
+    const [updated] = await Promise.all([
+      prisma.product.update({
+        where: { id },
+        data: {
+          ...(nameAr ? { nameAr } : {}),
+          ...(nameEn ? { nameEn } : {}),
+          ...(price !== undefined ? { price: Number(price) } : {}),
+          ...(categoryId ? { categoryId } : {}),
+          ...(isActive !== undefined ? { isActive: Boolean(isActive) } : {}),
+        },
+      }),
+      stock !== undefined
+        ? prisma.inventory.upsert({
+            where: { productId: id },
+            create: { productId: id, quantity: Number(stock) },
+            update: { quantity: Number(stock) },
+          })
+        : Promise.resolve(null),
+    ]);
 
-    await logAdminAction(req.user?.userId, 'PRODUCT_UPDATED', 'products', { id, updated }, req);
+    await logAdminAction(req.user?.userId, 'PRODUCT_UPDATED', 'products', { id, nameAr, price, stock }, req);
     recommendationService.invalidateProductCache(id).catch(() => {});
-    ResponseUtil.success(res, updated, 'تم تحديث بيانات المنتج بنجاح');
+    ResponseUtil.success(res, { ...updated, stock: stock !== undefined ? Number(stock) : undefined }, 'تم تحديث بيانات المنتج بنجاح');
   } catch (error) {
     next(error);
   }
@@ -1293,6 +1335,178 @@ router.delete('/products/:id', async (req: Request, res: Response, next: NextFun
       recommendationService.invalidateProductCache(id).catch(() => {});
       ResponseUtil.success(res, null, 'تم حذف المنتج نهائياً من قاعدة البيانات');
     }
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ==============================================================================
+// 5.1 PRODUCT REPORTS QUEUE (طابور بلاغات وشكاوى المنتجات المخالفة)
+// ==============================================================================
+router.get(['/products/reports', '/product-reports'], async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const page = parseInt(req.query.page as string, 10) || 1;
+    const limit = Math.min(parseInt(req.query.limit as string, 10) || 20, 100);
+    const skip = (page - 1) * limit;
+    const status = (req.query.status as string) || 'ALL';
+    const search = (req.query.search as string) || '';
+    const productId = req.query.productId as string;
+
+    const where: any = {};
+    if (status && status !== 'ALL') {
+      where.status = status;
+    }
+    if (productId) {
+      where.productId = productId;
+    }
+    if (search) {
+      where.OR = [
+        { reason: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+        { product: { nameAr: { contains: search, mode: 'insensitive' } } },
+        { product: { nameEn: { contains: search, mode: 'insensitive' } } },
+        { product: { sku: { contains: search, mode: 'insensitive' } } },
+        { product: { store: { name: { contains: search, mode: 'insensitive' } } } },
+        { user: { firstName: { contains: search, mode: 'insensitive' } } },
+        { user: { lastName: { contains: search, mode: 'insensitive' } } },
+        { user: { email: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const [total, reports, pendingCount, resolvedCount, dismissedCount, totalCount] = await Promise.all([
+      prisma.productReport.count({ where }),
+      prisma.productReport.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+          product: {
+            select: {
+              id: true,
+              nameAr: true,
+              nameEn: true,
+              sku: true,
+              price: true,
+              isActive: true,
+              isSuspended: true,
+              images: { take: 1, orderBy: { sortOrder: 'asc' }, select: { url: true } },
+              store: { select: { id: true, name: true, slug: true } },
+              category: { select: { id: true, nameAr: true, nameEn: true } },
+              inventory: { select: { quantity: true } },
+              _count: { select: { reports: true } },
+            },
+          },
+        },
+      }),
+      prisma.productReport.count({ where: { status: 'PENDING' } }),
+      prisma.productReport.count({ where: { status: 'RESOLVED' } }),
+      prisma.productReport.count({ where: { status: 'DISMISSED' } }),
+      prisma.productReport.count(),
+    ]);
+
+    const formattedReports = reports.map((r) => {
+      const imgRaw = r.product?.images?.[0]?.url;
+      const imageUrl = imgRaw ? storageService.normalizeUrl(imgRaw) : null;
+      return {
+        id: r.id,
+        productId: r.productId,
+        reason: r.reason,
+        description: r.description,
+        status: r.status,
+        createdAt: r.createdAt,
+        user: r.user,
+        product: r.product
+          ? {
+              ...r.product,
+              imageUrl,
+              stock: r.product.inventory?.quantity ?? 0,
+              reportsCount: r.product._count?.reports ?? 0,
+            }
+          : null,
+      };
+    });
+
+    ResponseUtil.success(res, {
+      reports: formattedReports,
+      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+      stats: {
+        pendingCount,
+        resolvedCount,
+        dismissedCount,
+        totalCount,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get(['/products/reports/stats', '/product-reports/stats'], async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const [pendingCount, resolvedCount, dismissedCount, totalCount] = await Promise.all([
+      prisma.productReport.count({ where: { status: 'PENDING' } }),
+      prisma.productReport.count({ where: { status: 'RESOLVED' } }),
+      prisma.productReport.count({ where: { status: 'DISMISSED' } }),
+      prisma.productReport.count(),
+    ]);
+
+    ResponseUtil.success(res, {
+      pendingCount,
+      resolvedCount,
+      dismissedCount,
+      totalCount,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post(['/products/reports/:id/resolve', '/product-reports/:id/resolve'], async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params.id);
+    const { adminNote, suspendProduct } = req.body;
+
+    const report = await prisma.productReport.findUnique({ where: { id } });
+    if (!report) throw new AppError('البلاغ غير موجود', 404);
+
+    await prisma.productReport.update({
+      where: { id },
+      data: { status: 'RESOLVED' },
+    });
+
+    if (suspendProduct && report.productId) {
+      await prisma.product.update({
+        where: { id: report.productId },
+        data: { isActive: false, isSuspended: true },
+      });
+      await logAdminAction(req.user?.userId, 'PRODUCT_SUSPENDED_VIA_REPORT', 'products', { productId: report.productId, reportId: id, adminNote }, req);
+      recommendationService.invalidateProductCache(report.productId).catch(() => {});
+    }
+
+    await logAdminAction(req.user?.userId, 'PRODUCT_REPORT_RESOLVED', 'products', { id, adminNote, suspendProduct }, req);
+    ResponseUtil.success(res, null, suspendProduct ? 'تم حل البلاغ وإيقاف المنتج بنجاح' : 'تم حل البلاغ واعتماده بنجاح');
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post(['/products/reports/:id/dismiss', '/product-reports/:id/dismiss'], async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params.id);
+    const { adminNote } = req.body;
+
+    const report = await prisma.productReport.findUnique({ where: { id } });
+    if (!report) throw new AppError('البلاغ غير موجود', 404);
+
+    await prisma.productReport.update({
+      where: { id },
+      data: { status: 'DISMISSED' },
+    });
+
+    await logAdminAction(req.user?.userId, 'PRODUCT_REPORT_DISMISSED', 'products', { id, adminNote }, req);
+    ResponseUtil.success(res, null, 'تم رفض البلاغ وإغلاقه');
   } catch (error) {
     next(error);
   }
@@ -3898,13 +4112,12 @@ router.post('/withdrawals/:id/complete', requirePermission('finance:withdrawals'
         },
       });
 
-      // Update seller balance: decrement pending, increment withdrawn
+      // Update seller balance: increment withdrawnBalance (pendingBalance was not incremented upon withdrawal request)
       const balance = await tx.sellerBalance.findUnique({ where: { sellerId: w.sellerId } });
       if (balance) {
         await tx.sellerBalance.update({
           where: { sellerId: w.sellerId },
           data: {
-            pendingBalance: Math.max(0, balance.pendingBalance - w.amount),
             withdrawnBalance: balance.withdrawnBalance + w.amount,
           },
         });
@@ -3997,14 +4210,13 @@ router.post('/withdrawals/:id/reject', requirePermission('finance:withdrawals'),
         },
       });
 
-      // Restore balance to seller: increment available, decrement pending
+      // Restore balance to seller: increment availableBalance (pendingBalance was not touched)
       const balance = await tx.sellerBalance.findUnique({ where: { sellerId: w.sellerId } });
       if (balance) {
         await tx.sellerBalance.update({
           where: { sellerId: w.sellerId },
           data: {
             availableBalance: balance.availableBalance + w.amount,
-            pendingBalance: Math.max(0, balance.pendingBalance - w.amount),
           },
         });
 
@@ -5092,150 +5304,11 @@ router.delete('/promotions/banners/:id', async (req: Request, res: Response, nex
 // ==============================================================================
 router.get('/reports/analytics', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const period = (req.query.period as string) || '30d';
-    let fromDate: Date;
-    let toDate = new Date();
-
-    if (req.query.startDate && req.query.endDate) {
-      fromDate = new Date(req.query.startDate as string);
-      toDate = new Date(req.query.endDate as string);
-      toDate.setHours(23, 59, 59, 999);
-    } else {
-      fromDate = new Date();
-      if (period === 'today') {
-        fromDate.setHours(0, 0, 0, 0);
-      } else if (period === 'yesterday') {
-        fromDate.setDate(fromDate.getDate() - 1);
-        fromDate.setHours(0, 0, 0, 0);
-        toDate = new Date();
-        toDate.setDate(toDate.getDate() - 1);
-        toDate.setHours(23, 59, 59, 999);
-      } else if (period === '7d') {
-        fromDate.setDate(fromDate.getDate() - 7);
-      } else if (period === '30d') {
-        fromDate.setDate(fromDate.getDate() - 30);
-      } else if (period === '90d') {
-        fromDate.setDate(fromDate.getDate() - 90);
-      } else if (period === 'this_year') {
-        fromDate = new Date(new Date().getFullYear(), 0, 1);
-      } else {
-        fromDate.setDate(fromDate.getDate() - 30);
-      }
-    }
-
-    const whereRange = { createdAt: { gte: fromDate, lte: toDate } };
-
-    const [
-      ordersCount,
-      completedOrdersCount,
-      cancelledOrdersCount,
-      salesAgg,
-      sellerOrdersAgg,
-      newCustomersCount,
-      newSellersCount,
-      topProducts,
-      topStores,
-      recentOrders,
-    ] = await Promise.all([
-      prisma.order.count({ where: whereRange }),
-      prisma.order.count({ where: { ...whereRange, status: OrderStatus.DELIVERED } }),
-      prisma.order.count({ where: { ...whereRange, status: { in: [OrderStatus.CANCELLED_BY_CUSTOMER, OrderStatus.CANCELLED_BY_SELLER, OrderStatus.REJECTED_BY_SELLER, OrderStatus.CANCELLED_BY_ADMIN] } } }),
-      prisma.order.aggregate({
-        where: whereRange,
-        _sum: { total: true, deliveryFee: true, discountAmount: true, taxAmount: true },
-        _avg: { total: true },
-      }),
-      prisma.sellerOrder.aggregate({
-        where: whereRange,
-        _sum: { commissionAmount: true, sellerPayout: true, subtotal: true },
-      }),
-      prisma.user.count({ where: { role: 'CUSTOMER', ...whereRange } }),
-      prisma.seller.count({ where: whereRange }),
-      prisma.orderItem.groupBy({
-        by: ['productId', 'productNameAr'],
-        where: whereRange,
-        _sum: { quantity: true, totalPrice: true },
-        orderBy: { _sum: { totalPrice: 'desc' } },
-        take: 5,
-      }),
-      prisma.sellerOrder.groupBy({
-        by: ['sellerId'],
-        where: whereRange,
-        _sum: { subtotal: true, commissionAmount: true },
-        _count: { id: true },
-        orderBy: { _sum: { subtotal: 'desc' } },
-        take: 5,
-      }),
-      prisma.order.findMany({
-        where: whereRange,
-        select: { id: true, orderNumber: true, total: true, deliveryFee: true, createdAt: true },
-        orderBy: { createdAt: 'asc' },
-        take: 200,
-      }),
-    ]);
-
-    // Fetch store names for top sellers
-    const topSellerIds = topStores.map(s => s.sellerId);
-    const stores = await prisma.store.findMany({
-      where: { sellerId: { in: topSellerIds } },
-      select: { sellerId: true, name: true },
-    });
-    const storeMap = new Map(stores.map(st => [st.sellerId, st.name]));
-
-    const enrichedTopStores = topStores.map(s => ({
-      sellerId: s.sellerId,
-      storeName: storeMap.get(s.sellerId) || 'متجر معتمد',
-      ordersCount: s._count.id,
-      totalSales: s._sum.subtotal || 0,
-      totalCommission: s._sum.commissionAmount || 0,
-    }));
-
-    const totalSales = salesAgg._sum.total || 0;
-    const totalDeliveryFees = salesAgg._sum.deliveryFee || 0;
-    const totalCommission = sellerOrdersAgg._sum.commissionAmount || 0;
-    const netSellerPayouts = sellerOrdersAgg._sum.sellerPayout || 0;
-    const averageOrderValue = salesAgg._avg.total ? parseFloat(salesAgg._avg.total.toFixed(2)) : 0;
-
-    // Daily time series
-    const dailyMap = new Map<string, { date: string; sales: number; orders: number; delivery: number }>();
-    recentOrders.forEach(o => {
-      const day = o.createdAt.toISOString().split('T')[0];
-      const existing = dailyMap.get(day) || { date: day, sales: 0, orders: 0, delivery: 0 };
-      existing.sales += o.total;
-      existing.delivery += o.deliveryFee;
-      existing.orders += 1;
-      dailyMap.set(day, existing);
-    });
-
-    const timeSeries = Array.from(dailyMap.values());
-
-    ResponseUtil.success(res, {
-      period: {
-        from: fromDate.toISOString(),
-        to: toDate.toISOString(),
-        label: period,
-      },
-      kpis: {
-        totalSales,
-        totalCommission,
-        totalDeliveryFees,
-        netSellerPayouts,
-        ordersCount,
-        completedOrdersCount,
-        cancelledOrdersCount,
-        averageOrderValue,
-        newCustomersCount,
-        newSellersCount,
-      },
-      topProducts: topProducts.map(p => ({
-        productId: p.productId,
-        name: p.productNameAr,
-        unitsSold: p._sum.quantity || 0,
-        revenue: p._sum.totalPrice || 0,
-      })),
-      topStores: enrichedTopStores,
-      timeSeries,
-    });
+    const period = (req.query.period as AnalyticsPeriod) || '30d';
+    const from = req.query.from ? String(req.query.from) : (req.query.startDate ? String(req.query.startDate) : undefined);
+    const to = req.query.to ? String(req.query.to) : (req.query.endDate ? String(req.query.endDate) : undefined);
+    const result = await AdminAnalyticsService.getOverview(period, from, to);
+    ResponseUtil.success(res, result);
   } catch (error) {
     next(error);
   }
@@ -5243,53 +5316,15 @@ router.get('/reports/analytics', async (req: Request, res: Response, next: NextF
 
 router.get('/reports/export-csv', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const type = (req.query.type as string) || 'sales';
-    const period = (req.query.period as string) || '30d';
-
-    let fromDate = new Date();
-    if (req.query.startDate && req.query.endDate) {
-      fromDate = new Date(req.query.startDate as string);
-    } else {
-      if (period === 'today') fromDate.setHours(0, 0, 0, 0);
-      else if (period === '7d') fromDate.setDate(fromDate.getDate() - 7);
-      else if (period === '30d') fromDate.setDate(fromDate.getDate() - 30);
-      else fromDate.setDate(fromDate.getDate() - 30);
-    }
-
-    const orders = await prisma.order.findMany({
-      where: { createdAt: { gte: fromDate } },
-      include: {
-        user: { select: { firstName: true, lastName: true, phone: true } },
-        sellerOrders: { include: { seller: { include: { stores: { select: { name: true } } } } } },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    let csvContent = '\uFEFF'; // UTF-8 BOM for Arabic support in Excel
-
-    if (type === 'commission') {
-      csvContent += 'رقم الطلب,تاريخ الطلب,العميل,المتجر,إجمالي الطلب (YER),عمولة المنصة (YER),مستحقات التاجر (YER)\n';
-      orders.forEach(o => {
-        const clientName = `"${o.user.firstName} ${o.user.lastName}"`;
-        o.sellerOrders.forEach(so => {
-          const storeName = `"${so.seller.stores[0]?.name || 'المتجر'}"`;
-          const dateStr = o.createdAt.toISOString().split('T')[0];
-          csvContent += `${o.orderNumber},${dateStr},${clientName},${storeName},${so.subtotal},${so.commissionAmount},${so.sellerPayout}\n`;
-        });
-      });
-    } else {
-      csvContent += 'رقم الطلب,تاريخ الطلب,العميل,رقم الجوال,الحالة,قيمة المنتجات (YER),رسوم التوصيل (YER),الإجمالي (YER)\n';
-      orders.forEach(o => {
-        const clientName = `"${o.user.firstName} ${o.user.lastName}"`;
-        const phone = o.user.phone || '';
-        const dateStr = o.createdAt.toISOString().split('T')[0];
-        csvContent += `${o.orderNumber},${dateStr},${clientName},${phone},${o.status},${o.subtotal},${o.deliveryFee},${o.total}\n`;
-      });
-    }
-
+    const format = (req.query.format as 'csv' | 'html') || 'csv';
+    const period = (req.query.period as AnalyticsPeriod) || '30d';
+    const from = req.query.from ? String(req.query.from) : (req.query.startDate ? String(req.query.startDate) : undefined);
+    const to = req.query.to ? String(req.query.to) : (req.query.endDate ? String(req.query.endDate) : undefined);
+    const type = (req.query.type as any) || 'sales';
+    const content = await AdminAnalyticsService.exportReport(format, period, from, to, type);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename=souqna_${type}_report_${new Date().toISOString().split('T')[0]}.csv`);
-    res.status(200).send(csvContent);
+    res.status(200).send(content);
   } catch (error) {
     next(error);
   }

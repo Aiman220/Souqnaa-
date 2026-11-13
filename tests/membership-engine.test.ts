@@ -6,6 +6,12 @@ import { MembershipBenefitEngine } from '../src/modules/membership/membership-be
 import { MembershipCacheService } from '../src/modules/membership/membership-cache.service';
 import { QualificationRulesConfig, CustomerMetricsSnapshot } from '../src/modules/membership/membership.types';
 import { OrderStatus, PaymentStatus, PaymentMethodType, RefundStatus } from '@prisma/client';
+import jwt from 'jsonwebtoken';
+import http from 'http';
+import { createApp } from '../src/app';
+import { config } from '../src/config';
+import { JwtUtil } from '../src/utils/jwt.util';
+import { redis } from '../src/database/redis';
 
 async function runComprehensiveMembershipTestSuite() {
   console.log('====================================================');
@@ -547,13 +553,188 @@ async function runComprehensiveMembershipTestSuite() {
       `No duplicate notifications spawned during concurrent execution (found: ${notifsAfterConcurrency.length})`
     );
 
+    // SCENARIO 15: Gold threshold is correctly evaluated
+    console.log('\n[Requirement 15] Gold threshold is correctly evaluated');
+    const qualifyingGoldOrder = await prisma.order.create({
+      data: {
+        orderNumber: `ORD-TEST-GOLD-${Date.now()}`,
+        userId: testUserId,
+        subtotal: 60000,
+        total: 60000,
+        currency: 'YER',
+        status: OrderStatus.DELIVERED,
+        deliveredAt: new Date(),
+        payment: {
+          create: {
+            method: PaymentMethodType.WALLET,
+            status: PaymentStatus.PAID,
+            amount: 60000,
+            currency: 'YER',
+            paidAt: new Date(),
+          },
+        },
+      },
+    });
+
+    const goldEvalResult = await MembershipEligibilityService.evaluateCustomerTier(testUserId, {
+      forceAuthoritativeRecalculation: true,
+    });
+    assert(
+      goldEvalResult.targetTierCode === 'GOLD' && goldEvalResult.membership.tier.level === 3,
+      'Customer upgraded to Gold (Level 3) when cumulative qualifying spend reaches 125,000 YER (threshold: 120,000 YER)',
+      `Actual Tier: ${goldEvalResult.targetTierCode}`
+    );
+
+    // SCENARIO 16: Platinum threshold is correctly evaluated
+    console.log('\n[Requirement 16] Platinum threshold is correctly evaluated');
+    const qualifyingPlatinumOrder = await prisma.order.create({
+      data: {
+        orderNumber: `ORD-TEST-PLATINUM-${Date.now()}`,
+        userId: testUserId,
+        subtotal: 130000,
+        total: 130000,
+        currency: 'YER',
+        status: OrderStatus.DELIVERED,
+        deliveredAt: new Date(),
+        payment: {
+          create: {
+            method: PaymentMethodType.WALLET,
+            status: PaymentStatus.PAID,
+            amount: 130000,
+            currency: 'YER',
+            paidAt: new Date(),
+          },
+        },
+      },
+    });
+
+    const platinumEvalResult = await MembershipEligibilityService.evaluateCustomerTier(testUserId, {
+      forceAuthoritativeRecalculation: true,
+    });
+    assert(
+      platinumEvalResult.targetTierCode === 'VIP_PLUS' && platinumEvalResult.membership.tier.level === 4,
+      'Customer upgraded to VIP+ Platinum (Level 4) when cumulative spend reaches 255,000 YER (threshold: 250,000 YER)',
+      `Actual Tier: ${platinumEvalResult.targetTierCode}`
+    );
+
+    // SCENARIO 17: Admin threshold changes are respected
+    console.log('\n[Requirement 17] Admin threshold changes are respected');
+    const goldTierRecord = await prisma.membershipTier.findUnique({ where: { code: 'GOLD' } });
+    if (goldTierRecord) {
+      // Temporarily set Platinum spend rule to 500,000 YER
+      const platinumTierRecord = await prisma.membershipTier.findUnique({ where: { code: 'VIP_PLUS' } });
+      if (platinumTierRecord) {
+        const originalPlatinumRules = platinumTierRecord.qualificationRules;
+        await prisma.membershipTier.update({
+          where: { code: 'VIP_PLUS' },
+          data: {
+            qualificationRules: JSON.stringify({
+              logic: 'ANY',
+              rules: [
+                { metric: 'COMPLETED_ORDERS', operator: 'GTE', value: 50 },
+                { metric: 'PERIOD_SPEND', operator: 'GTE', value: 500000 },
+              ],
+            }),
+          },
+        });
+
+        await MembershipEligibilityService.onTierConfigurationChanged();
+
+        const reEvalAfterThresholdChange = await MembershipEligibilityService.evaluateCustomerTier(testUserId, {
+          forceAuthoritativeRecalculation: true,
+        });
+
+        assert(
+          reEvalAfterThresholdChange.targetTierCode === 'GOLD',
+          'Customer tier adjusted to Gold after admin raised VIP+ Platinum threshold to 500,000 YER',
+          `Tier: ${reEvalAfterThresholdChange.targetTierCode}`
+        );
+
+        // Restore original VIP_PLUS rules
+        await prisma.membershipTier.update({
+          where: { code: 'VIP_PLUS' },
+          data: { qualificationRules: originalPlatinumRules },
+        });
+        await MembershipEligibilityService.onTierConfigurationChanged();
+      }
+    }
+
+    // SCENARIO 18: Cache invalidation works
+    console.log('\n[Requirement 18] Cache invalidation works');
+    const dummySummary = { tierCode: 'TEST', level: 99 };
+    await MembershipCacheService.setCustomerSummary(testUserId, dummySummary);
+    const cachedItem = await MembershipCacheService.getCustomerSummary(testUserId);
+    assert(cachedItem !== null && cachedItem.level === 99, 'Cache correctly stores customer summary');
+
+    await MembershipCacheService.invalidateCustomer(testUserId);
+    const postInvalidateItem = await MembershipCacheService.getCustomerSummary(testUserId);
+    assert(postInvalidateItem === null, 'invalidateCustomer successfully purges cached summary from Redis');
+
+    // SCENARIO 19: Customers cannot modify their own membership level through API requests
+    console.log('\n[Requirement 19] Customers cannot modify their own membership level through API requests');
+    const app = createApp();
+    const server = http.createServer(app);
+    const testPort = 4889;
+    await new Promise<void>((resolve) => server.listen(testPort, resolve));
+
+    try {
+      const { accessToken: customerToken, sessionId } = JwtUtil.generateTokens({
+        userId: testUserId,
+        role: 'CUSTOMER' as any,
+        email: testUserEmail,
+      });
+      await redis.set(`active_session:${testUserId}`, sessionId, 3600);
+
+      // Attempt 1: Customer tries to POST to customer membership endpoint to force upgrade
+      const postAttempt = await fetch(`http://localhost:${testPort}/api/v1/customers/me/membership`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${customerToken}`,
+        },
+        body: JSON.stringify({ level: 4, tierCode: 'VIP_PLUS' }),
+      });
+      assert(
+        postAttempt.status === 404 || postAttempt.status === 405,
+        `Customer cannot mutate membership via POST to /customers/me/membership (HTTP ${postAttempt.status})`
+      );
+
+      // Attempt 2: Customer tries to call admin override endpoint
+      const adminOverrideAttempt = await fetch(
+        `http://localhost:${testPort}/api/v1/admin/membership/customers/${testUserId}/override`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${customerToken}`,
+          },
+          body: JSON.stringify({ overrideTierId: 'any_id', reason: 'Self upgrade hack' }),
+        }
+      );
+      assert(
+        adminOverrideAttempt.status === 403,
+        `Customer token is rejected with 403 Forbidden on admin override endpoint (HTTP ${adminOverrideAttempt.status})`
+      );
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await new Promise((r) => setTimeout(r, 600));
+    }
+
     // Clean up test orders and user
     await prisma.notificationDelivery.deleteMany({ where: { notification: { userId: testUserId } } });
     await prisma.notification.deleteMany({ where: { userId: testUserId } });
     await prisma.membershipAuditLog.deleteMany({ where: { userId: testUserId } });
     await prisma.customerMembership.deleteMany({ where: { userId: testUserId } });
-    await prisma.payment.deleteMany({ where: { orderId: qualifyingSilverOrder.id } });
-    await prisma.order.delete({ where: { id: qualifyingSilverOrder.id } });
+    await prisma.payment.deleteMany({
+      where: {
+        orderId: { in: [qualifyingSilverOrder.id, qualifyingGoldOrder.id, qualifyingPlatinumOrder.id] },
+      },
+    });
+    await prisma.order.deleteMany({
+      where: {
+        id: { in: [qualifyingSilverOrder.id, qualifyingGoldOrder.id, qualifyingPlatinumOrder.id] },
+      },
+    });
     await prisma.user.delete({ where: { id: testUserId } });
     console.log('\n🧹 Test customer and transient artifacts safely cleaned up.');
   } catch (err: any) {
@@ -568,6 +749,7 @@ async function runComprehensiveMembershipTestSuite() {
   if (failed > 0) {
     process.exit(1);
   }
+  process.exit(0);
 }
 
 runComprehensiveMembershipTestSuite()

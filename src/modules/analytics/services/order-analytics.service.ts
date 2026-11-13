@@ -136,7 +136,9 @@ export class OrderAnalyticsService {
       refundRate,
       aov,
       averageFulfillmentHours,
+      avgFulfillmentHours: averageFulfillmentHours,
       averageDeliveryHours,
+      avgDeliveryHours: averageDeliveryHours,
     };
   }
 }

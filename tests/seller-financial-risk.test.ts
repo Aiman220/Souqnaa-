@@ -399,6 +399,8 @@ async function runSellerFinancialRiskTestSuite() {
     await prisma.$disconnect();
     if (failedTests > 0) {
       process.exit(1);
+    } else {
+      process.exit(0);
     }
   }
 }

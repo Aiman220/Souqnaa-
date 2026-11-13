@@ -300,6 +300,36 @@ async function runRemoteConfigTests() {
     assert(seasonalResolved.branding.platforms.android.iconUrl === '/uploads/branding/ramadan-lantern.png', 'Seasonal icon active within date window overrides android icon');
     assert(seasonalResolved.branding.platforms.android.deepLinkUrl === 'souqnaa://ramadan-offers', 'Seasonal deep link overrides android deep link');
 
+    // Test approved Customer App Icon persistence & audit trail
+    const orangeBranding = await remoteConfigService.updateBrandingConfig({
+      customerAppIcon: 'orange',
+    }, { id: 'admin-user-1', email: 'admin@souqnaa.ye' });
+    assert(orangeBranding.customerAppIcon === 'orange', 'Customer app icon updated to orange');
+
+    const customerIconSetting = await prisma.systemSetting.findUnique({
+      where: { key: 'customer_app_icon' },
+    });
+    assert(customerIconSetting?.value === 'orange', 'customer_app_icon persisted in PostgreSQL SystemSetting');
+
+    const customerIconAudit = await prisma.featureFlagAuditLog.findFirst({
+      where: { featureKey: 'customer_app_icon' },
+      orderBy: { createdAt: 'desc' },
+    });
+    assert(customerIconAudit !== null, 'Audit log recorded for customer_app_icon');
+    assert(customerIconAudit?.newValue === 'orange', 'Audit log new value matches orange');
+
+    // Test rejection of invalid customer app icon identifier
+    let threwInvalidIcon = false;
+    try {
+      await remoteConfigService.updateBrandingConfig({
+        customerAppIcon: 'unapproved_invalid_icon_xyz',
+      }, { id: 'admin-user-1', email: 'admin@souqnaa.ye' });
+    } catch (err: any) {
+      threwInvalidIcon = true;
+      assert(err.statusCode === 400, 'Invalid icon rejected with HTTP 400');
+    }
+    assert(threwInvalidIcon, 'updateBrandingConfig rejected invalid customer app icon identifier');
+
     // --- 11. Platform Wallet Accounts Configuration & Audit ---
     console.log('\n--- 11. Platform Wallet Accounts Configuration & Audit ---');
     const allPlatformWallets = await remoteConfigService.getPlatformWalletAccounts(undefined, true);

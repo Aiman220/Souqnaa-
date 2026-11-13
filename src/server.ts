@@ -13,6 +13,7 @@ import { CartAbandonmentJob } from './services/jobs/cart-abandonment.job';
 import { SellerReserveScheduler } from './services/jobs/seller-reserve.job';
 import { prisma } from './database/prisma';
 import { redis } from './database/redis';
+import { remoteConfigService } from './modules/remote-config/remote-config.service';
 
 const startServer = async () => {
   try {
@@ -25,6 +26,11 @@ const startServer = async () => {
 
     // Initialize Realtime WebSocket (Socket.io)
     SocketService.init(server);
+
+    // Initialize Remote Configuration & System Feature Flags (§40)
+    remoteConfigService.ensureInitialized().catch((err) => {
+      console.warn('[RemoteConfig] Deferred init warning:', err?.message);
+    });
 
     // Initialize Centralized SOUQNAA Notification Platform Scheduler (§53, §65)
     NotificationScheduler.get().start(30 * 1000);

@@ -372,104 +372,104 @@ export class SellerOrderPrintService {
         methodName.includes('Express') ||
         methodName.includes('⚡')
       ) {
-        deliveryMethodAr = 'الشحن السريع الفوري بين المحافظات (Express ⚡)';
+        deliveryMethodAr = 'الشحن السريع الفوري بين المحافظات';
         deliveryMethodEn = 'Express Inter-Governorate Delivery';
-        deliveryMethodBadgeAr = 'أسرع وصول ⚡';
-        deliveryMethodDescriptionAr = 'أولوية شحن فائقة، وصول مستعجل خلال 12-24 ساعة، مع تطبيق رسم الشحن السريع المعتمد من الخادم.';
-        deliveryPricingNoteAr = 'تشمل رسم الشحن السريع المعتمد رسمياً من الخادم (expressSurcharge).';
+        deliveryMethodBadgeAr = '';
+        deliveryMethodDescriptionAr = '';
+        deliveryPricingNoteAr = '';
       } else if (methodCode === 'pickup_point' || methodName.includes('نقطة توزيع') || methodName.includes('Pickup Point')) {
-        deliveryMethodAr = 'الاستلام من نقطة توزيع معتمدة (Pickup Point 📍)';
+        deliveryMethodAr = 'الاستلام من نقطة توزيع معتمدة';
         deliveryMethodEn = 'Designated Pickup Point';
-        deliveryMethodBadgeAr = 'وفر تكلفة التوصيل 🏷️';
-        deliveryMethodDescriptionAr = 'إمكانية الاستلام الذاتي من أقرب مركز لوجستي بالمحافظة مع خصم الاستلام.';
-        deliveryPricingNoteAr = 'رسوم مخفضة مع تطبيق خصم الاستلام الذاتي.';
+        deliveryMethodBadgeAr = '';
+        deliveryMethodDescriptionAr = '';
+        deliveryPricingNoteAr = '';
       } else if (methodCode === 'third_party_courier' || methodName.includes('شركات الشحن') || methodName.includes('Third-Party')) {
-        deliveryMethodAr = 'شركات الشحن والنقل السريع (Third-Party Courier 🚚)';
+        deliveryMethodAr = 'شركات الشحن والنقل السريع';
         deliveryMethodEn = 'Third-Party Courier';
-        deliveryMethodBadgeAr = 'توصيل للعنوان 📦';
-        deliveryMethodDescriptionAr = 'شحن مباشر حتى باب العنوان عبر شركات النقل والطرود.';
-        deliveryPricingNoteAr = 'تسعيرة التوصيل النهائي إلى باب العنوان المعتمدة.';
+        deliveryMethodBadgeAr = '';
+        deliveryMethodDescriptionAr = '';
+        deliveryPricingNoteAr = '';
       } else {
-        deliveryMethodAr = 'الشحن البري القياسي بين المحافظات (Standard Inter-Governorate)';
+        deliveryMethodAr = 'الشحن البري القياسي بين المحافظات';
         deliveryMethodEn = 'Standard Inter-Governorate Delivery';
-        deliveryMethodBadgeAr = 'شحن قياسي 🚛';
-        deliveryMethodDescriptionAr = 'المسار المعتمد، الناقل المعتمد، المسافة البرية الدقيقة بالكيلومتر، والوصول خلال 24-48 ساعة.';
-        deliveryPricingNoteAr = 'محسوبة بدقة من الخادم (رسم المسار + تعرفة الكيلومترات البرية).';
+        deliveryMethodBadgeAr = '';
+        deliveryMethodDescriptionAr = '';
+        deliveryPricingNoteAr = '';
       }
     }
     // 2. Intra-City Scheduled Delivery
     else if (rawScheduleType === 'SCHEDULED' || methodCode === 'scheduled' || methodName.includes('مجدول')) {
       const slot = parentOrder.deliveryTimeSlot || parentOrder.slotBooking?.timeSlot;
       const slotText = slot?.nameAr || (slot?.startTime && slot?.endTime ? `${slot.startTime} - ${slot.endTime}` : '');
-      deliveryMethodAr = slotText ? `التوصيل المجدول (${slotText})` : 'التوصيل المجدول (Scheduled Delivery 📅)';
+      deliveryMethodAr = slotText ? `التوصيل المجدول (${slotText})` : 'التوصيل المجدول';
       deliveryMethodEn = 'Scheduled Delivery';
-      deliveryMethodBadgeAr = 'موعد محجوز ⏰';
-      deliveryMethodDescriptionAr = 'توصيل مجدول في الموعد المحجوز مسبقاً من قبل العميل.';
-      deliveryPricingNoteAr = 'تسعيرة التوصيل المجدول المعتمدة من الخادم حسب الفترة.';
+      deliveryMethodBadgeAr = '';
+      deliveryMethodDescriptionAr = '';
+      deliveryPricingNoteAr = '';
     }
     // 3. Intra-City Express Delivery
     else if (isExpress || methodCode === 'express' || methodName.includes('فوري') || methodName.includes('إكسبرس')) {
-      deliveryMethodAr = 'التوصيل السريع الفوري (Express Delivery ⚡)';
+      deliveryMethodAr = 'التوصيل السريع الفوري';
       deliveryMethodEn = 'Express Immediate Delivery';
-      deliveryMethodBadgeAr = 'أسرع توصيل ⚡';
-      deliveryMethodDescriptionAr = 'أولوية شحن فائقة وتسليم فوري ومباشر للعميل في أسرع وقت.';
-      deliveryPricingNoteAr = 'تسعيرة التوصيل السريع الفوري المعتمدة من الخادم.';
+      deliveryMethodBadgeAr = '';
+      deliveryMethodDescriptionAr = '';
+      deliveryPricingNoteAr = '';
     }
     // 4. Same-Day Delivery
     else if (methodCode === 'same_day' || methodName.includes('نفس اليوم')) {
-      deliveryMethodAr = 'التوصيل في نفس اليوم (Same-Day Delivery 🚀)';
+      deliveryMethodAr = 'التوصيل في نفس اليوم';
       deliveryMethodEn = 'Same Day Delivery';
-      deliveryMethodBadgeAr = 'نفس اليوم 🚀';
-      deliveryMethodDescriptionAr = 'توصيل في نفس يوم الطلب خلال ساعات عمل المتجر.';
-      deliveryPricingNoteAr = 'تسعيرة التوصيل في نفس اليوم المعتمدة.';
+      deliveryMethodBadgeAr = '';
+      deliveryMethodDescriptionAr = '';
+      deliveryPricingNoteAr = '';
     }
     // 5. Store Pickup
     else if (methodCode === 'pickup' || methodCode === 'store_pickup' || methodName.includes('استلام من المتجر')) {
-      deliveryMethodAr = 'الاستلام من المتجر (Store Pickup 🏬)';
+      deliveryMethodAr = 'الاستلام من المتجر';
       deliveryMethodEn = 'Store Pickup';
-      deliveryMethodBadgeAr = 'استلام ذاتي 🏬';
-      deliveryMethodDescriptionAr = 'استلام العميل للطلب مباشرة من موقع المتجر.';
-      deliveryPricingNoteAr = 'بدون رسوم توصيل (مجاناً).';
+      deliveryMethodBadgeAr = '';
+      deliveryMethodDescriptionAr = '';
+      deliveryPricingNoteAr = '';
     }
     // 6. Seller-Managed Delivery
     else if (methodCode === 'seller_managed' || methodName.includes('إدارة البائع')) {
-      deliveryMethodAr = 'توصيل بإدارة المتجر (Seller-Managed Delivery 🛵)';
+      deliveryMethodAr = 'توصيل بإدارة المتجر';
       deliveryMethodEn = 'Seller-Managed Delivery';
-      deliveryMethodBadgeAr = 'إدارة المتجر 🛵';
-      deliveryMethodDescriptionAr = 'توصيل مخصص يتولى إدارته وتسليمه المتجر مباشرة للعميل.';
-      deliveryPricingNoteAr = 'رسوم التوصيل المحددة من المتجر.';
+      deliveryMethodBadgeAr = '';
+      deliveryMethodDescriptionAr = '';
+      deliveryPricingNoteAr = '';
     }
     // 7. Marketplace-Managed Shipping
     else if (methodCode === 'marketplace_managed' || methodName.includes('إدارة سوقنا')) {
-      deliveryMethodAr = 'شحن بإدارة منصة سوقناا (Marketplace Shipping 🚛)';
+      deliveryMethodAr = 'شحن بإدارة منصة سوقناا';
       deliveryMethodEn = 'Marketplace-Managed Shipping';
-      deliveryMethodBadgeAr = 'إدارة سوقناا 🚛';
-      deliveryMethodDescriptionAr = 'شحن لوجستي رسمي متكامل بإدارة شبكة مناديب سوقناا المعتمدين.';
-      deliveryPricingNoteAr = 'تسعيرة المنصة اللوجستية المعتمدة.';
+      deliveryMethodBadgeAr = '';
+      deliveryMethodDescriptionAr = '';
+      deliveryPricingNoteAr = '';
     }
     // 8. Hub-to-Hub Transport
     else if (methodCode === 'hub_to_hub' || methodName.includes('المحطات')) {
-      deliveryMethodAr = 'شحن بين المحطات والمراكز اللوجستية (Hub-to-Hub Transport 🏢)';
+      deliveryMethodAr = 'شحن بين المحطات والمراكز اللوجستية';
       deliveryMethodEn = 'Hub-to-Hub Transport';
-      deliveryMethodBadgeAr = 'بين المحطات 🏢';
-      deliveryMethodDescriptionAr = 'نقل لوجستي بين المراكز الرئيسية والمحطات التابعة للمنصة.';
-      deliveryPricingNoteAr = 'تسعيرة النقل اللوجستي المعتمدة بين المحطات.';
+      deliveryMethodBadgeAr = '';
+      deliveryMethodDescriptionAr = '';
+      deliveryPricingNoteAr = '';
     }
     // 9. Custom explicit method name
     else if (methodName.length > 0 && methodName !== 'غير محدد' && methodName !== 'null') {
       deliveryMethodAr = methodName;
       deliveryMethodEn = delivMethod?.nameEn || methodName;
-      deliveryMethodBadgeAr = 'توصيل قياسي 🛵';
-      deliveryMethodDescriptionAr = 'توصيل مباشر وفق المسافة البرية ووقت التجهيز.';
-      deliveryPricingNoteAr = 'محسوبة بدقة من الخادم وفق المسافة البرية.';
+      deliveryMethodBadgeAr = '';
+      deliveryMethodDescriptionAr = '';
+      deliveryPricingNoteAr = '';
     }
     // 10. Default Standard / ASAP Delivery
     else {
-      deliveryMethodAr = 'التوصيل القياسي (Standard / ASAP 🛵)';
+      deliveryMethodAr = 'التوصيل القياسي';
       deliveryMethodEn = 'Standard Delivery';
-      deliveryMethodBadgeAr = 'توصيل قياسي 🛵';
-      deliveryMethodDescriptionAr = 'توصيل مباشر داخل نطاق المدينة وفق المسافة البرية الدقيقة.';
-      deliveryPricingNoteAr = 'محسوبة بدقة من الخادم وفق المسافة البرية بالكيلومتر.';
+      deliveryMethodBadgeAr = '';
+      deliveryMethodDescriptionAr = '';
+      deliveryPricingNoteAr = '';
     }
 
     const interGovernorateRouteKey = String(
@@ -1402,9 +1402,6 @@ export class SellerOrderPrintService {
         <div class="meta-row"><span class="lbl">تاريخ ووقت الشراء:</span><span class="val">${d.orderDateFormattedAr}</span></div>
         <div class="meta-row"><span class="lbl">حالة معالجة الطلب:</span><span class="val" style="color:${d.orderStatusColor}; font-weight:800;">${d.orderStatusAr}</span></div>
         <div class="meta-row"><span class="lbl">طريقة التوصيل والشحن:</span><span class="val" style="font-weight:800;">${d.deliveryMethodAr}</span></div>
-        ${d.deliveryMethodBadgeAr ? `<div class="meta-row"><span class="lbl">شارة الشحن:</span><span class="val" style="font-weight:700; color:#0f766e; background:#ccfbf1; padding:1px 6px; border-radius:4px; display:inline-block;">${d.deliveryMethodBadgeAr}</span></div>` : ''}
-        ${d.deliveryMethodDescriptionAr ? `<div class="meta-row"><span class="lbl">وصف الشحن:</span><span class="val" style="font-size:11px; color:#166534;">${d.deliveryMethodDescriptionAr}</span></div>` : ''}
-        ${d.deliveryPricingNoteAr ? `<div class="meta-row"><span class="lbl">التسعيرة:</span><span class="val" style="font-size:11px; color:#0284c7; font-weight:600;">${d.deliveryPricingNoteAr}</span></div>` : ''}
         ${d.interGovernorateRouteKey ? `<div class="meta-row"><span class="lbl">المسار المعتمد:</span><span class="val" style="font-weight:700; color:#0f766e;">${d.interGovernorateRouteKey}</span></div>` : ''}
         ${d.carrierName ? `<div class="meta-row"><span class="lbl">الناقل اللوجستي:</span><span class="val">${d.carrierName}</span></div>` : ''}
         ${d.trackingNumber ? `<div class="meta-row"><span class="lbl">رقم التتبع:</span><span class="val" dir="ltr" style="font-family:monospace; font-weight:800; color:#ea580c;">${d.trackingNumber}</span></div>` : ''}

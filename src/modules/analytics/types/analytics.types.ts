@@ -139,7 +139,9 @@ export interface OrderLifecycleAnalytics {
   refundRate: number;
   aov: number;
   averageFulfillmentHours: number; // confirmed to shipped
+  avgFulfillmentHours?: number;
   averageDeliveryHours: number; // shipped to delivered
+  avgDeliveryHours?: number;
 }
 
 export interface CustomerAnalyticsSummary {
@@ -170,11 +172,14 @@ export interface CustomerAnalyticsSummary {
 export interface PromotionAnalyticsItem {
   id: string;
   name: string;
+  promotionName?: string;
   type: 'COUPON' | 'FLASH_SALE' | 'CAMPAIGN' | 'SELLER_PROMOTION' | 'FREE_DELIVERY';
+  promotionType?: string;
   status: string;
   usageCount: number;
   ordersGenerated: number;
   revenueGenerated: number;
+  attributedSales?: number;
   discountCost: number;
   commissionImpact: number;
   aov: number;

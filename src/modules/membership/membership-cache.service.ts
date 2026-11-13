@@ -70,4 +70,19 @@ export class MembershipCacheService {
       await redis.del(key);
     } catch (_) {}
   }
+
+  /**
+   * Invalidate all tiers and all customer membership caches.
+   */
+  public static async invalidateAll(): Promise<void> {
+    try {
+      await redis.del(this.TIERS_KEY);
+      if (typeof (redis as any).keys === 'function') {
+        const keys = await (redis as any).keys(`${this.CUSTOMER_PREFIX}*`);
+        if (keys && keys.length > 0) {
+          await (redis.del as any)(...keys);
+        }
+      }
+    } catch (_) {}
+  }
 }

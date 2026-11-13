@@ -176,10 +176,36 @@ export class DisputeService {
       );
     }
 
+    // Find or correlate related RefundRequest
+    let refundReq = refundRequestId
+      ? await prisma.refundRequest.findUnique({ where: { id: refundRequestId } })
+      : await prisma.refundRequest.findFirst({
+          where: { orderId: order.id, customerId },
+          orderBy: { createdAt: 'desc' },
+        });
+
     // Identify target seller
-    const targetSeller = order.sellerOrders[0]?.seller;
+    let targetSeller: { id: string; userId: string } | undefined = order.sellerOrders[0]?.seller;
+    if (!targetSeller && refundReq?.sellerId) {
+      const s = await prisma.seller.findUnique({
+        where: { id: refundReq.sellerId },
+        select: { id: true, userId: true },
+      });
+      if (s) targetSeller = s;
+    }
+
     if (!targetSeller) {
       throw new AppError('لا يوجد متجر مرتبط بهذا الطلب لمعالجة النزاع', 400);
+    }
+
+    if (!targetSeller.userId && targetSeller.id) {
+      const s = await prisma.seller.findUnique({
+        where: { id: targetSeller.id },
+        select: { userId: true },
+      });
+      if (s?.userId) {
+        targetSeller = { id: targetSeller.id, userId: s.userId };
+      }
     }
 
     // Validate evidence files
@@ -191,14 +217,6 @@ export class DisputeService {
         this.validateEvidenceFile(ev);
       }
     }
-
-    // Find or correlate related RefundRequest
-    let refundReq = refundRequestId
-      ? await prisma.refundRequest.findUnique({ where: { id: refundRequestId } })
-      : await prisma.refundRequest.findFirst({
-          where: { orderId: order.id, customerId },
-          orderBy: { createdAt: 'desc' },
-        });
 
     const result = await prisma.$transaction(async (tx) => {
       // Create canonical Dispute record

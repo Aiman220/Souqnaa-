@@ -141,6 +141,10 @@ export function formatProductForClient(product: any, campaignPresentation?: any)
     sellerId,
     images,
     store,
+    fulfillmentType: product.fulfillmentType || 'PHYSICAL',
+    isDigital: product.fulfillmentType === 'DIGITAL',
+    digitalDeliveryType: product.digitalDeliveryType || null,
+    digitalInstructions: product.digitalInstructions || null,
     campaignPresentation: presentation,
     campaign: presentation, // Backward-compatible alias matching Section 10 & 57
   };

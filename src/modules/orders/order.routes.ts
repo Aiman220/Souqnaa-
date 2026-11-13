@@ -48,6 +48,7 @@ import { FirstOrderPromotionReservationService } from '../promotions/services/fi
 import { FirstOrderShippingCalculation } from '../promotions/first-order-shipping.types';
 import { UniversalShippingPromotionService } from '../promotions/services/universal-shipping-promotion.service';
 import { ShippingPromotionReservationEngine } from '../promotions/services/shipping-promotion-reservation.engine';
+import { digitalFulfillmentService } from '../../services/digital/digital-fulfillment.service';
 import { ShippingFundingBreakdown } from '../promotions/universal-shipping-promotion.types';
 import { CartAbandonmentJob } from '../../services/jobs/cart-abandonment.job';
 
@@ -111,30 +112,30 @@ router.get('/checkout-payment-methods', async (req: Request, res: Response, next
       badge?: string;
       reason?: string;
     }> = [
-      {
-        code: 'SOUQNAAPAY',
-        nameAr: 'محفظة سوقناا باي (SOUQNApay)',
-        nameEn: 'SOUQNApay Wallet',
-        isAvailable: true,
-        badge: 'دفع فوري ⚡',
-      },
-      {
-        code: 'YEMENI_WALLET',
-        nameAr: 'المحافظ الإلكترونية اليمنية (حاسب، جوالي، ون كاش...)',
-        nameEn: 'Yemeni Electronic Wallets',
-        isAvailable: isWalletsActive,
-        badge: 'تحويل مباشر 🏦',
-        reason: isWalletsActive ? undefined : 'خدمة المحافظ الإلكترونية معطلة مؤقتاً',
-      },
-      {
-        code: 'COD',
-        nameAr: 'الدفع عند الاستلام (COD)',
-        nameEn: 'Cash on Delivery',
-        isAvailable: codEval.isCodAvailable,
-        badge: 'كاش 💵',
-        reason: codEval.reason,
-      },
-    ];
+        {
+          code: 'SOUQNAAPAY',
+          nameAr: 'محفظة سوقناا باي (SOUQNApay)',
+          nameEn: 'SOUQNApay Wallet',
+          isAvailable: true,
+          badge: 'دفع فوري ⚡',
+        },
+        {
+          code: 'YEMENI_WALLET',
+          nameAr: 'المحافظ الإلكترونية اليمنية (حاسب، جوالي، ون كاش...)',
+          nameEn: 'Yemeni Electronic Wallets',
+          isAvailable: isWalletsActive,
+          badge: 'تحويل مباشر 🏦',
+          reason: isWalletsActive ? undefined : 'خدمة المحافظ الإلكترونية معطلة مؤقتاً',
+        },
+        {
+          code: 'COD',
+          nameAr: 'الدفع عند الاستلام (COD)',
+          nameEn: 'Cash on Delivery',
+          isAvailable: codEval.isCodAvailable,
+          badge: 'كاش 💵',
+          reason: codEval.reason,
+        },
+      ];
 
     ResponseUtil.success(res, {
       paymentMethods: methods,
@@ -236,65 +237,6 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           })),
         };
         return ResponseUtil.success(res, enrichedExistingOrder, 'تم استرجاع الطلب المنفذ مسبقاً بنجاح');
-      }
-    }
-
-    // 1. Resolve Address with fallback
-    let address = null;
-    if (addressId) {
-      address = await prisma.address.findFirst({
-        where: { id: addressId, userId: req.user!.userId },
-        include: { city: true, district: true },
-      });
-    }
-    if (!address) {
-      address = await prisma.address.findFirst({
-        where: { userId: req.user!.userId },
-        include: { city: true, district: true },
-        orderBy: { isDefault: 'desc' },
-      });
-    }
-    if (!address) {
-      if (process.env.NODE_ENV === 'production') {
-        throw new AppError('يرجى تحديد أو إضافة عنوان توصيل لإتمام الطلب.', 400, 'ADDRESS_REQUIRED');
-      }
-      let defaultCity = await prisma.city.findFirst();
-      if (!defaultCity) {
-        let defaultCountry = await prisma.country.findFirst();
-        if (!defaultCountry) {
-          defaultCountry = await prisma.country.create({
-            data: { code: 'YE', nameAr: 'الجمهورية اليمنية', nameEn: 'Yemen' },
-          });
-        }
-        defaultCity = await prisma.city.create({
-          data: { nameAr: 'صنعاء', nameEn: 'Sanaa', countryId: defaultCountry.id },
-        });
-      }
-      address = await prisma.address.create({
-        data: {
-          userId: req.user!.userId,
-          recipientName: req.user!.email?.split('@')[0] || 'عميل سوقناا',
-          recipientPhone: '770000000',
-          street: 'شارع الزبيري',
-          cityId: defaultCity.id,
-          isDefault: true,
-        },
-        include: { city: true, district: true },
-      });
-    }
-
-    const isCityDiscoveryEnabled = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
-      userId: req.user!.userId,
-    });
-
-    if (isCityDiscoveryEnabled && address) {
-      const match = supportedAreasService.isAddressSupported(address);
-      if (!match.isSupported) {
-        throw new AppError(
-          match.rejectionReasonAr || 'عنوان التوصيل المحدد يقع خارج نطاق التوصيل المدعوم حالياً في اليمن',
-          400,
-          'UNSUPPORTED_DELIVERY_AREA'
-        );
       }
     }
 
@@ -401,6 +343,75 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
       }
     }
 
+    // 0. Authoritative Product Fulfillment Classification (Physical vs Digital)
+    // §33: Backend never trusts client-submitted delivery fee or fulfillment type.
+    const isItemDigital = (item: any) =>
+      item.product?.fulfillmentType === 'DIGITAL' || item.fulfillmentType === 'DIGITAL';
+    const hasPhysicalItems = orderCheckoutItems.some((it) => !isItemDigital(it));
+    const isDigitalOnly = !hasPhysicalItems;
+    const hasDigitalItems = orderCheckoutItems.some((it) => isItemDigital(it));
+
+    // 1. Resolve Delivery Address with fallback (ONLY required for physical items!)
+    let address = null;
+    if (hasPhysicalItems) {
+      if (addressId) {
+        address = await prisma.address.findFirst({
+          where: { id: addressId, userId: req.user!.userId },
+          include: { city: true, district: true },
+        });
+      }
+      if (!address) {
+        address = await prisma.address.findFirst({
+          where: { userId: req.user!.userId },
+          include: { city: true, district: true },
+          orderBy: { isDefault: 'desc' },
+        });
+      }
+      if (!address) {
+        if (process.env.NODE_ENV === 'production') {
+          throw new AppError('يرجى تحديد أو إضافة عنوان توصيل لإتمام طلب المنتجات المادية.', 400, 'ADDRESS_REQUIRED');
+        }
+        let defaultCity = await prisma.city.findFirst();
+        if (!defaultCity) {
+          let defaultCountry = await prisma.country.findFirst();
+          if (!defaultCountry) {
+            defaultCountry = await prisma.country.create({
+              data: { code: 'YE', nameAr: 'الجمهورية اليمنية', nameEn: 'Yemen' },
+            });
+          }
+          defaultCity = await prisma.city.create({
+            data: { nameAr: 'صنعاء', nameEn: 'Sanaa', countryId: defaultCountry.id },
+          });
+        }
+        address = await prisma.address.create({
+          data: {
+            userId: req.user!.userId,
+            recipientName: req.user!.email?.split('@')[0] || 'عميل سوقناا',
+            recipientPhone: '770000000',
+            street: 'شارع الزبيري',
+            cityId: defaultCity.id,
+            isDefault: true,
+          },
+          include: { city: true, district: true },
+        });
+      }
+
+      const isCityDiscoveryEnabled = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery', {
+        userId: req.user!.userId,
+      });
+
+      if (isCityDiscoveryEnabled && address) {
+        const match = supportedAreasService.isAddressSupported(address);
+        if (!match.isSupported) {
+          throw new AppError(
+            match.rejectionReasonAr || 'عنوان التوصيل المحدد يقع خارج نطاق التوصيل المدعوم حالياً في اليمن',
+            400,
+            'UNSUPPORTED_DELIVERY_AREA'
+          );
+        }
+      }
+    }
+
     // Map PaymentMethod
     let mappedPaymentMethod: PaymentMethodType = PaymentMethodType.CASH_ON_DELIVERY;
     const pmUpper = String(paymentMethod || '').toUpperCase();
@@ -457,6 +468,13 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
 
     // 2. Payment Methods Guard
     if (mappedPaymentMethod === PaymentMethodType.CASH_ON_DELIVERY) {
+      if (isDigitalOnly) {
+        throw new AppError(
+          'منتجات التسليم الرقمي تتطلب وسيلة دفع إلكترونية مؤكدة (محفظة سوقناا أو المحافظ الرقمية).',
+          400,
+          'DIGITAL_COD_NOT_ALLOWED'
+        );
+      }
       const isCodActive = await remoteConfigService.isFeatureActive('cash_on_delivery', evaluationContext);
       if (!isCodActive) {
         throw new AppError('طريقة الدفع عند الاستلام معطلة حالياً، يرجى اختيار طريقة دفع بديلة.', 400, 'FEATURE_DISABLED');
@@ -620,33 +638,118 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
       if (s.riskProfile?.newOrdersPaused || s.isFinanciallyRestricted) {
         const storeName = s.stores[0]?.name || 'أحد المتاجر';
         throw new AppError(
-          `المتجر "${storeName}" متوقف مؤقتاً عن استقبال طلبات جديدة لتجاوز السقف المالي للمخاطر (${s.financialRestrictionReason || 'تقييد مالي نشط'}). يرجى إزالة منتجات هذا المتجر للمتابعة.`,
+          `المتجر "${storeName}" متوقف مؤقتاً عن استقبال طلبات جديدة حالياً. يرجى إزالة منتجات هذا المتجر للمتابعة.`,
           400,
-          'SELLER_NEW_ORDERS_PAUSED'
+          'SELLER_NEW_ORDERS_PAUSED',
+          undefined,
+          {
+            ar: `المتجر "${storeName}" متوقف مؤقتاً عن استقبال طلبات جديدة حالياً. يرجى إزالة منتجات هذا المتجر للمتابعة.`,
+            en: `Store "${storeName}" is temporarily not accepting new orders at this time. Please remove this store's items to proceed.`,
+          }
         );
       }
     }
 
-    let quote;
-    try {
-      quote = await deliveryQuoteService.createQuote({
-        customerAddressId: address.id,
-        sellerOrders: sellerOrdersInput,
-        isExpress,
-        deliveryScheduleType: finalScheduleType as any,
-        deliveryDate,
-        deliveryTimeSlotId,
+    let quote: any;
+    if (isDigitalOnly) {
+      quote = {
+        deliveryAvailable: true,
+        isDigitalOnly: true,
+        totalDeliveryFee: 0,
+        currency: config.marketplace.currency || 'YER',
+        policy: config.marketplace.multiVendorPolicy,
+        slotFee: 0,
+        storesStatus: [],
+        standardAvailable: true,
+        scheduledAvailable: false,
+        expressAvailable: false,
+        sellerQuotes: Array.from(sellerGroups.keys()).map((sellerId) => ({
+          sellerId,
+          storeId: sellerGroups.get(sellerId)?.[0]?.product?.storeId || '',
+          storeName: 'التسليم الرقمي',
+          deliveryFee: 0,
+          originalDeliveryFee: 0,
+          baseFee: 0,
+          extraSellerFee: 0,
+          weightFee: 0,
+          expressFee: 0,
+          slotFee: 0,
+          deliveryDiscount: 0,
+          deliveryAvailable: true,
+          zoneId: null,
+          zoneName: 'التسليم الرقمي',
+          distanceKm: 0,
+          durationMinutes: 0,
+          currency: config.marketplace.currency || 'YER',
+          pricingVersion: 'digital-v1',
+          isExpress: false,
+          isDigital: true,
+        })),
+      };
+    } else {
+      // Mixed or physical-only order
+      // Separate physical sellers and digital-only sellers
+      const physicalSellerOrdersInput = sellerOrdersInput.filter((so) => {
+        const items = sellerGroups.get(so.sellerId) || [];
+        return items.some((it) => !isItemDigital(it));
       });
-    } catch (err: any) {
-      throw new AppError(err.message || 'فشل في حساب رسوم التوصيل', err.statusCode || 400);
-    }
 
-    if (!quote.deliveryAvailable) {
-      const unserviceableQuote = quote.sellerQuotes?.find((q: any) => !q.deliveryAvailable);
-      const explanation = unserviceableQuote
-        ? `المتجر "${unserviceableQuote.storeName || 'المحدد'}" لا يمكنه التوصيل إلى عنوانك المحدد (${address?.city?.nameAr || 'الموقع المختار'})`
-        : (quote.storeWarning || 'عنوان التوصيل خارج نطاق التوصيل المسموح به لواحد أو أكثر من المتاجر المشاركة في الطلب');
-      throw new AppError(explanation, 400, 'OUTSIDE_DELIVERY_AREA');
+      try {
+        const physicalQuote = await deliveryQuoteService.createQuote({
+          customerAddressId: address!.id,
+          sellerOrders: physicalSellerOrdersInput,
+          isExpress,
+          deliveryScheduleType: finalScheduleType as any,
+          deliveryDate,
+          deliveryTimeSlotId,
+        });
+
+        if (!physicalQuote.deliveryAvailable) {
+          const unserviceableQuote = physicalQuote.sellerQuotes?.find((q: any) => !q.deliveryAvailable);
+          const explanation = unserviceableQuote
+            ? `المتجر "${unserviceableQuote.storeName || 'المحدد'}" لا يمكنه التوصيل إلى عنوانك المحدد (${address?.city?.nameAr || 'الموقع المختار'})`
+            : (physicalQuote.storeWarning || 'عنوان التوصيل خارج نطاق التوصيل المسموح به لواحد أو أكثر من المتاجر المشاركة في الطلب');
+          throw new AppError(explanation, 400, 'OUTSIDE_DELIVERY_AREA');
+        }
+
+        // Merge digital seller quotes (0 fee) with physical seller quotes
+        const mergedQuotes = [...physicalQuote.sellerQuotes];
+        for (const sellerId of sellerGroups.keys()) {
+          const items = sellerGroups.get(sellerId) || [];
+          const hasPhysical = items.some((it) => !isItemDigital(it));
+          if (!hasPhysical) {
+            mergedQuotes.push({
+              sellerId,
+              storeId: items[0]?.product?.storeId || '',
+              storeName: 'التسليم الرقمي',
+              deliveryFee: 0,
+              baseFee: 0,
+              extraSellerFee: 0,
+              weightFee: 0,
+              expressFee: 0,
+              slotFee: 0,
+              deliveryDiscount: 0,
+              deliveryAvailable: true,
+              zoneId: null,
+              zoneName: 'التسليم الرقمي',
+              distanceKm: 0,
+              durationMinutes: 0,
+              currency: config.marketplace.currency || 'YER',
+              pricingVersion: 'digital-v1',
+              isExpress: false,
+              isDigital: true,
+            } as any);
+          }
+        }
+
+        quote = {
+          ...physicalQuote,
+          sellerQuotes: mergedQuotes,
+          totalDeliveryFee: physicalQuote.totalDeliveryFee, // delivery fee is strictly for physical items only!
+        };
+      } catch (err: any) {
+        throw new AppError(err.message || 'فشل في حساب رسوم التوصيل', err.statusCode || 400);
+      }
     }
 
     // 1.1 Universal Shipping Promotions & First-Order Free Shipping Authoritative Evaluation & Reservation
@@ -686,7 +789,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
       );
       const sellerCountMap = new Map(sellerPreviousCounts.map((s) => [s.sellerId, s.count]));
 
-      const rawSellerDeliveries = quote.sellerQuotes.map((sq) => ({
+      const rawSellerDeliveries = quote.sellerQuotes.map((sq: any) => ({
         sellerId: sq.sellerId,
         deliveryFee: sq.deliveryFee,
         deliveryZone: sq.zoneName || undefined,
@@ -768,7 +871,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
             deliveryMethod: deliveryMethodCode || finalScheduleType,
             deliveryZoneId: quote.sellerQuotes[0]?.zoneId || null,
             deliveryZoneName: quote.sellerQuotes[0]?.zoneName || null,
-            sellerQuotes: quote.sellerQuotes.map((sq) => ({
+            sellerQuotes: quote.sellerQuotes.map((sq: any) => ({
               sellerId: sq.sellerId,
               deliveryFee: sq.deliveryFee,
             })),
@@ -787,10 +890,10 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
     const requestedVoucherCodes: string[] = rawVoucherCodes
       ? (Array.isArray(rawVoucherCodes) ? rawVoucherCodes : [rawVoucherCodes])
       : cart?.appliedVouchers
-      ? cart.appliedVouchers.split(',').map((c: string) => c.trim())
-      : cart?.couponCode
-      ? [cart.couponCode]
-      : [];
+        ? cart.appliedVouchers.split(',').map((c: string) => c.trim())
+        : cart?.couponCode
+          ? [cart.couponCode]
+          : [];
 
     const cartEvalItems: CartEvaluationItem[] = orderCheckoutItems.map((it) => ({
       id: it.id,
@@ -826,7 +929,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
         customerId: req.user!.userId,
         items: cartEvalItems,
         shippingFee: quote.totalDeliveryFee,
-        sellerDeliveryFees: quote.sellerQuotes.map((sq) => ({
+        sellerDeliveryFees: quote.sellerQuotes.map((sq: any) => ({
           sellerId: sq.sellerId,
           deliveryFee: sq.deliveryFee,
         })),
@@ -994,7 +1097,9 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           displayOrderNumber: orderNumberData.displayOrderNumber,
           idempotencyKey: idempotencyKey || null,
           userId: req.user!.userId,
-          deliveryAddressId: address.id,
+          deliveryAddressId: address ? address.id : null,
+          isDigitalOnly,
+          hasDigitalItems,
           deliveryMethodId: parentDeliveryMethodId || null,
           status: OrderStatus.PENDING,
           currency: 'YER',
@@ -1036,21 +1141,23 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
 
       const sellerOrdersList: Array<{ id: string; sellerId: string; sellerOrderNumber: string; sellerSubtotal: number }> = [];
 
-      // 2. Create immutable Address Snapshot
-      await tx.orderDeliveryAddress.create({
-        data: {
-          orderId: createdOrder.id,
-          recipientName: address.recipientName,
-          recipientPhone: address.recipientPhone,
-          street: address.street,
-          buildingNumber: address.buildingNumber,
-          apartmentNumber: address.apartmentNumber,
-          cityName: address.city?.nameAr ?? 'صنعاء',
-          districtName: address.district?.nameAr ?? null,
-          latitude: address.latitude,
-          longitude: address.longitude,
-        },
-      });
+      // 2. Create immutable Address Snapshot (only if physical delivery address exists)
+      if (address) {
+        await tx.orderDeliveryAddress.create({
+          data: {
+            orderId: createdOrder.id,
+            recipientName: address.recipientName,
+            recipientPhone: address.recipientPhone,
+            street: address.street,
+            buildingNumber: address.buildingNumber,
+            apartmentNumber: address.apartmentNumber,
+            cityName: address.city?.nameAr ?? 'صنعاء',
+            districtName: address.district?.nameAr ?? null,
+            latitude: address.latitude,
+            longitude: address.longitude,
+          },
+        });
+      }
 
       // 3. Create Status History
       await tx.orderStatusHistory.create({
@@ -1103,7 +1210,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
 
         const sellerAlloc = (universalCalculation?.sellerBreakdown?.find((b: any) => b.sellerId === sellerId)) ||
           (firstOrderCalculation?.sellerBreakdown?.find((b) => b.sellerId === sellerId));
-        const sq = quote.sellerQuotes.find((q) => q.sellerId === sellerId);
+        const sq = quote.sellerQuotes.find((q: any) => q.sellerId === sellerId);
         const sellerBreakdown = voucherCalcResult?.sellerBreakdowns?.[sellerId];
         const sellerVoucherDiscount = sellerBreakdown?.sellerDiscount || 0;
         const sellerPlatformDiscount = sellerBreakdown?.platformDiscount || 0;
@@ -1141,12 +1248,18 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
 
         const sellerDeliveryMethod = resolvedSellerDeliveryMethods.get(sellerId) || defaultDeliveryMethod;
 
+        const sellerHasPhysical = items.some((it) => !isItemDigital(it));
+        const sellerIsDigitalOnly = !sellerHasPhysical;
+        const sellerHasDigital = items.some((it) => isItemDigital(it));
+
         const sellerOrder = await tx.sellerOrder.create({
           data: {
             orderId: createdOrder.id,
             sellerId,
             sellerOrderNumber,
             subOrderIndex,
+            isDigitalOnly: sellerIsDigitalOnly,
+            hasDigitalItems: sellerHasDigital,
             deliveryMethodId: sellerDeliveryMethod?.id || null,
             status: SellerOrderStatus.PENDING,
             subtotal: sellerSubtotal,
@@ -1206,6 +1319,8 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           const itemTax = taxResult.breakdown.find((b) => b.itemId === i.id);
           const itemTaxAmount = itemTax ? itemTax.taxAmount : 0;
 
+          const itemIsDigital = isItemDigital(i);
+
           const createdOrderItem = await tx.orderItem.create({
             data: {
               sellerOrderId: sellerOrder.id,
@@ -1218,6 +1333,8 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
               totalPrice: unitPrice * i.quantity,
               taxAmount: itemTaxAmount,
               voucherDiscountAmount: itemVoucherDiscount,
+              fulfillmentType: itemIsDigital ? 'DIGITAL' : 'PHYSICAL',
+              digitalFulfillmentStatus: itemIsDigital ? 'PENDING' : null,
               isFlashSale: i.isFlashSale ?? false,
               campaignId: flashItemMeta?.campaignId || null,
               flashSaleItemId: i.flashSaleItemId || null,
@@ -1230,6 +1347,21 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
             },
           });
           orderItemMap.set(i.id, createdOrderItem.id);
+
+          if (itemIsDigital) {
+            await tx.digitalFulfillment.create({
+              data: {
+                orderItemId: createdOrderItem.id,
+                orderId: createdOrder.id,
+                sellerOrderId: sellerOrder.id,
+                productId: i.productId,
+                customerId: req.user!.userId,
+                deliveryType: i.product.digitalDeliveryType || 'CODE',
+                status: 'PENDING',
+                idempotencyKey: `init_df_${createdOrderItem.id}`,
+              },
+            });
+          }
 
           // Tag allocations with orderItemId
           for (const alloc of itemAllocations) {
@@ -1579,7 +1711,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
 
     // Save DeliveryQuoteSnapshots per seller order
     for (const so of createdSellerOrders) {
-      const sq = quote.sellerQuotes.find((q) => q.sellerId === so.sellerId);
+      const sq = quote.sellerQuotes.find((q: any) => q.sellerId === so.sellerId);
       if (sq) {
         const sellerAlloc = (universalCalculation?.sellerBreakdown?.find((b: any) => b.sellerId === so.sellerId)) ||
           (firstOrderCalculation?.sellerBreakdown?.find((b) => b.sellerId === so.sellerId));
@@ -1617,6 +1749,30 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
       CartAbandonmentJob.onCheckoutCompleted(req.user!.userId, newOrder.id).catch(console.error);
     }
 
+    // Auto-fulfill digital items if order is already paid (e.g. SOUQNApay instant debit)
+    const isWalletPayment = mappedPaymentMethod === PaymentMethodType.WALLET;
+    if (isWalletPayment && hasDigitalItems) {
+      const digitalItemsToFulfill = await prisma.orderItem.findMany({
+        where: {
+          sellerOrder: { orderId: newOrder.id },
+          fulfillmentType: 'DIGITAL',
+        },
+      });
+      for (const dItem of digitalItemsToFulfill) {
+        try {
+          await digitalFulfillmentService.fulfillDigitalItem({
+            orderItemId: dItem.id,
+            actorId: req.user!.userId,
+            actorRole: 'CUSTOMER',
+            ipAddress: req.ip,
+            userAgent: req.headers['user-agent'],
+          });
+        } catch (err: any) {
+          console.warn('[DigitalFulfillment] auto-fulfill error:', err.message);
+        }
+      }
+    }
+
     const order = newOrder;
 
     // Fetch full order for response
@@ -1633,10 +1789,23 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
                     id: true,
                     nameAr: true,
                     nameEn: true,
+                    fulfillmentType: true,
+                    digitalDeliveryType: true,
+                    digitalInstructions: true,
                     images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
                   },
                 },
                 variant: { select: { id: true, nameAr: true, nameEn: true, sku: true, price: true, image: true } },
+                digitalFulfillment: {
+                  select: {
+                    id: true,
+                    deliveryType: true,
+                    status: true,
+                    maskedPayload: true,
+                    downloadExpiresAt: true,
+                    fulfilledAt: true,
+                  },
+                },
               },
             },
           },
@@ -1704,7 +1873,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           amount: fullOrder.total,
         });
       }
-    } catch (_) {}
+    } catch (_) { }
 
     // Centralized Domain Notification Event Dispatches (§1 - SOUQNAA NOTIFICATION PLATFORM)
     const sellerUserIds: string[] = [];
@@ -1773,7 +1942,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           }
         }
       }
-    } catch (_) {}
+    } catch (_) { }
 
     try {
       const userSettingsRec = await prisma.systemSetting.findUnique({
@@ -1783,22 +1952,22 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
       if (userSettingsRec?.value) {
         try {
           userSettings = JSON.parse(userSettingsRec.value);
-        } catch (_) {}
+        } catch (_) { }
       }
       const shouldSendInvoiceEmail = userSettings.orderInvoiceEmail !== false;
       const customerEmail = req.user?.email || (fullOrder as any)?.user?.email;
       if (shouldSendInvoiceEmail && customerEmail && fullOrder) {
-        OrderInvoiceService.sendInvoiceEmail(fullOrder, customerEmail, 'ar').catch(() => {});
+        OrderInvoiceService.sendInvoiceEmail(fullOrder, customerEmail, 'ar').catch(() => { });
       }
-    } catch (_) {}
+    } catch (_) { }
 
     ResponseUtil.created(res, fullOrder, 'تم إنشاء الطلب بنجاح');
   } catch (error) {
     if (universalReservationId) {
-      ShippingPromotionReservationEngine.release({ reservationId: universalReservationId }).catch(() => {});
+      ShippingPromotionReservationEngine.release({ reservationId: universalReservationId }).catch(() => { });
     }
     if (firstOrderReservationId) {
-      FirstOrderPromotionReservationService.releaseReservation(firstOrderReservationId).catch(() => {});
+      FirstOrderPromotionReservationService.releaseReservation(firstOrderReservationId).catch(() => { });
     }
     next(error);
   }
@@ -2028,7 +2197,7 @@ router.get('/summary', async (req: Request, res: Response, next: NextFunction) =
       try {
         const parsed = JSON.parse(cached);
         return ResponseUtil.success(res, parsed);
-      } catch (_) {}
+      } catch (_) { }
     }
 
     // 1. Fetch unread notifications referencing customer's orders
@@ -2286,7 +2455,7 @@ router.get('/summary', async (req: Request, res: Response, next: NextFunction) =
     const payload = { summaries, lastUpdatedAt: nowIso };
     try {
       await redis.set(cacheKey, JSON.stringify(payload), 30);
-    } catch (_) {}
+    } catch (_) { }
 
     ResponseUtil.success(res, payload);
   } catch (error) {
@@ -2494,7 +2663,7 @@ router.post('/mark-filter-read', async (req: Request, res: Response, next: NextF
         markedCount,
         timestamp: new Date().toISOString(),
       });
-    } catch (_) {}
+    } catch (_) { }
 
     ResponseUtil.success(res, { markedCount }, 'تم تحديث حالة القراءة بنجاح');
   } catch (error) {
@@ -2569,7 +2738,7 @@ router.post('/:id/read', async (req: Request, res: Response, next: NextFunction)
         orderId: order.id,
         timestamp: new Date().toISOString(),
       });
-    } catch (_) {}
+    } catch (_) { }
 
     ResponseUtil.success(
       res,
@@ -2836,10 +3005,23 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
                     id: true,
                     nameAr: true,
                     nameEn: true,
+                    fulfillmentType: true,
+                    digitalDeliveryType: true,
+                    digitalInstructions: true,
                     images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
                   },
                 },
                 variant: { select: { id: true, nameAr: true, nameEn: true, sku: true, price: true, image: true } },
+                digitalFulfillment: {
+                  select: {
+                    id: true,
+                    deliveryType: true,
+                    status: true,
+                    maskedPayload: true,
+                    downloadExpiresAt: true,
+                    fulfilledAt: true,
+                  },
+                },
               },
             },
             deliveryMethod: true,
@@ -2927,6 +3109,79 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
       sellerOrders: sellerOrdersWithDisputes,
       disputes,
       isUnread: Boolean(unreadNotif),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ==============================================================================
+// 3.0 SECURE DIGITAL ITEM RETRIEVAL & CODE REVEAL
+// ==============================================================================
+router.get('/:id/digital-items/:itemId/reveal', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { itemId } = req.params;
+    const result = await digitalFulfillmentService.getCustomerDigitalCode({
+      orderItemId: String(itemId),
+      customerId: req.user!.userId,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+    ResponseUtil.success(res, result, 'تم استرجاع بيانات التسليم الرقمي بنجاح');
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/:id/digital-items', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params.id);
+    const order = await prisma.order.findFirst({
+      where: {
+        OR: [{ id }, { orderNumber: id }],
+        userId: req.user!.userId,
+      },
+      include: {
+        payment: true,
+        sellerOrders: {
+          include: {
+            items: {
+              where: { fulfillmentType: 'DIGITAL' },
+              include: {
+                product: {
+                  select: {
+                    id: true,
+                    nameAr: true,
+                    nameEn: true,
+                    digitalDeliveryType: true,
+                    digitalInstructions: true,
+                  },
+                },
+                digitalFulfillment: {
+                  select: {
+                    id: true,
+                    deliveryType: true,
+                    status: true,
+                    maskedPayload: true,
+                    downloadExpiresAt: true,
+                    fulfilledAt: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!order) throw new AppError('الطلب غير موجود', 404);
+
+    const digitalItems = (order.sellerOrders || []).flatMap((so) => so.items || []);
+    ResponseUtil.success(res, {
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      isPaymentPaid: order.payment?.status === PaymentStatus.PAID,
+      items: digitalItems,
     });
   } catch (error) {
     next(error);
@@ -3197,7 +3452,7 @@ router.post('/:id/cancellation-request', async (req: Request, res: Response, nex
               sellerOrderId: so.id,
               reason,
             })
-          ).catch(() => {});
+          ).catch(() => { });
         }
       }
 
@@ -3223,7 +3478,7 @@ router.post('/:id/cancellation-request', async (req: Request, res: Response, nex
         changedByRole: 'CUSTOMER',
         extra: { previousStatus: order.status },
       });
-    } catch (_) {}
+    } catch (_) { }
 
     ResponseUtil.created(
       res,
@@ -3508,7 +3763,7 @@ router.post('/:id/mock-pay', async (req: Request, res: Response, next: NextFunct
           status: 'PAID',
         });
       }
-    } catch (_) {}
+    } catch (_) { }
 
     ResponseUtil.success(res, updatedOrder, 'تم تسجيل الدفع بنجاح. الطلب الآن بانتظار قبول المتجر');
   } catch (error) {
@@ -3557,16 +3812,16 @@ router.post(['/:id/return-request', '/:id/return'], async (req: Request, res: Re
       const targetSellerId = targetSellerOrder?.sellerId || order.sellerOrders[0]?.sellerId;
       const requestedAmt = targetSellerOrder
         ? Math.max(
-            0,
-            parseFloat(
-              (
-                targetSellerOrder.subtotal +
-                (targetSellerOrder.customerDeliveryCharge ?? targetSellerOrder.deliveryFee ?? 0) +
-                (targetSellerOrder.taxAmount ?? 0) -
-                (targetSellerOrder.voucherDiscountAmount ?? 0)
-              ).toFixed(2)
-            )
+          0,
+          parseFloat(
+            (
+              targetSellerOrder.subtotal +
+              (targetSellerOrder.customerDeliveryCharge ?? targetSellerOrder.deliveryFee ?? 0) +
+              (targetSellerOrder.taxAmount ?? 0) -
+              (targetSellerOrder.voucherDiscountAmount ?? 0)
+            ).toFixed(2)
           )
+        )
         : Number(order.total || order.subtotal);
 
       // Create ReturnRequest with PENDING status for seller review
@@ -3613,25 +3868,25 @@ router.post(['/:id/return-request', '/:id/return'], async (req: Request, res: Re
             currency: order.currency || 'YER',
             items: targetSellerOrder?.items && targetSellerOrder.items.length > 0
               ? {
-                  create: targetSellerOrder.items.map((it) => ({
-                    orderItemId: it.id,
-                    productId: it.productId,
-                    variantId: it.variantId || null,
-                    quantity: it.quantity,
-                    requestedAmount: it.totalPrice,
-                  })),
-                }
+                create: targetSellerOrder.items.map((it) => ({
+                  orderItemId: it.id,
+                  productId: it.productId,
+                  variantId: it.variantId || null,
+                  quantity: it.quantity,
+                  requestedAmount: it.totalPrice,
+                })),
+              }
               : undefined,
             evidence: evidenceList.length > 0
               ? {
-                  create: evidenceList.map((ev) => ({
-                    uploadedBy: req.user!.userId,
-                    uploadedByRole: 'CUSTOMER' as any,
-                    fileUrl: ev.fileUrl,
-                    fileType: 'image/jpeg',
-                    mimeType: ev.mimeType || 'image/jpeg',
-                  })),
-                }
+                create: evidenceList.map((ev) => ({
+                  uploadedBy: req.user!.userId,
+                  uploadedByRole: 'CUSTOMER' as any,
+                  fileUrl: ev.fileUrl,
+                  fileType: 'image/jpeg',
+                  mimeType: ev.mimeType || 'image/jpeg',
+                })),
+              }
               : undefined,
             statusHistory: {
               create: [
@@ -3723,7 +3978,7 @@ router.post(['/:id/return-request', '/:id/return'], async (req: Request, res: Re
         orderId: order.id,
         returnRequestId: returnRequest.id,
       });
-    } catch (_) {}
+    } catch (_) { }
 
     ResponseUtil.created(res, returnRequest, 'تم تقديم طلب الإرجاع بنجاح وجارٍ مراجعته من قبل المتجر');
   } catch (error) {
@@ -3929,7 +4184,7 @@ router.post(['/:id/disputes', '/:id/dispute'], async (req: Request, res: Respons
           reason,
           recipientRole: 'CUSTOMER',
         })
-      ).catch(() => {});
+      ).catch(() => { });
 
       void SocketService.get()?.emitToAdminsWithPermission('disputes:resolve', 'admin:new_dispute', {
         disputeId: dispute.id,
@@ -3947,7 +4202,7 @@ router.post(['/:id/disputes', '/:id/dispute'], async (req: Request, res: Respons
         refundId: refundReq.id,
         status: 'ADMIN_REVIEW',
       });
-    } catch (_) {}
+    } catch (_) { }
 
     ResponseUtil.created(res, dispute, 'تم فتح تذكرة النزاع بنجاح وسيقوم فريق الدعم بمراجعتها');
   } catch (error) {

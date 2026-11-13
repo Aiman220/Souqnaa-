@@ -12,6 +12,7 @@ import { SocketService } from '../../services/websocket/socket.service';
 import { notificationEventBus } from '../notifications/services/event-bus';
 import { NotificationEventFactory } from '../notifications/events/domain-events';
 import { remoteConfigService } from '../remote-config/remote-config.service';
+import { SellerCodSettlementService } from './seller-cod-settlement.service';
 
 export interface FinancialRiskThresholds {
   warningThreshold: number;        // e.g. 5,000 YER
@@ -125,6 +126,27 @@ export interface SellerFinancialStanding {
     paymentMethod: string;
     status: string;
     createdAt: Date;
+  }>;
+  totalCodObligations?: number;
+  totalCodWalletDeductions?: number;
+  totalCodVerifiedPayments?: number;
+  totalCodOutstanding?: number;
+  codObligations?: Array<{
+    id: string;
+    obligationNumber: string;
+    orderNumber: string;
+    obligationAmount: number;
+    walletDeduction: number;
+    remainingObligation: number;
+    verifiedPaymentAmount: number;
+    outstandingAmount: number;
+    currency: string;
+    status: string;
+    paymentMethod?: string | null;
+    paymentReference?: string | null;
+    proofImageUrl?: string | null;
+    createdAt: Date;
+    settledAt?: Date | null;
   }>;
 }
 
@@ -288,6 +310,61 @@ export class SellerFinancialRiskService {
       riskTier,
       reservePercentage,
       holdingDays: thresholds.reserveHoldingDays,
+    };
+  }
+
+  /**
+   * Evaluates debt threshold according to configured risk boundaries.
+   */
+  public static evaluateDebtThreshold(
+    debt: number,
+    thresholds: FinancialRiskThresholds = this.DEFAULT_THRESHOLDS
+  ): 'NORMAL' | 'WARNING' | 'RESTRICTED' | 'CRITICAL' {
+    if (debt >= thresholds.blockThreshold) return 'CRITICAL';
+    if (debt >= thresholds.criticalThreshold) return 'RESTRICTED';
+    if (debt >= thresholds.warningThreshold) return 'WARNING';
+    return 'NORMAL';
+  }
+
+  /**
+   * Applies hysteresis to prevent status oscillation around threshold boundaries.
+   */
+  public static evaluateHysteresis(
+    currentStatus: 'RESTRICTED' | 'NORMAL' | 'WARNING' | 'CRITICAL',
+    debt: number,
+    thresholds: FinancialRiskThresholds = this.DEFAULT_THRESHOLDS
+  ): 'RESTRICTED' | 'NORMAL' | 'WARNING' | 'CRITICAL' {
+    if (currentStatus === 'RESTRICTED') {
+      // Must fall strictly below unblockThreshold to leave RESTRICTED state
+      if (debt < thresholds.unblockThreshold) {
+        return this.evaluateDebtThreshold(debt, thresholds);
+      }
+      return 'RESTRICTED';
+    }
+    return this.evaluateDebtThreshold(debt, thresholds);
+  }
+
+  /**
+   * Synchronous check on account closure invariants (zero debt, zero active disputes, zero in-flight orders).
+   */
+  public static canCloseAccount(params: {
+    confirmedDebt: number;
+    activeDisputesCount: number;
+    pendingOrdersCount: number;
+  }): { allowed: boolean; reasons: string[] } {
+    const reasons: string[] = [];
+    if (params.confirmedDebt > 0) {
+      reasons.push(`لا يمكن إغلاق الحساب لوجود مديونيات أو مستحقات مالية قائمة بمبلغ ${params.confirmedDebt} ر.ي`);
+    }
+    if (params.activeDisputesCount > 0) {
+      reasons.push(`يوجد ${params.activeDisputesCount} نزاع أو استرجاع قيد التحقيق والمراجعة`);
+    }
+    if (params.pendingOrdersCount > 0) {
+      reasons.push(`يوجد ${params.pendingOrdersCount} طلب نشط قيد التنفيذ`);
+    }
+    return {
+      allowed: reasons.length === 0,
+      reasons,
     };
   }
 
@@ -628,6 +705,9 @@ export class SellerFinancialRiskService {
         outstandings: {
           orderBy: { createdAt: 'desc' },
         },
+        codObligations: {
+          orderBy: { createdAt: 'desc' },
+        },
         sellerOrders: {
           select: {
             id: true,
@@ -813,6 +893,39 @@ export class SellerFinancialRiskService {
         status: so.status,
         createdAt: so.order?.createdAt,
       })),
+      totalCodObligations: (seller.codObligations || []).reduce(
+        (sum: number, o: any) => sum + (o.status !== 'REVERSED' ? o.obligationAmount : 0),
+        0
+      ),
+      totalCodWalletDeductions: (seller.codObligations || []).reduce(
+        (sum: number, o: any) => sum + (o.status !== 'REVERSED' ? o.walletDeduction : 0),
+        0
+      ),
+      totalCodVerifiedPayments: (seller.codObligations || []).reduce(
+        (sum: number, o: any) => sum + (o.status !== 'REVERSED' ? o.verifiedPaymentAmount : 0),
+        0
+      ),
+      totalCodOutstanding: (seller.codObligations || []).reduce(
+        (sum: number, o: any) => sum + (o.status !== 'REVERSED' ? o.outstandingAmount : 0),
+        0
+      ),
+      codObligations: (seller.codObligations || []).map((o: any) => ({
+        id: o.id,
+        obligationNumber: o.obligationNumber,
+        orderNumber: o.orderNumber,
+        obligationAmount: o.obligationAmount,
+        walletDeduction: o.walletDeduction,
+        remainingObligation: o.remainingObligation,
+        verifiedPaymentAmount: o.verifiedPaymentAmount,
+        outstandingAmount: o.outstandingAmount,
+        currency: o.currency,
+        status: o.status,
+        paymentMethod: o.paymentMethod,
+        paymentReference: o.paymentReference,
+        proofImageUrl: o.proofImageUrl,
+        createdAt: o.createdAt,
+        settledAt: o.settledAt,
+      })),
     };
   }
 
@@ -835,6 +948,26 @@ export class SellerFinancialRiskService {
         reason: 'خدمة الدفع عند الاستلام معطلة مؤقتاً على مستوى المنصة',
         sellerStatus: {},
       };
+    }
+
+    // Customer COD Policy: COD is available only after completing at least 3 orders (DELIVERED status)
+    if (params.customerId) {
+      const completedOrdersCount = await prisma.order.count({
+        where: {
+          userId: params.customerId,
+          status: 'DELIVERED',
+        },
+      });
+
+      const MIN_COMPLETED_ORDERS_FOR_COD = 3;
+      if (completedOrdersCount < MIN_COMPLETED_ORDERS_FOR_COD) {
+        const remaining = MIN_COMPLETED_ORDERS_FOR_COD - completedOrdersCount;
+        return {
+          isCodAvailable: false,
+          reason: `خدمة الدفع عند الاستلام (COD) متاحة للعميل بعد إكمال 3 طلبات ناجحة سابقة. (أكملت ${completedOrdersCount} من ${MIN_COMPLETED_ORDERS_FOR_COD}، متبقي ${remaining}). يرجى اختيار وسيلة دفع بديلة لإتمام طلبك.`,
+          sellerStatus: {},
+        };
+      }
     }
 
     if (!params.sellerIds || params.sellerIds.length === 0) {
@@ -876,7 +1009,7 @@ export class SellerFinancialRiskService {
 
       if (s.isFinanciallyRestricted) {
         allEligible = false;
-        failureReason = 'خدمة الدفع عند الاستلام غير متاحة لأحد المتاجر بسبب قيود مالية معلقة';
+        failureReason = 'خدمة الدفع عند الاستلام غير متاحة حالياً لأحد المتاجر. يرجى اختيار وسيلة دفع بديلة.';
         break;
       }
     }
@@ -985,111 +1118,21 @@ export class SellerFinancialRiskService {
       };
     }
 
-    // CASH ON DELIVERY (COD)
-    if (balance.availableBalance >= commissionAmount) {
-      collectedAmount = commissionAmount;
-      balance = await tx.sellerBalance.update({
-        where: { id: balance.id },
-        data: { availableBalance: { decrement: commissionAmount } },
-      });
-
-      await tx.sellerTransaction.create({
-        data: {
-          sellerBalanceId: balance.id,
-          amount: -commissionAmount,
-          type: 'COMMISSION',
-          referenceId: sellerOrderId,
-          description: `خصم عمولة منصة سوقناا لطلب الدفع عند الاستلام #${orderNumber}`,
-        },
-      });
-    } else {
-      const availablePortion = Math.max(0, balance.availableBalance);
-      collectedAmount = availablePortion;
-      outstandingAmount = commissionAmount - availablePortion;
-
-      if (availablePortion > 0) {
-        await tx.sellerBalance.update({
-          where: { id: balance.id },
-          data: { availableBalance: 0 },
-        });
-
-        await tx.sellerTransaction.create({
-          data: {
-            sellerBalanceId: balance.id,
-            amount: -availablePortion,
-            type: 'COMMISSION',
-            referenceId: sellerOrderId,
-            description: `خصم جزء متاح من عمولة المنصة لطلب الدفع عند الاستلام #${orderNumber}`,
-          },
-        });
-      }
-
-      await tx.sellerOutstanding.create({
-        data: {
-          sellerId,
-          sourceType: 'ORDER_COMMISSION',
-          sourceReference: sellerOrderId,
-          amount: outstandingAmount,
-          paidAmount: 0,
-          remainingAmount: outstandingAmount,
-          currency: 'YER',
-          status: 'OPEN',
-          warningLevel: 'NORMAL',
-          metadata: JSON.stringify({
-            orderNumber,
-            totalCommission: commissionAmount,
-            collectedPortion: availablePortion,
-            createdAt: new Date().toISOString(),
-          }),
-        },
-      });
-
-      balance = await tx.sellerBalance.update({
-        where: { id: balance.id },
-        data: { outstandingCommission: { increment: outstandingAmount } },
-      });
-
-      await tx.sellerTransaction.create({
-        data: {
-          sellerBalanceId: balance.id,
-          amount: 0,
-          type: 'DEBIT',
-          referenceId: sellerOrderId,
-          description: `تسجيل مديونية عمولة منصة لطلب الدفع عند الاستلام #${orderNumber} (${outstandingAmount} ر.ي مستحقة)`,
-        },
-      });
-    }
-
-    // Re-evaluate restrictions
-    const restrictionResult = await this.evaluateAndApplyRestrictions(tx, sellerId);
-
-    // Broadcast real-time events to seller
-    const seller = await tx.seller.findUnique({ where: { id: sellerId }, select: { userId: true } });
-    if (seller?.userId) {
-      SocketService.get()?.emitToUser(seller.userId, 'seller:finance_updated', {
-        outstandingCommission: restrictionResult.totalRemainingDebt,
-        financialRestrictionLevel: restrictionResult.restrictionLevel,
-        isFinanciallyRestricted: restrictionResult.isRestricted,
-        newOrdersPaused: restrictionResult.newOrdersPaused,
-      });
-
-      if (restrictionResult.isRestricted) {
-        const thresholds = await this.getRiskThresholds();
-        SocketService.get()?.emitToUser(seller.userId, 'seller:account_restricted', {
-          reason: `تجاوز الحد الأقصى للمديونية (${restrictionResult.totalRemainingDebt} ر.ي)`,
-          outstanding: restrictionResult.totalRemainingDebt,
-          blockThreshold: thresholds.blockThreshold,
-          unblockThreshold: thresholds.unblockThreshold,
-          amountNeededToUnblock: Math.max(0, restrictionResult.totalRemainingDebt - thresholds.unblockThreshold),
-        });
-      }
-    }
+    // CASH ON DELIVERY (COD) — Authoritative COD Wallet Deduction Engine
+    const codResult = await SellerCodSettlementService.processCodOrderObligation(tx, {
+      sellerOrderId,
+      orderNumber,
+      sellerId,
+      obligationAmount: commissionAmount,
+      isCod: true,
+      currency: balance.currency,
+    });
 
     return {
-      collectedAmount,
-      outstandingAmount,
-      sellerBalance: balance,
-      isRestricted: restrictionResult.isRestricted,
+      collectedAmount: codResult.walletDeduction,
+      outstandingAmount: codResult.remainingObligation,
+      sellerBalance: codResult.sellerBalance,
+      isRestricted: codResult.isRestricted,
     };
   }
 
@@ -1278,7 +1321,7 @@ export class SellerFinancialRiskService {
           referenceId: deposit.id,
         })
       );
-    } catch (_) {}
+    } catch (_) { }
 
     return {
       deposit: updatedDeposit,
@@ -1381,7 +1424,7 @@ export class SellerFinancialRiskService {
   }> {
     const standing = await this.getSellerFinancialStanding(sellerId);
 
-    const [openRefunds, openDisputes, inFlightOrders, pendingWithdrawals, pendingSettlements] = await Promise.all([
+    const [openRefunds, openDisputes, inFlightOrders, pendingWithdrawals, pendingSettlements, openCodObligations] = await Promise.all([
       prisma.refundRequest.count({
         where: {
           sellerId,
@@ -1412,9 +1455,19 @@ export class SellerFinancialRiskService {
           status: { in: ['PENDING', 'PROCESSING'] },
         },
       }),
+      prisma.codFinancialObligation.count({
+        where: {
+          sellerId,
+          status: { in: ['PENDING_PAYMENT', 'PAYMENT_SUBMITTED', 'UNDER_REVIEW', 'PARTIALLY_SETTLED', 'PAYMENT_REJECTED'] },
+        },
+      }),
     ]);
 
     const reasons: string[] = [];
+
+    if (openCodObligations > 0) {
+      reasons.push(`يوجد ${openCodObligations} التزامات دفع عند الاستلام (COD) معلقة يجب تسويتها بالكامل قبل إغلاق الحساب`);
+    }
 
     if (standing.outstandingCommission > 0.01) {
       reasons.push(`يوجد مديونية مستحقة معلقة بقيمة ${standing.outstandingCommission} ${standing.currency} يجب سدادها أولاً`);
@@ -1520,6 +1573,241 @@ export class SellerFinancialRiskService {
       pausedOrdersCount,
       restrictedWithdrawalsCount,
       openExceptionsCount: openExceptions,
+    };
+  }
+
+  /**
+   * Authoritative Marketplace-Wide Financial Risk Exposure Monitoring (§Phase 9)
+   * Tracks aggregate seller liabilities, unrecovered debt, marketplace-funded refunds,
+   * active reservations, reserve coverage, daily/monthly limits, and concentration risk.
+   */
+  public static async getMarketplaceRiskExposure(): Promise<{
+    totalSellerRefundLiabilities: number;
+    totalUnrecoveredSellerDebt: number;
+    totalMarketplaceFundedRefunds: number;
+    totalRecoverableMarketplaceExposure: number;
+    totalActiveRefundReservations: number;
+    totalSellerReserveCoverage: number;
+    totalRefundObligationsDue: number;
+    dailyMarketplaceFundedAmount: number;
+    monthlyMarketplaceFundedAmount: number;
+    availableProtectionFundBalance: number;
+    controls: {
+      maxExposurePerSeller: number;
+      maxAggregateOutstandingDebt: number;
+      dailyMarketplaceFundedLimit: number;
+      monthlyMarketplaceFundedLimit: number;
+      isDailyLimitBreached: boolean;
+      isMonthlyLimitBreached: boolean;
+      isAggregateDebtBreached: boolean;
+    };
+    exposureAlerts: Array<{
+      type: string;
+      severity: string;
+      message: string;
+      details?: any;
+    }>;
+    topExposedSellers: Array<{
+      sellerId: string;
+      storeName: string;
+      outstandingDebt: number;
+      reservedBalance: number;
+      riskTier: string;
+      isRestricted: boolean;
+    }>;
+  }> {
+    const thresholds = await this.getRiskThresholds();
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const [
+      refundLiabilitiesAgg,
+      allDebtAgg,
+      reservesAgg,
+      activeLocksCount,
+      marketplaceTransactions,
+      topSellers,
+    ] = await Promise.all([
+      // 1. Total outstanding seller refund liabilities
+      prisma.sellerOutstanding.aggregate({
+        where: {
+          sourceType: 'REFUND_LIABILITY',
+          status: { in: ['OPEN', 'PARTIALLY_PAID'] },
+        },
+        _sum: { remainingAmount: true },
+        _count: { id: true },
+      }),
+      // 2. Total unrecovered seller debt (all sources)
+      prisma.sellerOutstanding.aggregate({
+        where: {
+          status: { in: ['OPEN', 'PARTIALLY_PAID'] },
+        },
+        _sum: { remainingAmount: true },
+      }),
+      // 3. Total active seller reserves
+      prisma.sellerReserveAllocation.aggregate({
+        where: { status: 'RESERVED' },
+        _sum: { amount: true },
+      }),
+      // 4. Active refund execution locks
+      prisma.refundExecutionLock.count({
+        where: { status: 'LOCKED' },
+      }),
+      // 5. Marketplace-funded transactions
+      prisma.financialTransaction.findMany({
+        where: {
+          type: 'REFUND_CUSTOMER',
+          direction: 'CREDIT',
+          description: { contains: 'تمويل حماية المنصة' },
+        },
+        select: {
+          amount: true,
+          createdAt: true,
+        },
+      }),
+      // 6. Top exposed sellers
+      prisma.seller.findMany({
+        where: {
+          outstandings: {
+            some: { status: { in: ['OPEN', 'PARTIALLY_PAID'] } },
+          },
+        },
+        include: {
+          stores: { select: { name: true }, take: 1 },
+          user: { select: { firstName: true, lastName: true } },
+          balance: true,
+          riskProfile: true,
+          outstandings: {
+            where: { status: { in: ['OPEN', 'PARTIALLY_PAID'] } },
+            select: { remainingAmount: true },
+          },
+          reserveAllocations: {
+            where: { status: 'RESERVED' },
+            select: { amount: true },
+          },
+        },
+        take: 10,
+      }),
+    ]);
+
+    const totalSellerRefundLiabilities = refundLiabilitiesAgg._sum.remainingAmount || 0;
+    const totalUnrecoveredSellerDebt = allDebtAgg._sum.remainingAmount || 0;
+    const totalSellerReserveCoverage = reservesAgg._sum.amount || 0;
+    const totalActiveRefundReservations = activeLocksCount;
+
+    let totalMarketplaceFundedRefunds = 0;
+    let dailyMarketplaceFundedAmount = 0;
+    let monthlyMarketplaceFundedAmount = 0;
+
+    for (const tx of marketplaceTransactions) {
+      const amt = Number(tx.amount || 0);
+      totalMarketplaceFundedRefunds += amt;
+      if (tx.createdAt >= startOfToday) {
+        dailyMarketplaceFundedAmount += amt;
+      }
+      if (tx.createdAt >= startOfMonth) {
+        monthlyMarketplaceFundedAmount += amt;
+      }
+    }
+
+    const totalRecoverableMarketplaceExposure = Math.max(
+      0,
+      totalMarketplaceFundedRefunds - totalSellerReserveCoverage
+    );
+
+    // Configurable Limits
+    const maxExposurePerSeller = thresholds.maxExposureLimit || 50000;
+    const maxAggregateOutstandingDebt = 1000000; // 1,000,000 YER default configurable cap
+    const dailyMarketplaceFundedLimit = 200000;  // 200,000 YER default daily cap
+    const monthlyMarketplaceFundedLimit = 1000000; // 1,000,000 YER default monthly cap
+    const availableProtectionFundBalance = Math.max(0, monthlyMarketplaceFundedLimit - monthlyMarketplaceFundedAmount);
+
+    const isDailyLimitBreached = dailyMarketplaceFundedAmount >= dailyMarketplaceFundedLimit;
+    const isMonthlyLimitBreached = monthlyMarketplaceFundedAmount >= monthlyMarketplaceFundedLimit;
+    const isAggregateDebtBreached = totalUnrecoveredSellerDebt >= maxAggregateOutstandingDebt;
+
+    // Build exposure alerts
+    const exposureAlerts: Array<{ type: string; severity: string; message: string; details?: any }> = [];
+
+    if (isDailyLimitBreached) {
+      exposureAlerts.push({
+        type: 'DAILY_MARKETPLACE_FUNDING_LIMIT_BREACHED',
+        severity: 'CRITICAL',
+        message: `تم الوصول إلى الحد الأقصى اليومي لتمويل استرجاعات المنصة (${dailyMarketplaceFundedAmount} / ${dailyMarketplaceFundedLimit} ر.ي)`,
+        details: { dailyMarketplaceFundedAmount, dailyMarketplaceFundedLimit },
+      });
+    }
+
+    if (isMonthlyLimitBreached) {
+      exposureAlerts.push({
+        type: 'MONTHLY_MARKETPLACE_FUNDING_LIMIT_BREACHED',
+        severity: 'CRITICAL',
+        message: `تم الوصول إلى الحد الأقصى الشهري لتمويل استرجاعات المنصة (${monthlyMarketplaceFundedAmount} / ${monthlyMarketplaceFundedLimit} ر.ي)`,
+        details: { monthlyMarketplaceFundedAmount, monthlyMarketplaceFundedLimit },
+      });
+    }
+
+    if (isAggregateDebtBreached) {
+      exposureAlerts.push({
+        type: 'AGGREGATE_SELLER_DEBT_LIMIT_BREACHED',
+        severity: 'HIGH',
+        message: `إجمالي مديونيات التجار غير المحصلة تجاوز السقف الإجمالي المحدد (${totalUnrecoveredSellerDebt} / ${maxAggregateOutstandingDebt} ر.ي)`,
+        details: { totalUnrecoveredSellerDebt, maxAggregateOutstandingDebt },
+      });
+    }
+
+    // Top exposed sellers sorted descending by debt
+    const topExposedSellers = topSellers
+      .map((s) => {
+        const debt = s.outstandings.reduce((sum, o) => sum + (o.remainingAmount || 0), 0);
+        const res = s.reserveAllocations.reduce((sum, r) => sum + (r.amount || 0), 0);
+        const name = s.stores[0]?.name || `${s.user?.firstName || ''} ${s.user?.lastName || ''}`.trim() || s.id;
+        return {
+          sellerId: s.id,
+          storeName: name,
+          outstandingDebt: debt,
+          reservedBalance: res,
+          riskTier: s.riskProfile?.riskTier || 'NORMAL',
+          isRestricted: s.isFinanciallyRestricted,
+        };
+      })
+      .sort((a, b) => b.outstandingDebt - a.outstandingDebt);
+
+    // Check individual seller concentration alerts
+    for (const s of topExposedSellers) {
+      if (s.outstandingDebt >= maxExposurePerSeller) {
+        exposureAlerts.push({
+          type: 'SELLER_EXPOSURE_CAP_BREACHED',
+          severity: 'HIGH',
+          message: `المتجر [${s.storeName}] تجاوز الحد الأقصى للمديونية الفردية (${s.outstandingDebt} / ${maxExposurePerSeller} ر.ي)`,
+          details: { sellerId: s.sellerId, storeName: s.storeName, debt: s.outstandingDebt },
+        });
+      }
+    }
+
+    return {
+      totalSellerRefundLiabilities,
+      totalUnrecoveredSellerDebt,
+      totalMarketplaceFundedRefunds,
+      totalRecoverableMarketplaceExposure,
+      totalActiveRefundReservations,
+      totalSellerReserveCoverage,
+      totalRefundObligationsDue: totalSellerRefundLiabilities,
+      dailyMarketplaceFundedAmount,
+      monthlyMarketplaceFundedAmount,
+      availableProtectionFundBalance,
+      controls: {
+        maxExposurePerSeller,
+        maxAggregateOutstandingDebt,
+        dailyMarketplaceFundedLimit,
+        monthlyMarketplaceFundedLimit,
+        isDailyLimitBreached,
+        isMonthlyLimitBreached,
+        isAggregateDebtBreached,
+      },
+      exposureAlerts,
+      topExposedSellers,
     };
   }
 }

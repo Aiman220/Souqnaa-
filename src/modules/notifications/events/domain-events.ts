@@ -210,7 +210,8 @@ export class NotificationEventFactory {
       | 'REFUND_ACCEPTED'
       | 'REFUND_REJECTED'
       | 'REFUND_ESCALATED'
-      | 'REFUND_COMPLETED';
+      | 'REFUND_COMPLETED'
+      | 'SELLER_REFUND_REQUEST';
     recipientId: string;
     refundId: string;
     refundNumber: string;
@@ -222,10 +223,21 @@ export class NotificationEventFactory {
     isSeller?: boolean;
     isAdmin?: boolean;
   }): DomainNotificationEvent {
+    const effectiveEventType =
+      params.isSeller && (params.eventType === 'REFUND_REQUESTED' || params.eventType === 'SELLER_REFUND_REQUEST')
+        ? 'SELLER_REFUND_REQUEST'
+        : params.eventType;
+
+    const deepLink = params.isAdmin
+      ? `souqnaa://admin/refunds/${params.refundId}`
+      : params.isSeller
+      ? `souqnaa://seller/refunds/${params.refundId}`
+      : `souqnaa://refunds/${params.refundId}`;
+
     return {
       eventId: randomUUID(),
-      idempotencyKey: `refund_${params.refundId}_${params.eventType}`,
-      eventType: params.eventType,
+      idempotencyKey: `refund_${params.refundId}_${params.recipientId}_${effectiveEventType}`,
+      eventType: effectiveEventType,
       category: NotificationCategory.REFUND,
       priority: NotificationPriority.HIGH,
       recipientId: params.recipientId,
@@ -239,11 +251,12 @@ export class NotificationEventFactory {
       data: {
         refundId: params.refundId,
         refundNumber: params.refundNumber,
-        orderId: params.orderId,
-        orderNumber: params.orderNumber,
+        orderId: params.orderId || '',
+        orderNumber: params.orderNumber || '',
         amount: params.amount,
         currency: params.currency || 'YER',
-        reason: params.reason,
+        reason: params.reason || '',
+        deepLink,
       },
       bypassQuietHours: true,
       bypassRateLimit: true,

@@ -8,18 +8,37 @@ export interface ReconciliationAnomaly {
     | 'MANUAL_TRANSFER_MISSING_PROOF'
     | 'MANUAL_TRANSFER_MISSING_REFERENCE'
     | 'REFUND_EXCEEDS_ORDER_TOTAL'
-    | 'DUPLICATE_WALLET_CREDIT';
+    | 'DUPLICATE_WALLET_CREDIT'
+    | 'SELLER_DEBT_INVARIANT_VIOLATION'
+    | 'MARKETPLACE_EXPOSURE_INVARIANT_VIOLATION'
+    | 'NEGATIVE_WALLET_BALANCE'
+    | 'REFUND_UNBACKED_BY_VERIFIED_PAYMENT';
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM';
-  refundId: string;
+  refundId?: string;
   refundNumber?: string;
   orderId?: string;
   orderNumber?: string;
+  sellerId?: string;
   descriptionAr: string;
   descriptionEn: string;
   details: Record<string, any>;
 }
 
 export class RefundReconciliationService {
+  /**
+   * Evaluates double-entry ledger equilibrium.
+   */
+  public static reconcileLedgerBalance(credits: number, debits: number): {
+    isBalanced: boolean;
+    discrepancy: number;
+  } {
+    const diff = Math.abs(credits - debits);
+    return {
+      isBalanced: diff < 0.01,
+      discrepancy: diff,
+    };
+  }
+
   /**
    * Scans all refunds, manual transfers, and wallet ledger records for financial discrepancies.
    */
@@ -158,6 +177,44 @@ export class RefundReconciliationService {
           details: { occurrences: dup._count.id },
         });
       }
+    }
+
+    // 3. Mathematical Invariant Verification: Outstanding Seller Debt
+    // Invariant: Remaining = Amount - PaidAmount across all liability records
+    const allOutstandings = await prisma.sellerOutstanding.findMany({
+      select: { id: true, sellerId: true, amount: true, paidAmount: true, remainingAmount: true, status: true },
+    });
+
+    for (const out of allOutstandings) {
+      const expectedRemaining = Math.max(0, parseFloat((out.amount - out.paidAmount).toFixed(2)));
+      const actualRemaining = parseFloat(out.remainingAmount.toFixed(2));
+      if (Math.abs(expectedRemaining - actualRemaining) > 0.05) {
+        anomalies.push({
+          type: 'SELLER_DEBT_INVARIANT_VIOLATION',
+          severity: 'HIGH',
+          sellerId: out.sellerId,
+          descriptionAr: `خلل في معادلة المديونية للمطالبة [${out.id}]: الأصل (${out.amount}) - المسدد (${out.paidAmount}) لا يساوي المتبقي (${out.remainingAmount})`,
+          descriptionEn: `Mathematical debt conservation violated in liability record [${out.id}]`,
+          details: { id: out.id, amount: out.amount, paidAmount: out.paidAmount, remainingAmount: out.remainingAmount, expectedRemaining },
+        });
+      }
+    }
+
+    // 4. Invariant: Seller Available Balances must NEVER be negative
+    const negativeBalances = await prisma.sellerBalance.findMany({
+      where: { availableBalance: { lt: -0.01 } },
+      select: { id: true, sellerId: true, availableBalance: true },
+    });
+
+    for (const nb of negativeBalances) {
+      anomalies.push({
+        type: 'NEGATIVE_WALLET_BALANCE',
+        severity: 'CRITICAL',
+        sellerId: nb.sellerId,
+        descriptionAr: `رصيد المحفظة المتاح سالب (${nb.availableBalance} ر.ي) للتاجر [${nb.sellerId}]، وهو ما يخالف قواعد النزاهة المحاسبية`,
+        descriptionEn: `Negative wallet balance detected (${nb.availableBalance}) for seller [${nb.sellerId}]`,
+        details: { sellerBalanceId: nb.id, availableBalance: nb.availableBalance },
+      });
     }
 
     return {

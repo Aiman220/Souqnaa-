@@ -48,10 +48,21 @@ export interface PlatformWalletAccountConfig {
   updatedAt?: string;
 }
 
+export const APPROVED_CUSTOMER_APP_ICONS = [
+  'default',
+  'orange',
+  'modern',
+  'minimal',
+  'seasonal',
+] as const;
+
+export type ApprovedCustomerAppIcon = (typeof APPROVED_CUSTOMER_APP_ICONS)[number];
+
 export interface AppBrandingConfig {
   appNameAr: string;
   appNameEn: string;
   appVersion?: string;
+  customerAppIcon?: string;
   defaultLogoUrl: string;
   defaultIconUrl: string;
   defaultDeepLink: string;
@@ -70,6 +81,7 @@ export const DEFAULT_APP_BRANDING: AppBrandingConfig = {
   appNameAr: 'سوقناا',
   appNameEn: 'SOUQNAA',
   appVersion: '1.80.37',
+  customerAppIcon: 'default',
   defaultLogoUrl: '/uploads/branding/souqnaa-logo.png',
   defaultIconUrl: '/uploads/branding/souqnaa-app-icon.png',
   defaultDeepLink: 'souqnaa://app/open',

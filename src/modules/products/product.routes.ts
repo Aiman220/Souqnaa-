@@ -17,6 +17,9 @@ import { recommendationService } from '../recommendations/services/recommendatio
 import { StorefrontInvalidatorService } from '../../services/storefront-invalidator.service';
 import { deliveryServiceabilityService } from '../../services/delivery/delivery-serviceability.service';
 import { RemoteConfigService } from '../remote-config/remote-config.service';
+import { digitalFulfillmentService } from '../../services/digital/digital-fulfillment.service';
+import { UrlSecurityUtil } from '../../utils/url-security.util';
+import { FulfillmentType, DigitalDeliveryType } from '@prisma/client';
 
 const router = Router();
 
@@ -438,7 +441,31 @@ router.post('/', authenticate, requireSeller, async (req: Request, res: Response
       images = [],
       variants = [],
       attributes = [],
+      fulfillmentType: rawFulfillmentType = 'PHYSICAL',
+      digitalDeliveryType,
+      digitalFileUrl,
+      digitalInstructions,
     } = req.body;
+
+    const fulfillmentType: FulfillmentType =
+      String(rawFulfillmentType).toUpperCase() === 'DIGITAL' ? FulfillmentType.DIGITAL : FulfillmentType.PHYSICAL;
+
+    if (fulfillmentType === FulfillmentType.DIGITAL) {
+      const category = await prisma.category.findUnique({ where: { id: categoryId } });
+      const isEligible = digitalFulfillmentService.isSubcategoryEligibleForDigital(category?.slug);
+      if (!isEligible && req.user?.role !== 'ADMIN') {
+        throw new AppError(
+          'القسم المحدد غير مؤهل لمنتجات التسليم الرقمي. الأقسام المؤهلة تشمل: شحن الرصيد، باقات الإنترنت، بطاقات الهدايا، بطاقات الألعاب، الاشتراكات، والبرمجيات.',
+          400,
+          'CATEGORY_NOT_DIGITAL_ELIGIBLE'
+        );
+      }
+      if (digitalFileUrl && typeof digitalFileUrl === 'string') {
+        if (!UrlSecurityUtil.isSafeUrl(digitalFileUrl)) {
+          throw new AppError('رابط الملف الرقمي غير صالح أو غير مسموح به لأسباب أمنية', 400, 'INVALID_DIGITAL_URL');
+        }
+      }
+    }
 
     const slug = `${nameEn.toLowerCase().replace(/[\s\W-]+/g, '-')}-${Date.now()}`;
 
@@ -456,6 +483,10 @@ router.post('/', authenticate, requireSeller, async (req: Request, res: Response
           price: parseFloat(price),
           compareAtPrice: compareAtPrice ? parseFloat(compareAtPrice) : null,
           sku: sku || `SKU-${Date.now()}`,
+          fulfillmentType,
+          digitalDeliveryType: fulfillmentType === FulfillmentType.DIGITAL ? (digitalDeliveryType || DigitalDeliveryType.CODE) : null,
+          digitalFileUrl: fulfillmentType === FulfillmentType.DIGITAL ? (digitalFileUrl || null) : null,
+          digitalInstructions: fulfillmentType === FulfillmentType.DIGITAL ? (digitalInstructions || null) : null,
           images: {
             create: images.map((img: any, idx: number) => ({
               url: typeof img === 'string' ? img : img.url,
@@ -563,9 +594,33 @@ router.put('/:id', authenticate, requireSeller, async (req: Request, res: Respon
       isActive,
       stockQuantity,
       variants,
+      fulfillmentType,
+      digitalDeliveryType,
+      digitalFileUrl,
+      digitalInstructions,
     } = req.body;
 
     const updateData: any = {};
+    if (fulfillmentType !== undefined) {
+      const targetType = String(fulfillmentType).toUpperCase() === 'DIGITAL' ? FulfillmentType.DIGITAL : FulfillmentType.PHYSICAL;
+      if (targetType === FulfillmentType.DIGITAL) {
+        const catId = categoryId || existing.categoryId;
+        const cat = await prisma.category.findUnique({ where: { id: catId } });
+        const isEligible = digitalFulfillmentService.isSubcategoryEligibleForDigital(cat?.slug);
+        if (!isEligible && !isAdmin) {
+          throw new AppError('القسم المحدد غير مؤهل لمنتجات التسليم الرقمي', 400, 'CATEGORY_NOT_DIGITAL_ELIGIBLE');
+        }
+      }
+      updateData.fulfillmentType = targetType;
+    }
+    if (digitalDeliveryType !== undefined) updateData.digitalDeliveryType = digitalDeliveryType;
+    if (digitalFileUrl !== undefined) {
+      if (digitalFileUrl && typeof digitalFileUrl === 'string' && !UrlSecurityUtil.isSafeUrl(digitalFileUrl)) {
+        throw new AppError('رابط الملف الرقمي غير صالح أو غير مسموح به لأسباب أمنية', 400, 'INVALID_DIGITAL_URL');
+      }
+      updateData.digitalFileUrl = digitalFileUrl;
+    }
+    if (digitalInstructions !== undefined) updateData.digitalInstructions = digitalInstructions ? String(digitalInstructions) : null;
     if (nameAr !== undefined) updateData.nameAr = String(nameAr);
     if (nameEn !== undefined) updateData.nameEn = String(nameEn);
     if (descriptionAr !== undefined) updateData.descriptionAr = descriptionAr ? String(descriptionAr) : null;
@@ -655,6 +710,83 @@ router.put('/:id', authenticate, requireSeller, async (req: Request, res: Respon
     });
 
     ResponseUtil.success(res, updated, 'Product updated successfully');
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/v1/products/:id/digital-codes (Seller add encrypted digital codes to pool)
+router.post('/:id/digital-codes', authenticate, requireSeller, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const productId = String(req.params.id);
+    const { codes } = req.body;
+
+    if (!Array.isArray(codes) || codes.length === 0) {
+      throw new AppError('يرجى تقديم قائمة صالحة من الرموز الرقمية (مصفوفة نصوص)', 400);
+    }
+
+    const seller = await prisma.seller.findUnique({
+      where: { userId: req.user!.userId },
+    });
+    const sellerId = seller?.id || '';
+
+    const result = await digitalFulfillmentService.addDigitalCodes({
+      productId,
+      sellerId,
+      codes,
+      actorId: req.user!.userId,
+      actorRole: req.user?.role || 'SELLER',
+    });
+
+    ResponseUtil.success(res, result, 'تمت إضافة الرموز الرقمية بنجاح إلى مخزون المنتج');
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/v1/products/:id/digital-codes (View safe masked pool list and stock count)
+router.get('/:id/digital-codes', authenticate, requireSeller, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const productId = String(req.params.id);
+    const seller = await prisma.seller.findUnique({
+      where: { userId: req.user!.userId },
+      include: { stores: true },
+    });
+
+    const product = await prisma.product.findUnique({
+      where: { id: productId },
+      include: { store: true },
+    });
+
+    if (!product) throw new AppError('المنتج غير موجود', 404);
+
+    if (req.user?.role !== 'ADMIN' && product.store.sellerId !== seller?.id) {
+      throw new AppError('لا تملك صلاحية عرض هذا المخزون', 403);
+    }
+
+    const codes = await prisma.digitalProductCode.findMany({
+      where: { productId },
+      select: {
+        id: true,
+        codeMasked: true,
+        isUsed: true,
+        usedAt: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+
+    const totalCount = await prisma.digitalProductCode.count({ where: { productId } });
+    const unusedCount = await prisma.digitalProductCode.count({ where: { productId, isUsed: false } });
+
+    ResponseUtil.success(res, {
+      productId,
+      totalCount,
+      availableCount: unusedCount,
+      usedCount: totalCount - unusedCount,
+      codes,
+    });
   } catch (error) {
     next(error);
   }

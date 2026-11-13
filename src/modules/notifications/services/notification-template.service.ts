@@ -157,6 +157,13 @@ export class NotificationTemplateService {
       bodyEn: 'SOUQNAA team is reviewing dispute {{refundNumber}}.',
       deepLinkPattern: 'souqnaa://refunds/{{refundId}}',
     },
+    REFUND_DISPUTED: {
+      titleAr: 'نزاع جديد على طلب استرجاع ⚠️',
+      titleEn: 'Dispute raised on refund request ⚠️',
+      bodyAr: 'قام العميل بتصعيد طلب الاسترجاع للطلب #{{orderNumber}} كنزاع رسمي للإدارة.',
+      bodyEn: 'Customer disputed the refund decision for order #{{orderNumber}}.',
+      deepLinkPattern: 'souqnaa://seller/refunds/{{refundId}}',
+    },
     REFUND_COMPLETED: {
       titleAr: 'تم تحويل مبلغ الاسترجاع 💰',
       titleEn: 'Refund completed 💰',
@@ -422,6 +429,13 @@ export class NotificationTemplateService {
       titleEn: 'New refund request from customer 🔄',
       bodyAr: 'طلب العميل استرجاع الطلب #{{orderNumber}}. يرجى اتخاذ القرار.',
       bodyEn: 'Customer requested refund for order #{{orderNumber}}.',
+      deepLinkPattern: 'souqnaa://seller/refunds/{{refundId}}',
+    },
+    SELLER_REFUND_DISPUTED: {
+      titleAr: 'نزاع جديد على طلب استرجاع ⚠️',
+      titleEn: 'Dispute raised on refund request ⚠️',
+      bodyAr: 'قام العميل بتصعيد طلب الاسترجاع للطلب #{{orderNumber}} كنزاع رسمي للإدارة.',
+      bodyEn: 'Customer disputed the refund decision for order #{{orderNumber}}.',
       deepLinkPattern: 'souqnaa://seller/refunds/{{refundId}}',
     },
 

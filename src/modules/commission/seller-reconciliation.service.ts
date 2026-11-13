@@ -89,6 +89,7 @@ export class SellerReconciliationService {
           where: { status: 'RESERVED' },
         },
         riskProfile: true,
+        codObligations: true,
       },
     });
 
@@ -177,7 +178,90 @@ export class SellerReconciliationService {
         }
       }
 
-      // 5. Calculate Net Exposure
+      // 5. Invariant: COD Financial Obligation Mathematical Conservation:
+      // Outstanding = Original Obligation - Wallet Deductions - Verified Payments + Reversals
+      if (seller.codObligations && seller.codObligations.length > 0) {
+        const orderIdsSeen = new Set<string>();
+
+        for (const cod of seller.codObligations) {
+          // A. Duplicate deduction detection
+          if (cod.sellerOrderId) {
+            if (orderIdsSeen.has(cod.sellerOrderId) && cod.status !== 'REVERSED') {
+              exceptions.push({
+                sellerId: seller.id,
+                entityType: 'COD_OBLIGATION',
+                entityId: cod.id,
+                severity: 'CRITICAL',
+                expectedAmount: 1,
+                actualAmount: 2,
+                discrepancy: 1,
+                description: `تكرار غير مصرح به في خصم أو قيد التزام COD لنفس الطلب [${cod.sellerOrderId}]`,
+              });
+            }
+            orderIdsSeen.add(cod.sellerOrderId);
+          }
+
+          // B. Mathematical conservation per obligation
+          if (cod.status !== 'REVERSED') {
+            const expectedOutstanding = Math.max(
+              0,
+              parseFloat((cod.obligationAmount - cod.walletDeduction - cod.verifiedPaymentAmount).toFixed(2))
+            );
+            const actualOutstanding = parseFloat((cod.outstandingAmount || 0).toFixed(2));
+            const driftCod = Math.abs(expectedOutstanding - actualOutstanding);
+
+            if (driftCod > 0.05) {
+              exceptions.push({
+                sellerId: seller.id,
+                entityType: 'COD_OBLIGATION',
+                entityId: cod.id,
+                severity: driftCod > 1000 ? 'HIGH' : 'MEDIUM',
+                expectedAmount: expectedOutstanding,
+                actualAmount: actualOutstanding,
+                discrepancy: parseFloat((actualOutstanding - expectedOutstanding).toFixed(2)),
+                description: `عدم تطابق في معادلة رصيد التزام COD [${cod.obligationNumber}]: المتوقع (${expectedOutstanding} ر.ي) والمسجل (${actualOutstanding} ر.ي)`,
+              });
+            }
+
+            // C. Invariant: Settled obligation must have outstandingAmount == 0
+            if (cod.status === 'SETTLED' && actualOutstanding > 0.01) {
+              exceptions.push({
+                sellerId: seller.id,
+                entityType: 'COD_OBLIGATION',
+                entityId: cod.id,
+                severity: 'HIGH',
+                expectedAmount: 0,
+                actualAmount: actualOutstanding,
+                discrepancy: actualOutstanding,
+                description: `التزام COD [${cod.obligationNumber}] مؤشر كـ SETTLED ولكن رصيده المتبقي غير مصفّر (${actualOutstanding} ر.ي)`,
+              });
+            }
+
+            // D. Invariant: Wallet deduction must be backed by a SellerTransaction
+            if (cod.walletDeduction > 0 && seller.balance?.transactions) {
+              const hasMatchingTx = seller.balance.transactions.some(
+                (t: any) =>
+                  (t.type === 'COMMISSION' || t.type === 'DEBIT') &&
+                  Math.abs(Math.abs(t.amount) - cod.walletDeduction) < 0.05
+              );
+              if (!hasMatchingTx) {
+                exceptions.push({
+                  sellerId: seller.id,
+                  entityType: 'WALLET_LEDGER',
+                  entityId: cod.id,
+                  severity: 'HIGH',
+                  expectedAmount: cod.walletDeduction,
+                  actualAmount: 0,
+                  discrepancy: cod.walletDeduction,
+                  description: `استقطاع محفظة بقيمة (${cod.walletDeduction} ر.ي) لالتزام COD [${cod.obligationNumber}] غير مقيد بدفتر الأستاذ العام`,
+                });
+              }
+            }
+          }
+        }
+      }
+
+      // 6. Calculate Net Exposure
       const unsecuredExposure = Math.max(0, sumOutstandings - sumReserves);
       totalExposure += unsecuredExposure;
     }

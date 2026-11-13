@@ -113,7 +113,7 @@ export class AdminMembershipController {
         },
       });
 
-      await MembershipCacheService.invalidateTiers();
+      await MembershipEligibilityService.onTierConfigurationChanged();
       ResponseUtil.success(res, tier, 'Tier created successfully', 201);
     } catch (err) {
       next(err);
@@ -172,7 +172,7 @@ export class AdminMembershipController {
         data: dataToUpdate,
       });
 
-      await MembershipCacheService.invalidateTiers();
+      await MembershipEligibilityService.onTierConfigurationChanged();
       ResponseUtil.success(res, updated, 'Tier updated successfully');
     } catch (err) {
       next(err);
@@ -201,13 +201,13 @@ export class AdminMembershipController {
           where: { id },
           data: { isActive: false },
         });
-        await MembershipCacheService.invalidateTiers();
+        await MembershipEligibilityService.onTierConfigurationChanged();
         ResponseUtil.success(res, { deactivated: true }, 'Tier contains active members, so it was marked inactive.');
         return;
       }
 
       await prisma.membershipTier.delete({ where: { id } });
-      await MembershipCacheService.invalidateTiers();
+      await MembershipEligibilityService.onTierConfigurationChanged();
       ResponseUtil.success(res, { deleted: true }, 'Tier deleted successfully');
     } catch (err) {
       next(err);

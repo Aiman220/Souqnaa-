@@ -44,7 +44,8 @@ export interface StoreAvailabilityStatus {
 }
 
 export interface QuoteRequest {
-  customerAddressId: string;
+  customerAddressId?: string;
+  isDigitalOnly?: boolean;
   sellerOrders: SellerOrderInput[];
   deliveryMethod?: string;
   isExpress?: boolean;
@@ -60,6 +61,7 @@ export interface QuoteRequest {
 export interface FullQuoteResponse {
   deliveryAvailable: boolean;
   reason?: string;
+  isDigitalOnly?: boolean;
   maxDistanceKm?: number;
   maxRadiusKm?: number;
   sellerQuotes: (DeliveryQuoteResult & { sellerId: string; storeId: string; storeName?: string })[];
@@ -203,6 +205,45 @@ export class DeliveryQuoteService {
       discountAmount = 0,
       discountFundedBy,
     } = request;
+
+    // 0. Handle digital-only orders (no physical delivery fees, no address/distance checks)
+    if (request.isDigitalOnly) {
+      return {
+        deliveryAvailable: true,
+        isDigitalOnly: true,
+        maxDistanceKm: 0,
+        maxRadiusKm: 0,
+        sellerQuotes: sellerOrders.map((so) => ({
+          deliveryAvailable: true,
+          sellerId: so.sellerId,
+          storeId: so.storeId,
+          storeName: 'التسليم الرقمي',
+          distanceKm: 0,
+          durationMinutes: 0,
+          zoneId: null,
+          zoneName: 'التسليم الرقمي',
+          baseFee: 0,
+          extraSellerFee: 0,
+          weightFee: 0,
+          slotFee: 0,
+          expressFee: 0,
+          deliveryDiscount: 0,
+          deliveryFee: 0,
+          currency: config.marketplace.currency || 'YER',
+          pricingVersion: 'digital-v1',
+          isExpress: false,
+          isDigital: true,
+        })),
+        totalDeliveryFee: 0,
+        currency: config.marketplace.currency || 'YER',
+        policy: 'DIGITAL_DELIVERY',
+        slotFee: 0,
+        storesStatus: [],
+        standardAvailable: true,
+        scheduledAvailable: false,
+        expressAvailable: false,
+      };
+    }
 
     // 0. Resolve slot fee for scheduled deliveries
     let slotFee = 0;

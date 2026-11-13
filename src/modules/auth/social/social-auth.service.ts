@@ -4,7 +4,7 @@ import { prisma } from '../../../database/prisma';
 import { redis } from '../../../database/redis';
 import { JwtUtil } from '../../../utils/jwt.util';
 import { AppError } from '../../../middleware/error.middleware';
-import { UserRoleType, SellerStatus } from '@prisma/client';
+import { UserRoleType, SellerStatus, MembershipStatus, MembershipAuditChangeType } from '@prisma/client';
 import { smtpEmailProvider } from '../../notifications/providers/email.provider';
 import {
   SocialProvider,
@@ -283,6 +283,40 @@ export class SocialAuthenticationService {
         await tx.customer.create({ data: { userId: createdUser.id } });
         await tx.cart.create({ data: { userId: createdUser.id } });
         await tx.wishlist.create({ data: { userId: createdUser.id } });
+
+        const baselineTier = await tx.membershipTier.findFirst({
+          where: { isActive: true },
+          orderBy: [{ level: 'asc' }, { priority: 'asc' }],
+        });
+
+        if (baselineTier) {
+          await tx.customerMembership.create({
+            data: {
+              userId: createdUser.id,
+              tierId: baselineTier.id,
+              status: MembershipStatus.ACTIVE,
+              startedAt: new Date(),
+              lifetimeSpend: 0,
+              periodSpend: 0,
+              completedOrders: 0,
+              periodCompletedOrders: 0,
+              pointsBalance: 0,
+              lastEvaluatedAt: new Date(),
+              version: 1,
+            },
+          });
+
+          await tx.membershipAuditLog.create({
+            data: {
+              userId: createdUser.id,
+              actorId: 'SYSTEM',
+              actorRole: 'SYSTEM',
+              changeType: MembershipAuditChangeType.INITIAL_ASSIGNMENT,
+              newTierId: baselineTier.id,
+              reason: 'Initial membership assignment upon onboarding via social auth',
+            },
+          });
+        }
       } else if (assignedRole === UserRoleType.SELLER) {
         const seller = await tx.seller.create({
           data: {
