@@ -60,6 +60,26 @@ export interface CreateRefundInput {
 
 export class RefundService {
   /**
+   * Structured error logging for notification failures without exposing sensitive credentials or tokens (§4)
+   */
+  public static logNotificationError(
+    refundId: string,
+    recipientId: string,
+    eventType: string,
+    error: any
+  ): void {
+    const errorCategory = error?.name || error?.code || (error?.message ? 'DISPATCH_ERROR' : 'UNKNOWN_ERROR');
+    const rawMsg = String(error?.message || error || '');
+    const sanitizedMsg = rawMsg
+      .replace(/(token|key|secret|password|bearer|authorization)[=:\s]+[^\s,;]+/gi, '$1=[REDACTED]')
+      .substring(0, 300);
+
+    console.error(
+      `[RefundService] [refund_notification_failed] refundId=${refundId} recipientId=${recipientId} eventType=${eventType} errorCategory=${errorCategory} details="${sanitizedMsg}"`
+    );
+  }
+
+  /**
    * 1. Customer creates a refund request with authoritative calculation.
    */
   static async createRefundRequest(input: CreateRefundInput) {
@@ -312,7 +332,9 @@ export class RefundService {
             amount: Number(totalAuthoritativeAmount),
             isSeller: true,
           })
-        ).catch(() => {});
+        ).catch((err) => {
+          RefundService.logNotificationError(refund.id, targetSellerUserId!, 'SELLER_REFUND_REQUEST', err);
+        });
 
         const socketSvc = SocketService.get();
         if (socketSvc) {
@@ -346,7 +368,9 @@ export class RefundService {
           amount: Number(totalAuthoritativeAmount),
           isSeller: false,
         })
-      ).catch(() => {});
+      ).catch((err) => {
+        RefundService.logNotificationError(refund.id, customerId, 'REFUND_REQUESTED', err);
+      });
 
       void SocketService.get()?.emitToOrderParticipants(order.id, [
         { event: 'REFUND_CREATED', data: { refundId: refund.id, orderId: order.id, orderNumber: order.orderNumber, status: refund.status }, adminPermission: 'disputes:resolve' },
@@ -354,7 +378,9 @@ export class RefundService {
         { event: 'order:return_requested', data: { orderId: order.id, orderNumber: order.orderNumber, refundId: refund.id }, adminPermission: 'disputes:resolve' },
         { event: 'order:status', data: { orderId: order.id, status: order.status }, adminPermission: 'orders:view' },
       ]);
-    } catch (_) {}
+    } catch (err) {
+      RefundService.logNotificationError(refund.id, sellerId, 'REFUND_NOTIFICATION_PIPELINE', err);
+    }
 
     return refund;
   }
@@ -511,7 +537,9 @@ export class RefundService {
         amount: Number(updated.requestedAmount || 0),
         isSeller: false,
       })
-    ).catch(() => {});
+    ).catch((err) => {
+      RefundService.logNotificationError(updated.id, updated.customerId, 'REFUND_ACCEPTED', err);
+    });
 
     await RefundService.emitAdjustedProductSales((updated as any)?.__adjustedProducts);
 
@@ -642,7 +670,9 @@ export class RefundService {
         reason: rejectionReason,
         isSeller: false,
       })
-    ).catch(() => {});
+    ).catch((err) => {
+      RefundService.logNotificationError(updated.id, updated.customerId, 'REFUND_REJECTED', err);
+    });
 
     try {
       void SocketService.get()?.emitToOrderParticipants(updated.orderId, [
@@ -891,7 +921,9 @@ export class RefundService {
           deadline: '48h',
           recipientRole: 'SELLER',
         })
-      ).catch(() => {});
+      ).catch((err) => {
+        RefundService.logNotificationError(updated.id, safeSellerUserId, 'DISPUTE_SELLER_NOTIFIED', err);
+      });
 
       // Targeted socket alerts for seller
       const socketSvc = SocketService.get();
@@ -925,7 +957,9 @@ export class RefundService {
         reason: disputeReason,
         recipientRole: 'CUSTOMER',
       })
-    ).catch(() => {});
+    ).catch((err) => {
+      RefundService.logNotificationError(updated.id, customerId, 'DISPUTE_CREATED', err);
+    });
 
     try {
       void SocketService.get()?.emitToOrderParticipants(updated.orderId, [
@@ -1163,7 +1197,9 @@ export class RefundService {
           currency: updated.currency || 'YER',
           recipientRole: 'CUSTOMER',
         })
-      ).catch(() => {});
+      ).catch((err) => {
+        RefundService.logNotificationError(updated.id, updated.customerId, 'DISPUTE_RESOLVED_CUSTOMER', err);
+      });
 
       // 2. Seller In-App Notification and Push Notification
       if (updated.seller?.userId) {
@@ -1183,7 +1219,9 @@ export class RefundService {
             status: 'SENT',
             isRead: false,
           },
-        }).catch(() => {});
+        }).catch((err) => {
+          RefundService.logNotificationError(updated.id, updated.seller!.userId, 'ADMIN_NOTIFICATION_RECORD_FAILED', err);
+        });
 
         notificationDispatcher.dispatch(
           NotificationEventFactory.disputeEvent({
@@ -1198,10 +1236,12 @@ export class RefundService {
             currency: updated.currency || 'YER',
             recipientRole: 'SELLER',
           })
-        ).catch(() => {});
+        ).catch((err) => {
+          RefundService.logNotificationError(updated.id, updated.seller!.userId, 'DISPUTE_RESOLVED_SELLER', err);
+        });
       }
     } catch (notifErr) {
-      console.error('[RefundService.adminResolve] Error dispatching notifications:', notifErr);
+      RefundService.logNotificationError(updated.id, updated.seller?.userId || 'unknown', 'DISPUTE_NOTIFICATION_PIPELINE', notifErr);
     }
 
     if (decision === 'APPROVE_FULL' || decision === 'APPROVE_PARTIAL') {

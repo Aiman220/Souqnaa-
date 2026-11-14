@@ -223,14 +223,15 @@ export class NotificationEventFactory {
     isSeller?: boolean;
     isAdmin?: boolean;
   }): DomainNotificationEvent {
+    const isSeller = Boolean(params.isSeller || params.eventType === 'SELLER_REFUND_REQUEST');
     const effectiveEventType =
-      params.isSeller && (params.eventType === 'REFUND_REQUESTED' || params.eventType === 'SELLER_REFUND_REQUEST')
+      isSeller && (params.eventType === 'REFUND_REQUESTED' || params.eventType === 'SELLER_REFUND_REQUEST')
         ? 'SELLER_REFUND_REQUEST'
         : params.eventType;
 
     const deepLink = params.isAdmin
       ? `souqnaa://admin/refunds/${params.refundId}`
-      : params.isSeller
+      : isSeller
       ? `souqnaa://seller/refunds/${params.refundId}`
       : `souqnaa://refunds/${params.refundId}`;
 
@@ -243,7 +244,7 @@ export class NotificationEventFactory {
       recipientId: params.recipientId,
       recipientType: params.isAdmin
         ? AppType.ADMIN
-        : params.isSeller
+        : isSeller
         ? AppType.SELLER
         : AppType.CUSTOMER,
       entityType: 'refund',
@@ -262,6 +263,7 @@ export class NotificationEventFactory {
         currency: params.currency || 'YER',
         reason: params.reason || '',
         deepLink,
+        isSeller,
       },
       bypassQuietHours: true,
       bypassRateLimit: true,

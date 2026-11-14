@@ -821,8 +821,34 @@ export class SellerFinancialRiskService {
     // Authoritative calculate amount needed to unblock
     const amountNeededToUnblock = Math.max(0, authoritativeOutstanding - thresholds.unblockThreshold);
 
+    let isRestricted = seller.isFinanciallyRestricted;
+
+    // Self-healing: if marked financially restricted due to debt, but actual authoritative debt is below unblockThreshold (e.g. 0), auto-unblock!
+    if (isRestricted && authoritativeOutstanding <= thresholds.unblockThreshold) {
+      const activeNonDebtRestrictions = (seller.financialRestrictions || []).filter(
+        (r: any) => r.status === 'ACTIVE' && r.reasonCode !== 'OUTSTANDING_REFUND_DEBT'
+      );
+      if (activeNonDebtRestrictions.length === 0) {
+        isRestricted = false;
+        // Fire-and-forget database normalization
+        prisma.seller.update({
+          where: { id: sellerId },
+          data: {
+            isFinanciallyRestricted: false,
+            financialRestrictionLevel: 'NORMAL',
+            financialRestrictionReason: null,
+            financialRestrictedAt: null,
+          },
+        }).catch(() => {});
+        prisma.financialRestriction.updateMany({
+          where: { sellerId, status: 'ACTIVE', reasonCode: 'OUTSTANDING_REFUND_DEBT' },
+          data: { status: 'RELEASED', releasedAt: new Date(), releaseReason: 'مديونية مسددة بالكامل' },
+        }).catch(() => {});
+      }
+    }
+
     let calculatedLevel: 'NORMAL' | 'WARNING' | 'CRITICAL' | 'RESTRICTED' = 'NORMAL';
-    if (seller.isFinanciallyRestricted || authoritativeOutstanding >= thresholds.blockThreshold) {
+    if (isRestricted || authoritativeOutstanding >= thresholds.blockThreshold) {
       calculatedLevel = 'RESTRICTED';
     } else if (authoritativeOutstanding >= thresholds.criticalThreshold) {
       calculatedLevel = 'CRITICAL';
@@ -840,8 +866,8 @@ export class SellerFinancialRiskService {
     const riskScore = seller.riskProfile?.riskScore ?? 0;
     const reservePercentage = seller.riskProfile?.reservePercentage ?? thresholds.baseReservePercentage;
     const reserveHoldingDays = seller.riskProfile?.reserveHoldingDays ?? thresholds.reserveHoldingDays;
-    const newOrdersPaused = seller.riskProfile?.newOrdersPaused ?? seller.isFinanciallyRestricted;
-    const withdrawalsRestricted = seller.riskProfile?.withdrawalsRestricted ?? seller.isFinanciallyRestricted;
+    const newOrdersPaused = seller.riskProfile?.newOrdersPaused ?? isRestricted;
+    const withdrawalsRestricted = seller.riskProfile?.withdrawalsRestricted ?? isRestricted;
 
     return {
       sellerId: seller.id,
@@ -863,10 +889,10 @@ export class SellerFinancialRiskService {
       totalReservedBalance,
       unsecuredExposure,
       currency,
-      isFinanciallyRestricted: seller.isFinanciallyRestricted,
+      isFinanciallyRestricted: isRestricted,
       financialRestrictionLevel: calculatedLevel,
-      financialRestrictionReason: seller.financialRestrictionReason,
-      financialRestrictedAt: seller.financialRestrictedAt,
+      financialRestrictionReason: isRestricted ? seller.financialRestrictionReason : null,
+      financialRestrictedAt: isRestricted ? seller.financialRestrictedAt : null,
       cashOnDeliveryEnabled: seller.cashOnDeliveryEnabled,
       newOrdersPaused,
       withdrawalsRestricted,
@@ -1404,7 +1430,9 @@ export class SellerFinancialRiskService {
         where: { id: sellerId },
         data: {
           isFinanciallyRestricted: false,
+          financialRestrictionLevel: 'NORMAL',
           financialRestrictionReason: `رفع استثنائي من الإدارة: ${reason.trim()}`,
+          financialRestrictedAt: null,
         },
       });
 

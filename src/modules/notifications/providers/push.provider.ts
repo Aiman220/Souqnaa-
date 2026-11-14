@@ -272,10 +272,25 @@ export class FcmPushProvider implements NotificationProvider {
       dataEntries['notificationId'] = String(params.notificationId);
     }
 
+    // Ensure seller refund notifications contain correct seller deep link
+    const isSellerRefund =
+      params.data?.isSeller === true ||
+      params.data?.isSeller === 'true' ||
+      rawType === 'SELLER_REFUND_REQUEST' ||
+      (params.category === 'REFUND' && (params.data?.recipientRole === 'SELLER' || String(params.recipientId).includes('seller')));
+    if (isSellerRefund && dataEntries['refundId']) {
+      if (!dataEntries['deepLink'] || dataEntries['deepLink'] === 'souqnaa://notifications' || dataEntries['deepLink'].startsWith('souqnaa://refunds/')) {
+        dataEntries['deepLink'] = `souqnaa://seller/refunds/${dataEntries['refundId']}`;
+      }
+    }
+
     // Strip customer and system sensitive data to prevent credential/PII leaks (§3)
     const sensitiveKeys = [
       'customerName', 'customerEmail', 'customerPhone', 'customerAddress',
+      'customer_name', 'customer_email', 'customer_phone', 'customer_address',
+      'buyerName', 'buyerEmail', 'buyerPhone', 'buyerAddress',
       'password', 'token', 'secret', 'creditCard', 'cardNumber', 'cvv', 'pin',
+      'apiKey', 'accessToken', 'refreshToken',
     ];
     for (const sKey of sensitiveKeys) {
       delete dataEntries[sKey];

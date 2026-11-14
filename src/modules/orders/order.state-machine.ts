@@ -21,7 +21,9 @@ import { notificationDispatcher } from '../notifications/services/notification-d
 import { ShippingPromotionBudgetService } from '../promotions/services/shipping-promotion-budget.service';
 import { MembershipEligibilityService } from '../membership/membership-eligibility.service';
 import { SellerFinancialRiskService } from '../commission/seller-financial-risk.service';
+import { SellerReserveService } from '../commission/seller-reserve.service';
 import { CustomerCodEligibilityService } from '../payments/customer-cod-eligibility.service';
+import { TaxMath } from '../tax/tax.math';
 
 /**
  * Valid transitions for Seller Orders / Orders based on current status.
@@ -523,30 +525,47 @@ export class OrderStateMachine {
             },
           });
         } else {
-          // Prepaid: Platform holds customer funds and moves payout atomically to availableBalance
+          // Prepaid: Platform holds customer funds, holds 10% reserve for 30 days, moves 90% payout atomically to availableBalance
+          const reservePercentage = 0.10;
+          const holdingDays = 30;
+          const reserveAmount = payout > 0 ? parseFloat((payout * reservePercentage).toFixed(2)) : 0;
+          const liquidPayout = TaxMath.subtract(payout, reserveAmount);
+
           const bal = await tx.sellerBalance.upsert({
             where: { sellerId: sellerOrder.sellerId },
             update: {
               ...(payout > 0 ? { pendingBalance: { decrement: payout } } : {}),
-              availableBalance: { increment: payout },
+              availableBalance: { increment: liquidPayout },
             },
             create: {
               sellerId: sellerOrder.sellerId,
               pendingBalance: 0,
-              availableBalance: payout,
+              availableBalance: liquidPayout,
               withdrawnBalance: 0,
             },
           });
 
+          if (reserveAmount > 0) {
+            await SellerReserveService.allocateReserveFromDeliveredOrder(tx, {
+              sellerId: sellerOrder.sellerId,
+              sellerOrderId: sellerOrder.id,
+              orderNumber: sellerOrder.order.orderNumber,
+              payoutAmount: payout,
+              reserveAmount,
+              reservePercentage,
+              holdingDays,
+            });
+          }
+
           // Record credit transaction
-          if (payout > 0) {
+          if (liquidPayout > 0) {
             await tx.sellerTransaction.create({
               data: {
                 sellerBalanceId: bal.id,
-                amount: payout,
+                amount: liquidPayout,
                 type: TransactionType.CREDIT,
                 referenceId: sellerOrder.id,
-                description: `أرباح الطلب #${sellerOrder.order.orderNumber}`,
+                description: `أرباح الطلب #${sellerOrder.order.orderNumber}${reserveAmount > 0 ? ' (صافي بعد حجز 10% احتياطي 30 يوماً)' : ''}`,
               },
             });
           }
@@ -1311,29 +1330,46 @@ export class OrderStateMachine {
               },
             });
           } else {
-            // Prepaid: Platform holds customer funds, move atomically to availableBalance
+            // Prepaid: Platform holds customer funds, holds 10% reserve for 30 days, move 90% payout atomically to availableBalance
+            const reservePercentage = 0.10;
+            const holdingDays = 30;
+            const reserveAmount = payout > 0 ? parseFloat((payout * reservePercentage).toFixed(2)) : 0;
+            const liquidPayout = TaxMath.subtract(payout, reserveAmount);
+
             const bal = await tx.sellerBalance.upsert({
               where: { sellerId: so.sellerId },
               update: {
                 ...(payout > 0 ? { pendingBalance: { decrement: payout } } : {}),
-                availableBalance: { increment: payout },
+                availableBalance: { increment: liquidPayout },
               },
               create: {
                 sellerId: so.sellerId,
                 pendingBalance: 0,
-                availableBalance: payout,
+                availableBalance: liquidPayout,
                 withdrawnBalance: 0,
               },
             });
 
-            if (payout > 0) {
+            if (reserveAmount > 0) {
+              await SellerReserveService.allocateReserveFromDeliveredOrder(tx, {
+                sellerId: so.sellerId,
+                sellerOrderId: so.id,
+                orderNumber: order.orderNumber,
+                payoutAmount: payout,
+                reserveAmount,
+                reservePercentage,
+                holdingDays,
+              });
+            }
+
+            if (liquidPayout > 0) {
               await tx.sellerTransaction.create({
                 data: {
                   sellerBalanceId: bal.id,
-                  amount: payout,
+                  amount: liquidPayout,
                   type: TransactionType.CREDIT,
                   referenceId: so.id,
-                  description: `أرباح الطلب #${order.orderNumber}`,
+                  description: `أرباح الطلب #${order.orderNumber}${reserveAmount > 0 ? ' (صافي بعد حجز 10% احتياطي 30 يوماً)' : ''}`,
                 },
               });
             }

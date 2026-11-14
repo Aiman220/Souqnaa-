@@ -662,11 +662,11 @@ export class NotificationTemplateService {
   }
 
   /**
-   * Safely interpolates {{key}} placeholders in template string with variable values.
+   * Safely interpolates {{key}} or {key} placeholders in template string with variable values.
    */
   private interpolate(templateStr: string, variables: Record<string, any>): string {
     if (!templateStr) return '';
-    return templateStr.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, key) => {
+    return templateStr.replace(/\{{1,2}\s*([a-zA-Z0-9_]+)\s*\}{1,2}/g, (match, key) => {
       const val = variables[key];
       if (val === undefined || val === null) {
         return '';
@@ -719,9 +719,15 @@ export class NotificationTemplateService {
    * Renders content for a domain event using template + event variables.
    */
   async render(event: DomainNotificationEvent): Promise<RenderedNotificationContent> {
+    const isSeller =
+      event.recipientType === AppType.SELLER ||
+      (event.recipientType as any) === 'SELLER' ||
+      event.data?.isSeller === true ||
+      event.data?.recipientRole === 'SELLER' ||
+      event.eventType === 'SELLER_REFUND_REQUEST';
+
     const effectiveCode =
-      (event.recipientType === AppType.SELLER || (event.data?.isSeller as boolean)) &&
-      (event.eventType === 'REFUND_REQUESTED' || event.eventType === 'SELLER_REFUND_REQUEST')
+      isSeller && (event.eventType === 'REFUND_REQUESTED' || event.eventType === 'SELLER_REFUND_REQUEST')
         ? 'SELLER_REFUND_REQUEST'
         : event.eventType;
     const template = await this.getTemplate(effectiveCode);

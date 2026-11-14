@@ -144,6 +144,118 @@ export class SellerReserveService {
   }
 
   /**
+   * Creates an authoritative reserve allocation from a delivered prepaid order payout (10% held for 30 days).
+   * Atomic, idempotent, and non-duplicative.
+   */
+  public static async allocateReserveFromDeliveredOrder(
+    tx: any,
+    params: {
+      sellerId: string;
+      sellerOrderId: string;
+      orderNumber: string;
+      payoutAmount: number;
+      reserveAmount: number;
+      reservePercentage?: number;
+      holdingDays?: number;
+      currency?: string;
+    }
+  ): Promise<ReserveAllocationResult> {
+    const {
+      sellerId,
+      sellerOrderId,
+      orderNumber,
+      payoutAmount,
+      reserveAmount,
+      reservePercentage = 0.10,
+      holdingDays = 30,
+      currency = 'YER',
+    } = params;
+
+    if (reserveAmount <= 0) {
+      return {
+        allocationId: '',
+        sellerId,
+        amount: 0,
+        reservePercentage,
+        holdingDays,
+        releaseEligibleAt: new Date(),
+        status: 'SKIPPED',
+      };
+    }
+
+    // Idempotency: verify this sellerOrderId doesn't already have an active reserve allocation
+    const existing = await tx.sellerReserveAllocation.findFirst({
+      where: {
+        sellerId,
+        reason: { contains: orderNumber },
+        status: 'RESERVED',
+      },
+    });
+
+    if (existing) {
+      return {
+        allocationId: existing.id,
+        sellerId: existing.sellerId,
+        settlementId: existing.settlementId,
+        amount: existing.amount,
+        reservePercentage: existing.reservePercentage,
+        holdingDays: existing.holdingDays,
+        releaseEligibleAt: existing.releaseEligibleAt,
+        status: existing.status,
+      };
+    }
+
+    const releaseEligibleAt = new Date(Date.now() + holdingDays * 24 * 60 * 60 * 1000);
+
+    const allocation = await tx.sellerReserveAllocation.create({
+      data: {
+        sellerId,
+        amount: reserveAmount,
+        currency,
+        reservePercentage,
+        riskTier: 'NORMAL',
+        holdingDays,
+        releaseEligibleAt,
+        status: 'RESERVED',
+        reason: `احتياطي ضمان الالتزامات (10% لمدة ${holdingDays} يوماً) للطلب #${orderNumber}`,
+        metadata: JSON.stringify({
+          sellerOrderId,
+          orderNumber,
+          payoutAmount,
+          reserveAmount,
+          createdAt: new Date().toISOString(),
+        }),
+      },
+    });
+
+    // Update SellerRiskProfile totalReservedBalance
+    await tx.sellerRiskProfile.upsert({
+      where: { sellerId },
+      create: {
+        sellerId,
+        riskTier: 'NORMAL',
+        reservePercentage,
+        reserveHoldingDays: holdingDays,
+        totalReservedBalance: reserveAmount,
+      },
+      update: {
+        totalReservedBalance: { increment: reserveAmount },
+        lastEvaluatedAt: new Date(),
+      },
+    });
+
+    return {
+      allocationId: allocation.id,
+      sellerId,
+      amount: reserveAmount,
+      reservePercentage,
+      holdingDays,
+      releaseEligibleAt,
+      status: allocation.status,
+    };
+  }
+
+  /**
    * Processes mature reserves whose holding period has elapsed.
    * Releases undisputed funds to seller available balance or applies to confirmed debt.
    */

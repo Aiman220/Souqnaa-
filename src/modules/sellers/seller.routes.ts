@@ -1303,10 +1303,23 @@ router.get('/dashboard', async (req: Request, res: Response, next: NextFunction)
 
     const earned = (balance?.availableBalance || 0) + (balance?.withdrawnBalance || 0);
 
-    const outstandingCommission = balance?.outstandingCommission || 0;
-    const isFinanciallyRestricted = seller.isFinanciallyRestricted || false;
-    const financialRestrictionLevel = seller.financialRestrictionLevel || 'NORMAL';
-    const amountNeededToUnblock = Math.max(0, outstandingCommission - 4000);
+    const standing = await SellerFinancialRiskService.getSellerFinancialStanding(seller.id);
+    const outstandingCommission = standing.outstandingCommission;
+    const isFinanciallyRestricted = standing.isFinanciallyRestricted;
+    let financialRestrictionLevel = standing.financialRestrictionLevel;
+    const amountNeededToUnblock = standing.amountNeededToUnblock;
+
+    // Self-heal: If seller is not restricted, normalize any inconsistent database state
+    if (!isFinanciallyRestricted && seller.financialRestrictionLevel === 'RESTRICTED') {
+      financialRestrictionLevel = 'NORMAL';
+      await prisma.seller.update({
+        where: { id: seller.id },
+        data: {
+          financialRestrictionLevel: 'NORMAL',
+          financialRestrictedAt: null,
+        },
+      });
+    }
 
     const enrichedRecentOrders = recentOrders.map((ro) => ({
       ...ro,
@@ -3263,7 +3276,10 @@ router.post(['/me/returns/:id/reject', '/me/orders/:id/reject-return'], async (r
 router.get('/me/balance', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const seller = await getSeller(req.user!.userId);
-    const standing = await SellerFinancialRiskService.getSellerFinancialStanding(seller.id);
+    const [standing, codSummary] = await Promise.all([
+      SellerFinancialRiskService.getSellerFinancialStanding(seller.id),
+      SellerCodSettlementService.getSellerCodSummary(seller.id),
+    ]);
 
     // Calculate aggregated delivered payouts & commissions & taxes
     const stats = await prisma.sellerOrder.aggregate({
@@ -3307,6 +3323,14 @@ router.get('/me/balance', async (req: Request, res: Response, next: NextFunction
       totalEarnings,
       totalCommissions,
       totalTaxCollected,
+      totalCodObligations: codSummary.totalObligationAmount,
+      totalCodWalletDeductions: codSummary.totalWalletDeductions,
+      totalCodVerifiedPayments: codSummary.totalVerifiedPayments,
+      totalCodOutstanding: codSummary.totalOutstanding,
+      codObligations: codSummary.obligations,
+      reserveAllocations: standing.reserveAllocations,
+      debtRecoveryAllocations: standing.debtRecoveryAllocations,
+      activeRestrictions: standing.activeRestrictions,
       updatedAt: seller.balance?.updatedAt || new Date(),
     });
   } catch (error) {
@@ -3488,12 +3512,12 @@ router.get('/me/cod-settings', async (req: Request, res: Response, next: NextFun
     const standing = await SellerFinancialRiskService.getSellerFinancialStanding(seller.id);
     ResponseUtil.success(res, {
       cashOnDeliveryEnabled: seller.cashOnDeliveryEnabled,
-      isFinanciallyRestricted: seller.isFinanciallyRestricted,
-      financialRestrictionLevel: seller.financialRestrictionLevel || 'NORMAL',
+      isFinanciallyRestricted: standing.isFinanciallyRestricted,
+      financialRestrictionLevel: standing.financialRestrictionLevel,
       financialRestrictionReason: seller.financialRestrictionReason,
       outstandingCommission: standing.outstandingCommission,
       amountNeededToUnblock: standing.amountNeededToUnblock,
-      canEnableCod: !seller.isFinanciallyRestricted,
+      canEnableCod: !standing.isFinanciallyRestricted,
     });
   } catch (error) {
     next(error);
