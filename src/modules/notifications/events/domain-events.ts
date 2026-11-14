@@ -249,6 +249,11 @@ export class NotificationEventFactory {
       entityType: 'refund',
       entityId: params.refundId,
       data: {
+        type:
+          effectiveEventType === 'SELLER_REFUND_REQUEST' || effectiveEventType === 'REFUND_REQUESTED'
+            ? 'REFUND_REQUESTED'
+            : effectiveEventType,
+        eventType: effectiveEventType,
         refundId: params.refundId,
         refundNumber: params.refundNumber,
         orderId: params.orderId || '',

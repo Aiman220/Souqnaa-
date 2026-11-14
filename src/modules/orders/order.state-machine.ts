@@ -21,6 +21,7 @@ import { notificationDispatcher } from '../notifications/services/notification-d
 import { ShippingPromotionBudgetService } from '../promotions/services/shipping-promotion-budget.service';
 import { MembershipEligibilityService } from '../membership/membership-eligibility.service';
 import { SellerFinancialRiskService } from '../commission/seller-financial-risk.service';
+import { CustomerCodEligibilityService } from '../payments/customer-cod-eligibility.service';
 
 /**
  * Valid transitions for Seller Orders / Orders based on current status.
@@ -1581,6 +1582,13 @@ export class OrderStateMachine {
       } catch (err) {
         console.error('[Membership] Failed to evaluate membership on direct delivery:', err);
       }
+
+      // Customer COD Eligibility Evaluation on Order Delivery
+      try {
+        await CustomerCodEligibilityService.evaluateQualifyingOrder(order.id);
+      } catch (err) {
+        console.error('[Customer COD] Failed to evaluate COD qualifying order on delivery:', err);
+      }
     }
 
     // 8. SOUQNAA Coins Cancellation Reversal & Coin Refund trigger (§21)
@@ -1593,6 +1601,13 @@ export class OrderStateMachine {
         });
       } catch (err) {
         console.error('[Rewards] Failed to reverse/refund coins on order cancellation:', err);
+      }
+
+      // Customer COD Eligibility Invalidation on Order Cancellation
+      try {
+        await CustomerCodEligibilityService.handleOrderCancelled(order.id, reason);
+      } catch (err) {
+        console.error('[Customer COD] Failed to handle order cancellation for COD:', err);
       }
 
       // SOUQNAA Promotions & Vouchers Reversal on Order Cancellation

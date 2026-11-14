@@ -142,6 +142,7 @@ router.get('/checkout-payment-methods', async (req: Request, res: Response, next
       isCodAvailable: codEval.isCodAvailable,
       codReason: codEval.reason,
       sellerStatus: codEval.sellerStatus,
+      customerCodEligibility: codEval.customerCodEligibility,
     });
   } catch (error) {
     next(error);

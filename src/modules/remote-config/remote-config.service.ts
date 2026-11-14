@@ -92,10 +92,13 @@ export class RemoteConfigService {
     return integer % 100;
   }
 
+  private isInitialized = false;
+
   /**
    * Ensure default feature flags are seeded and populated in the database.
    */
   public async ensureInitialized(): Promise<void> {
+    if (this.isInitialized) return;
     try {
       // Ensure supported delivery areas are synced
       await supportedAreasService.ensureDatabaseSync();
@@ -125,6 +128,20 @@ export class RemoteConfigService {
               updatedBy: 'SYSTEM_BOOTSTRAP',
             },
           });
+        } else if (def.key === 'refunds') {
+          if (!existing.descriptionEn || existing.descriptionEn !== def.descriptionEn || existing.displayNameEn !== def.displayNameEn) {
+            await prisma.featureFlag.update({
+              where: { key: 'refunds' },
+              data: {
+                displayNameEn: def.displayNameEn,
+                descriptionAr: def.descriptionAr,
+                descriptionEn: def.descriptionEn,
+                maintenanceMessageAr: def.maintenanceMessageAr,
+                maintenanceMessageEn: def.maintenanceMessageEn,
+                isSensitive: true,
+              },
+            });
+          }
         } else if (['scheduled_delivery', 'express_delivery', 'free_delivery_campaigns', 'city_based_product_discovery'].includes(def.key)) {
           let existingDeps: string[] = [];
           try {
@@ -165,6 +182,7 @@ export class RemoteConfigService {
           },
         });
       }
+      this.isInitialized = true;
     } catch (error) {
       console.error('[RemoteConfigService] Failed to initialize default feature flags:', error);
     }
@@ -312,19 +330,23 @@ export class RemoteConfigService {
   ): Promise<ResolvedRemoteConfigResponse> {
     const { flags, branding, version, updatedAt, etag } = await this.getRawFlags();
 
-    // Check ETag or version header / query
-    if (context.ifNoneMatch && context.ifNoneMatch === etag) {
-      return {
-        modified: false,
-        configVersion: version,
-        etag,
-        updatedAt: updatedAt.toISOString(),
-        features: {},
-        details: {},
-        walletProviders: {},
-        branding,
-        platformWallets: [],
-      };
+    if (context.ifNoneMatch) {
+      const match = context.ifNoneMatch === etag ||
+        context.ifNoneMatch.replace(/^W\//, '').replace(/^"|"$/g, '').trim() ===
+        etag.replace(/^W\//, '').replace(/^"|"$/g, '').trim();
+      if (match) {
+        return {
+          modified: false,
+          configVersion: version,
+          etag,
+          updatedAt: updatedAt.toISOString(),
+          features: {},
+          details: {},
+          walletProviders: {},
+          branding,
+          platformWallets: [],
+        };
+      }
     }
 
     if (context.clientVersion && context.clientVersion === version) {
@@ -537,6 +559,48 @@ export class RemoteConfigService {
     const config = await this.getResolvedConfig();
     const provider = config.walletProviders[providerCode.toUpperCase()];
     return provider?.enabled === true;
+  }
+
+  /**
+   * Minimum qualifying completed prepaid orders required for customer COD eligibility.
+   * Authoritative source from Remote Config / Feature Flags with system setting fallback, defaulting to 3.
+   */
+  public async getCustomerCodMinOrders(context?: ClientEvaluationContext): Promise<number> {
+    try {
+      const flag = await prisma.featureFlag.findUnique({
+        where: { key: 'customer_cod_eligibility' },
+      });
+      if (flag?.metadata) {
+        const meta = typeof flag.metadata === 'string' ? JSON.parse(flag.metadata) : flag.metadata;
+        const minOrders = meta.minQualifyingOrders;
+        if (typeof minOrders === 'number' && minOrders >= 0) {
+          return minOrders;
+        }
+      }
+    } catch (_) {}
+
+    try {
+      const resolved = await this.getResolvedConfig(context);
+      const detail = resolved.details?.['customer_cod_eligibility'];
+      if (detail && detail.metadata && typeof detail.metadata === 'object') {
+        const minOrders = (detail.metadata as any).minQualifyingOrders;
+        if (typeof minOrders === 'number' && minOrders >= 0) {
+          return minOrders;
+        }
+      }
+    } catch (_) {}
+
+    try {
+      const setting = await prisma.systemSetting.findUnique({
+        where: { key: 'customer_cod_min_orders' },
+      });
+      if (setting && setting.value) {
+        const val = parseInt(setting.value, 10);
+        if (!isNaN(val) && val >= 0) return val;
+      }
+    } catch (_) {}
+
+    return 3;
   }
 
   /**
@@ -1064,7 +1128,13 @@ export class RemoteConfigService {
       const lower = trimmed.toLowerCase();
 
       const matched = APPROVED_CUSTOMER_APP_ICONS.find(
-        (id) => lower === id || lower.includes(`app_icon_${id}`) || lower.includes(`_${id}.`)
+        (id) =>
+          lower === id ||
+          lower.includes(`app_icon_${id}`) ||
+          lower.includes(`_${id}.`) ||
+          lower.includes(`/${id}.`) ||
+          lower.endsWith(`/${id}`) ||
+          (id !== 'default' && lower.includes(id))
       );
 
       if (matched) {
@@ -1073,7 +1143,11 @@ export class RemoteConfigService {
         trimmed.startsWith('http://') ||
         trimmed.startsWith('https://') ||
         trimmed.startsWith('/uploads/') ||
-        trimmed.startsWith('/storage/')
+        trimmed.startsWith('uploads/') ||
+        trimmed.startsWith('/storage/') ||
+        trimmed.startsWith('storage/') ||
+        trimmed.startsWith('assets/') ||
+        /\.(png|jpg|jpeg|webp|svg|ico)$/i.test(trimmed)
       ) {
         canonicalIcon = trimmed;
       } else {

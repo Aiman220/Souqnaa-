@@ -213,6 +213,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       estimatedTotal: taxResult.grandTotal,
       isCodAvailable: codEval.isCodAvailable,
       codReason: codEval.reason,
+      customerCodEligibility: codEval.customerCodEligibility,
     });
 
     // Notify Cart Abandonment Engine of cart activity

@@ -219,7 +219,40 @@ export class RefundFundingWaterfallService {
     let sellerFundedAmount = 0;
     const fundingSources: FundingAllocationItem[] = [];
 
-    // Priority 1: Seller Available Wallet Balance
+    // Priority 1: Seller's Unsettled Delivered Proceeds (delivered orders pending settlement)
+    const unsettledSuborder = await tx.sellerOrder.findFirst({
+      where: {
+        orderId,
+        sellerId,
+        status: SellerOrderStatus.DELIVERED,
+        settlementItems: { none: {} },
+      },
+    });
+
+    if (unsettledSuborder && unsettledSuborder.sellerPayout && Number(unsettledSuborder.sellerPayout) > 0 && remainingSellerLiabilityToCover > 0) {
+      const availablePayout = Math.max(0, Number(unsettledSuborder.sellerPayout));
+      const payoutToDeduct = Math.min(availablePayout, remainingSellerLiabilityToCover);
+      const newPayout = TaxMath.subtract(availablePayout, payoutToDeduct);
+
+      await tx.sellerOrder.update({
+        where: { id: unsettledSuborder.id },
+        data: {
+          sellerPayout: newPayout,
+        },
+      });
+
+      sellerFundedAmount = TaxMath.add(sellerFundedAmount, payoutToDeduct);
+      remainingSellerLiabilityToCover = TaxMath.subtract(remainingSellerLiabilityToCover, payoutToDeduct);
+
+      fundingSources.push({
+        source: 'UNSETTLED_PROCEEDS',
+        amount: payoutToDeduct,
+        referenceId: unsettledSuborder.id,
+        description: `استقطاع مباشر من أرباح الطلب المسلم المعلقة قبل التسوية (${payoutToDeduct} ${currency})`,
+      });
+    }
+
+    // Priority 2: Seller Available Wallet Balance
     if (currentAvailable > 0 && remainingSellerLiabilityToCover > 0) {
       const balanceToUse = Math.min(currentAvailable, remainingSellerLiabilityToCover);
       const newAvailable = Math.round((currentAvailable - balanceToUse) * 100) / 100;

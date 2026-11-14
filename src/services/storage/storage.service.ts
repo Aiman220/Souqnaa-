@@ -71,6 +71,7 @@ export interface IStorageService {
   getPublicUrl(key: string): string;
   getVariantUrl(key: string, variant: ImageVariantName): string;
   normalizeUrl(rawUrl: string | null | undefined): string;
+  cleanKey(key: string): string;
 }
 
 function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
@@ -156,6 +157,10 @@ class CloudflareR2StorageService implements IStorageService {
     }
     // Also remove any duplicate storage/file path prefix if accidentally passed as key
     k = k.replace(/^(api\/v1\/)?storage\/file\//, '');
+    k = k.replace(/^\/+/, '');
+    if (k.startsWith('uploads/')) {
+      k = k.substring('uploads/'.length);
+    }
     return k.replace(/^\/+/, '');
   }
 
@@ -577,7 +582,14 @@ class CloudflareR2StorageService implements IStorageService {
       };
     } catch (s3Err) {
       // Local disk fallback for assets stored in uploadDir
-      const localPath = path.resolve(process.cwd(), config.storage.uploadDir, cleanKey);
+      let localPath = path.resolve(process.cwd(), config.storage.uploadDir, cleanKey);
+      if (!fs.existsSync(localPath)) {
+        const strippedKey = cleanKey.replace(/^uploads\//, '');
+        const altPath = path.resolve(process.cwd(), config.storage.uploadDir, strippedKey);
+        if (fs.existsSync(altPath)) {
+          localPath = altPath;
+        }
+      }
       if (fs.existsSync(localPath)) {
         const stats = fs.statSync(localPath);
         const ext = path.extname(localPath).toLowerCase();

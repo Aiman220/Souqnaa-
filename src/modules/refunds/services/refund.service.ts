@@ -28,8 +28,10 @@ import { TaxEngine } from '../../tax/tax.service';
 import { MembershipEligibilityService } from '../../membership/membership-eligibility.service';
 import { SellerFinancialRiskService } from '../../commission/seller-financial-risk.service';
 import { RefundAmountCalculator } from './refund-amount-calculator.service';
+import { CustomerCodEligibilityService } from '../../payments/customer-cod-eligibility.service';
 import { RefundFundingWaterfallService } from './refund-funding-waterfall.service';
 import { RefundFraudDetectionService } from './refund-fraud-detector.service';
+import { RemoteConfigService } from '../../remote-config/remote-config.service';
 
 export interface CreateRefundInput {
   orderId: string;
@@ -74,6 +76,18 @@ export class RefundService {
       items,
       evidence,
     } = input;
+
+    // 0. Authoritative platform-wide feature flag check
+    const isRefundsActive = await RemoteConfigService.getInstance().isFeatureActive('refunds', {
+      userId: customerId,
+    });
+    if (!isRefundsActive) {
+      throw new AppError(
+        'تقديم طلبات الإرجاع واسترداد الأموال معطل حالياً لأسباب الصيانة التشغيلية والرقابة الإدارية.',
+        403,
+        'FEATURE_DISABLED'
+      );
+    }
 
     // Resolve reason text
     let resolvedReasonText = input.reasonText || '';
@@ -1512,6 +1526,19 @@ export class RefundService {
           where: { id: orderPayment.id },
           data: { status: newPaymentStatus },
         });
+
+        // Recalculate customer COD eligibility on refund completion
+        try {
+          await CustomerCodEligibilityService.handleRefundCompleted({
+            orderId: refund.orderId,
+            refundApprovedAmount: approvedAmount,
+            totalOrderAmount: orderPayment.amount,
+            isFraudOrDisputed: false,
+            tx,
+          });
+        } catch (codErr) {
+          console.error('[Customer COD] Failed to process refund on COD qualifying order:', codErr);
+        }
 
         if (refund.sellerOrderId) {
           await tx.sellerOrder.update({

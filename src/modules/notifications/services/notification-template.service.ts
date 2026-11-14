@@ -3,6 +3,7 @@ import {
   DomainNotificationEvent,
   RenderedNotificationContent,
   NotificationCategory,
+  AppType,
 } from '../notification.types';
 
 interface TemplateDefinition {
@@ -425,10 +426,10 @@ export class NotificationTemplateService {
       deepLinkPattern: 'souqnaa://seller/wallet',
     },
     SELLER_REFUND_REQUEST: {
-      titleAr: 'طلب استرجاع جديد من عميل 🔄',
-      titleEn: 'New refund request from customer 🔄',
-      bodyAr: 'طلب العميل استرجاع الطلب #{{orderNumber}}. يرجى اتخاذ القرار.',
-      bodyEn: 'Customer requested refund for order #{{orderNumber}}.',
+      titleAr: 'طلب استرجاع جديد',
+      titleEn: 'New Refund Request',
+      bodyAr: 'طلب العميل استرجاع الطلب #{{orderNumber}}.',
+      bodyEn: 'A customer has requested a refund for order #{{orderNumber}}.',
       deepLinkPattern: 'souqnaa://seller/refunds/{{refundId}}',
     },
     SELLER_REFUND_DISPUTED: {
@@ -718,9 +719,18 @@ export class NotificationTemplateService {
    * Renders content for a domain event using template + event variables.
    */
   async render(event: DomainNotificationEvent): Promise<RenderedNotificationContent> {
-    const template = await this.getTemplate(event.eventType);
+    const effectiveCode =
+      (event.recipientType === AppType.SELLER || (event.data?.isSeller as boolean)) &&
+      (event.eventType === 'REFUND_REQUESTED' || event.eventType === 'SELLER_REFUND_REQUEST')
+        ? 'SELLER_REFUND_REQUEST'
+        : event.eventType;
+    const template = await this.getTemplate(effectiveCode);
+    const orderNumberVal = event.data?.orderNumber || event.data?.orderId || '';
     const variables = {
       ...(event.data || {}),
+      orderNumber: orderNumberVal,
+      orderId: event.data?.orderId || '',
+      refundId: event.data?.refundId || event.entityId || '',
       recipientId: event.recipientId,
       eventType: event.eventType,
       entityId: event.entityId,

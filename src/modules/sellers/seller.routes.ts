@@ -3458,6 +3458,29 @@ router.get('/me/outstandings', async (req: Request, res: Response, next: NextFun
   }
 });
 
+// ── POST /me/outstandings/pay ──────────────────────────────────────────────────
+router.post('/me/outstandings/pay', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const seller = await getSeller(req.user!.userId);
+    const { amount, notes } = req.body;
+
+    const result = await SellerFinancialRiskService.payOutstandingFromWalletBalance({
+      sellerId: seller.id,
+      amount: amount !== undefined && amount !== null ? Number(amount) : undefined,
+      notes,
+    });
+
+    ResponseUtil.success(res, {
+      ...result,
+      message: result.isAutoUnblocked
+        ? 'تم سداد المديونية بنجاح ورفع التقييد المالي عن حسابك تلقائياً ✓'
+        : 'تم سداد المبلغ بنجاح وتحديث رصيد المديونية المتبقي',
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ── GET /me/cod-settings ───────────────────────────────────────────────────────
 router.get('/me/cod-settings', async (req: Request, res: Response, next: NextFunction) => {
   try {

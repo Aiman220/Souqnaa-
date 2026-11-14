@@ -44,6 +44,7 @@ import { AdminRbacService, SYSTEM_PERMISSIONS } from './admin-rbac.service';
 import { resolveRefundAmount } from './refund-amount.policy';
 import { resolveCustomerDepositApprovalAmount } from './deposit-approval.policy';
 import { recommendationService } from '../recommendations/services/recommendation.service';
+import { CustomerCodEligibilityService } from '../payments/customer-cod-eligibility.service';
 
 const router = Router();
 router.use(authenticate, requireAdmin);
@@ -435,11 +436,148 @@ router.get('/customers/:id', async (req: Request, res: Response, next: NextFunct
       },
     });
     if (!customer) throw new AppError('العميل غير موجود', 404);
-    ResponseUtil.success(res, customer);
+
+    // Enrich with authoritative COD eligibility and qualifying orders summary
+    let codEligibility: any = null;
+    try {
+      codEligibility = await CustomerCodEligibilityService.getCustomerCodEligibility(id);
+    } catch (_) {}
+
+    ResponseUtil.success(res, {
+      ...customer,
+      codEligibility,
+    });
   } catch (error) {
     next(error);
   }
 });
+
+// GET /api/v1/admin/customers/:id/cod-eligibility — Inspect detailed COD eligibility, qualifying orders & history
+router.get(
+  '/customers/:id/cod-eligibility',
+  requirePermission('customers:view'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id);
+      const user = await prisma.user.findUnique({
+        where: { id },
+        select: { id: true, firstName: true, lastName: true, email: true, phone: true },
+      });
+      if (!user) throw new AppError('حساب العميل غير موجود', 404);
+
+      const eligibility = await CustomerCodEligibilityService.getCustomerCodEligibility(id);
+      const qualifyingOrders = await CustomerCodEligibilityService.getQualifyingCompletedOrders(id);
+      const history = await CustomerCodEligibilityService.getCodEligibilityHistory(id);
+
+      ResponseUtil.success(res, {
+        customer: user,
+        eligibility,
+        qualifyingOrders,
+        history,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// POST /api/v1/admin/customers/:id/cod-eligibility/recalculate — Authorized recalculation based on genuine records
+router.post(
+  '/customers/:id/cod-eligibility/recalculate',
+  requirePermission('customers:manage'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id);
+      const { reason } = req.body;
+
+      const eligibility = await CustomerCodEligibilityService.recalculateCustomerCodEligibility(
+        id,
+        reason || 'إعادة احتساب وتدقيق يدوي من لوحة تحكم الإدارة',
+        req.user!.userId
+      );
+
+      await logAdminAction(
+        req.user?.userId,
+        'CUSTOMER_COD_RECALCULATED',
+        'customers',
+        { customerId: id, status: eligibility.status, count: eligibility.qualifyingOrdersCount, reason },
+        req
+      );
+
+      ResponseUtil.success(res, eligibility, 'تم إعادة تدقيق واحتساب أهلية الدفع عند الاستلام بنجاح');
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// POST /api/v1/admin/customers/:id/cod-eligibility/suspend — Suspend COD access for documented fraud/risk reasons
+router.post(
+  '/customers/:id/cod-eligibility/suspend',
+  requirePermission('customers:manage'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id);
+      const { reason } = req.body;
+
+      if (!reason || String(reason).trim().length < 5) {
+        throw new AppError('يرجى توثيق سبب تعليق خدمة الدفع عند الاستلام بالتفصيل (5 أحرف على الأقل)', 400);
+      }
+
+      const eligibility = await CustomerCodEligibilityService.invalidateEligibilityForFraud(
+        id,
+        String(reason).trim(),
+        req.user!.userId
+      );
+
+      await logAdminAction(
+        req.user?.userId,
+        'CUSTOMER_COD_SUSPENDED',
+        'customers',
+        { customerId: id, reason },
+        req
+      );
+
+      ResponseUtil.success(res, eligibility, 'تم تعليق خدمة الدفع عند الاستلام لحساب العميل بنجاح');
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// POST /api/v1/admin/customers/:id/cod-eligibility/reinstate — Reinstate COD access after authorized review
+router.post(
+  '/customers/:id/cod-eligibility/reinstate',
+  requirePermission('customers:manage'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id);
+      const { reason } = req.body;
+
+      if (!reason || String(reason).trim().length < 5) {
+        throw new AppError('يرجى توثيق سبب رفع التعليق وإعادة التفعيل بالتفصيل (5 أحرف على الأقل)', 400);
+      }
+
+      const eligibility = await CustomerCodEligibilityService.reinstateCodEligibility(
+        id,
+        String(reason).trim(),
+        req.user!.userId
+      );
+
+      await logAdminAction(
+        req.user?.userId,
+        'CUSTOMER_COD_REINSTATED',
+        'customers',
+        { customerId: id, reason, newStatus: eligibility.status },
+        req
+      );
+
+      ResponseUtil.success(res, eligibility, 'تم رفع التعليق وتحديث أهلية الدفع عند الاستلام للعميل بنجاح');
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 router.post('/customers', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -1203,143 +1341,6 @@ router.get('/products', async (req: Request, res: Response, next: NextFunction) 
   }
 });
 
-router.get('/products/:id', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const id = String(req.params.id);
-    const product = await prisma.product.findUnique({
-      where: { id },
-      include: {
-        category: true,
-        store: { include: { seller: { include: { user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } } } } } },
-        images: { orderBy: { sortOrder: 'asc' } },
-        variants: true,
-        inventory: { select: { quantity: true, lowStockAlert: true, reserved: true } },
-        reports: {
-          take: 20,
-          orderBy: { createdAt: 'desc' },
-          include: { user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } } },
-        },
-        productReviews: {
-          take: 10,
-          orderBy: { createdAt: 'desc' },
-          select: { id: true, rating: true, title: true, body: true, status: true, createdAt: true, user: { select: { id: true, firstName: true, lastName: true } } },
-        },
-        _count: { select: { productReviews: true, orderItems: true, reports: true } },
-      },
-    });
-    if (!product) throw new AppError('المنتج غير موجود', 404);
-
-    const normalizedImages = product.images.map((img) => ({
-      ...img,
-      url: storageService.normalizeUrl(img.url),
-    }));
-
-    const formatted = {
-      ...product,
-      images: normalizedImages,
-      imageUrl: normalizedImages[0]?.url || null,
-      stock: product.inventory?.quantity ?? 0,
-      reportsCount: product._count?.reports ?? 0,
-      reviewsCount: product._count?.productReviews ?? product.reviewCount ?? 0,
-      ordersCount: product._count?.orderItems ?? 0,
-      reviews: product.productReviews, // alias for compatibility
-    };
-
-    ResponseUtil.success(res, formatted);
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.post('/products/:id/approve', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const id = String(req.params.id);
-    const product = await prisma.product.update({
-      where: { id },
-      data: { isActive: true },
-    });
-    await logAdminAction(req.user?.userId, 'PRODUCT_APPROVED', 'products', { id }, req);
-    recommendationService.invalidateProductCache(id).catch(() => {});
-    ResponseUtil.success(res, product, 'تم اعتماد وتفعيل نشر المنتج في السوق');
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.post('/products/:id/suspend', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const id = String(req.params.id);
-    const { reason, reportType } = req.body;
-    const product = await prisma.product.update({
-      where: { id },
-      data: { isActive: false },
-    });
-    await logAdminAction(req.user?.userId, 'PRODUCT_SUSPENDED', 'products', { id, reason, reportType }, req);
-    recommendationService.invalidateProductCache(id).catch(() => {});
-    ResponseUtil.success(res, product, 'تم إيقاف وحجب المنتج عن العرض لانتهاك السياسات أو البلاغات');
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.put('/products/:id', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const id = String(req.params.id);
-    const { nameAr, nameEn, price, stock, categoryId, isActive } = req.body;
-
-    const [updated] = await Promise.all([
-      prisma.product.update({
-        where: { id },
-        data: {
-          ...(nameAr ? { nameAr } : {}),
-          ...(nameEn ? { nameEn } : {}),
-          ...(price !== undefined ? { price: Number(price) } : {}),
-          ...(categoryId ? { categoryId } : {}),
-          ...(isActive !== undefined ? { isActive: Boolean(isActive) } : {}),
-        },
-      }),
-      stock !== undefined
-        ? prisma.inventory.upsert({
-            where: { productId: id },
-            create: { productId: id, quantity: Number(stock) },
-            update: { quantity: Number(stock) },
-          })
-        : Promise.resolve(null),
-    ]);
-
-    await logAdminAction(req.user?.userId, 'PRODUCT_UPDATED', 'products', { id, nameAr, price, stock }, req);
-    recommendationService.invalidateProductCache(id).catch(() => {});
-    ResponseUtil.success(res, { ...updated, stock: stock !== undefined ? Number(stock) : undefined }, 'تم تحديث بيانات المنتج بنجاح');
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.delete('/products/:id', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const id = String(req.params.id);
-    const existing = await prisma.product.findUnique({
-      where: { id },
-      include: { _count: { select: { orderItems: true } } },
-    });
-    if (!existing) throw new AppError('المنتج غير موجود', 404);
-
-    if (existing._count.orderItems > 0) {
-      await prisma.product.update({ where: { id }, data: { isActive: false } });
-      await logAdminAction(req.user?.userId, 'PRODUCT_SOFT_DELETED', 'products', { id, reason: 'Has order items' }, req);
-      recommendationService.invalidateProductCache(id).catch(() => {});
-      ResponseUtil.success(res, null, 'نظراً لوجود مبيعات سابقة للمنتج، تم حجب المنتج وأرشفته');
-    } else {
-      await prisma.product.delete({ where: { id } });
-      await logAdminAction(req.user?.userId, 'PRODUCT_DELETED', 'products', { id }, req);
-      recommendationService.invalidateProductCache(id).catch(() => {});
-      ResponseUtil.success(res, null, 'تم حذف المنتج نهائياً من قاعدة البيانات');
-    }
-  } catch (error) {
-    next(error);
-  }
-});
-
 // ==============================================================================
 // 5.1 PRODUCT REPORTS QUEUE (طابور بلاغات وشكاوى المنتجات المخالفة)
 // ==============================================================================
@@ -1507,6 +1508,143 @@ router.post(['/products/reports/:id/dismiss', '/product-reports/:id/dismiss'], a
 
     await logAdminAction(req.user?.userId, 'PRODUCT_REPORT_DISMISSED', 'products', { id, adminNote }, req);
     ResponseUtil.success(res, null, 'تم رفض البلاغ وإغلاقه');
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/products/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params.id);
+    const product = await prisma.product.findUnique({
+      where: { id },
+      include: {
+        category: true,
+        store: { include: { seller: { include: { user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } } } } } },
+        images: { orderBy: { sortOrder: 'asc' } },
+        variants: true,
+        inventory: { select: { quantity: true, lowStockAlert: true, reserved: true } },
+        reports: {
+          take: 20,
+          orderBy: { createdAt: 'desc' },
+          include: { user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } } },
+        },
+        productReviews: {
+          take: 10,
+          orderBy: { createdAt: 'desc' },
+          select: { id: true, rating: true, title: true, body: true, status: true, createdAt: true, user: { select: { id: true, firstName: true, lastName: true } } },
+        },
+        _count: { select: { productReviews: true, orderItems: true, reports: true } },
+      },
+    });
+    if (!product) throw new AppError('المنتج غير موجود', 404);
+
+    const normalizedImages = product.images.map((img) => ({
+      ...img,
+      url: storageService.normalizeUrl(img.url),
+    }));
+
+    const formatted = {
+      ...product,
+      images: normalizedImages,
+      imageUrl: normalizedImages[0]?.url || null,
+      stock: product.inventory?.quantity ?? 0,
+      reportsCount: product._count?.reports ?? 0,
+      reviewsCount: product._count?.productReviews ?? product.reviewCount ?? 0,
+      ordersCount: product._count?.orderItems ?? 0,
+      reviews: product.productReviews, // alias for compatibility
+    };
+
+    ResponseUtil.success(res, formatted);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/products/:id/approve', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params.id);
+    const product = await prisma.product.update({
+      where: { id },
+      data: { isActive: true },
+    });
+    await logAdminAction(req.user?.userId, 'PRODUCT_APPROVED', 'products', { id }, req);
+    recommendationService.invalidateProductCache(id).catch(() => {});
+    ResponseUtil.success(res, product, 'تم اعتماد وتفعيل نشر المنتج في السوق');
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/products/:id/suspend', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params.id);
+    const { reason, reportType } = req.body;
+    const product = await prisma.product.update({
+      where: { id },
+      data: { isActive: false },
+    });
+    await logAdminAction(req.user?.userId, 'PRODUCT_SUSPENDED', 'products', { id, reason, reportType }, req);
+    recommendationService.invalidateProductCache(id).catch(() => {});
+    ResponseUtil.success(res, product, 'تم إيقاف وحجب المنتج عن العرض لانتهاك السياسات أو البلاغات');
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.put('/products/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params.id);
+    const { nameAr, nameEn, price, stock, categoryId, isActive } = req.body;
+
+    const [updated] = await Promise.all([
+      prisma.product.update({
+        where: { id },
+        data: {
+          ...(nameAr ? { nameAr } : {}),
+          ...(nameEn ? { nameEn } : {}),
+          ...(price !== undefined ? { price: Number(price) } : {}),
+          ...(categoryId ? { categoryId } : {}),
+          ...(isActive !== undefined ? { isActive: Boolean(isActive) } : {}),
+        },
+      }),
+      stock !== undefined
+        ? prisma.inventory.upsert({
+            where: { productId: id },
+            create: { productId: id, quantity: Number(stock) },
+            update: { quantity: Number(stock) },
+          })
+        : Promise.resolve(null),
+    ]);
+
+    await logAdminAction(req.user?.userId, 'PRODUCT_UPDATED', 'products', { id, nameAr, price, stock }, req);
+    recommendationService.invalidateProductCache(id).catch(() => {});
+    ResponseUtil.success(res, { ...updated, stock: stock !== undefined ? Number(stock) : undefined }, 'تم تحديث بيانات المنتج بنجاح');
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete('/products/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params.id);
+    const existing = await prisma.product.findUnique({
+      where: { id },
+      include: { _count: { select: { orderItems: true } } },
+    });
+    if (!existing) throw new AppError('المنتج غير موجود', 404);
+
+    if (existing._count.orderItems > 0) {
+      await prisma.product.update({ where: { id }, data: { isActive: false } });
+      await logAdminAction(req.user?.userId, 'PRODUCT_SOFT_DELETED', 'products', { id, reason: 'Has order items' }, req);
+      recommendationService.invalidateProductCache(id).catch(() => {});
+      ResponseUtil.success(res, null, 'نظراً لوجود مبيعات سابقة للمنتج، تم حجب المنتج وأرشفته');
+    } else {
+      await prisma.product.delete({ where: { id } });
+      await logAdminAction(req.user?.userId, 'PRODUCT_DELETED', 'products', { id }, req);
+      recommendationService.invalidateProductCache(id).catch(() => {});
+      ResponseUtil.success(res, null, 'تم حذف المنتج نهائياً من قاعدة البيانات');
+    }
   } catch (error) {
     next(error);
   }
@@ -2031,6 +2169,29 @@ const handleVerifyWalletPayment = async (req: Request, res: Response, next: Next
     if (!order.payment) throw new AppError('لا توجد بيانات دفع مسجلة لهذا الطلب', 404);
 
     const payment = order.payment;
+    if (payment.status === PaymentStatus.PAID) {
+      throw new AppError('تم اعتماد وتأكيد دفعة هذا الطلب مسبقاً (عملية معتمدة مسبقاً)', 409, 'PAYMENT_ALREADY_VERIFIED');
+    }
+
+    const effectiveRef = String(adminReference || payment.walletTransactionRef || '').trim();
+    if (effectiveRef && effectiveRef.length > 2) {
+      const duplicateRef = await prisma.payment.findFirst({
+        where: {
+          walletTransactionRef: effectiveRef,
+          status: PaymentStatus.PAID,
+          orderId: { not: order.id },
+        },
+        select: { id: true, orderId: true },
+      });
+      if (duplicateRef) {
+        throw new AppError(
+          `رقم العملية أو المرجع البنكي [${effectiveRef}] تم اعتماده مسبقاً لطلب آخر. يرجى التأكد من صحة إشعار التحويل.`,
+          409,
+          'DUPLICATE_TRANSACTION_REFERENCE'
+        );
+      }
+    }
+
     const effectiveProvider = payment.walletProvider || 'محفظة رقمية';
 
     const result = await prisma.$transaction(async (tx) => {
@@ -2040,7 +2201,7 @@ const handleVerifyWalletPayment = async (req: Request, res: Response, next: Next
         data: {
           status: PaymentStatus.PAID,
           paidAt: new Date(),
-          transactionId: adminReference || payment.walletTransactionRef || payment.transactionId || `VERIFIED-${Date.now()}`,
+          transactionId: effectiveRef || payment.transactionId || `VERIFIED-${Date.now()}`,
         },
       });
 
@@ -2066,7 +2227,7 @@ const handleVerifyWalletPayment = async (req: Request, res: Response, next: Next
           data: {
             paymentId: payment.id,
             gateway: effectiveProvider,
-            referenceId: adminReference || payment.walletTransactionRef || updatedPayment.transactionId,
+            referenceId: effectiveRef || updatedPayment.transactionId,
             amount: payment.amount,
             status: PaymentStatus.PAID,
             rawResponse: JSON.stringify({
@@ -2078,7 +2239,24 @@ const handleVerifyWalletPayment = async (req: Request, res: Response, next: Next
         });
       }
 
-      // 3. Keep order & sellerOrders in PENDING so they proceed to the seller side under "جديدة / بانتظار القبول" (Pending acceptance)
+      // 3. Record immutable PaymentVerificationAudit log (§3)
+      await tx.paymentVerificationAudit.create({
+        data: {
+          paymentId: payment.id,
+          orderId: order.id,
+          customerId: order.userId,
+          paymentProvider: effectiveProvider,
+          transactionReference: effectiveRef || updatedPayment.transactionId || 'MANUAL-REF',
+          verificationOperator: req.user!.userId,
+          previousPaymentStatus: payment.status,
+          newPaymentStatus: PaymentStatus.PAID,
+          amount: payment.amount,
+          currency: order.currency,
+          note: note || null,
+        },
+      });
+
+      // 4. Keep order & sellerOrders in PENDING so they proceed to the seller side under "جديدة / بانتظار القبول" (Pending acceptance)
       let updatedOrder = order;
       if (order.status === OrderStatus.PENDING) {
         await tx.sellerOrder.updateMany({
@@ -2087,7 +2265,12 @@ const handleVerifyWalletPayment = async (req: Request, res: Response, next: Next
         });
       }
 
-      // 4. Create OrderStatusHistory
+      // 5. If order has already reached DELIVERED terminal status, evaluate for COD qualification now
+      if (order.status === OrderStatus.DELIVERED) {
+        await CustomerCodEligibilityService.evaluateQualifyingOrder(order.id, tx);
+      }
+
+      // 6. Create OrderStatusHistory
       await tx.orderStatusHistory.create({
         data: {
           orderId: order.id,

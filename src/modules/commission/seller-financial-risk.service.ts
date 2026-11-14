@@ -13,6 +13,8 @@ import { notificationEventBus } from '../notifications/services/event-bus';
 import { NotificationEventFactory } from '../notifications/events/domain-events';
 import { remoteConfigService } from '../remote-config/remote-config.service';
 import { SellerCodSettlementService } from './seller-cod-settlement.service';
+import { CustomerCodEligibilityService, CodEligibilityResult } from '../payments/customer-cod-eligibility.service';
+import { TaxMath } from '../tax/tax.math';
 
 export interface FinancialRiskThresholds {
   warningThreshold: number;        // e.g. 5,000 YER
@@ -562,6 +564,13 @@ export class SellerFinancialRiskService {
   }> {
     const thresholds = await this.getRiskThresholds();
 
+    // Check current seller state to track unblocking transitions
+    const currentSeller = await tx.seller.findUnique({
+      where: { id: sellerId },
+      select: { id: true, userId: true, isFinanciallyRestricted: true, financialRestrictionLevel: true },
+    });
+    const wasRestricted = currentSeller?.isFinanciallyRestricted || false;
+
     // Fetch active outstandings
     const activeOutstandings = await tx.sellerOutstanding.findMany({
       where: { sellerId, status: { in: ['OPEN', 'PARTIALLY_PAID'] } },
@@ -657,6 +666,42 @@ export class SellerFinancialRiskService {
           withdrawalsRestricted: false,
         },
       });
+
+      // Synchronize SellerBalance.outstandingCommission with active remaining debt
+      await tx.sellerBalance.updateMany({
+        where: { sellerId },
+        data: { outstandingCommission: totalRemaining },
+      });
+
+      // If seller was restricted, trigger automatic unblock events and notifications
+      if (wasRestricted && currentSeller?.userId) {
+        try {
+          SocketService.get()?.emitToUser(currentSeller.userId, 'seller:account_unblocked', {
+            sellerId,
+            reason: `سداد المديونية تلقائياً إلى ما دون حد فك التقييد (${totalRemaining} ر.ي)`,
+            unblockedBy: 'SYSTEM_AUTO',
+          });
+          SocketService.get()?.emitToUser(currentSeller.userId, 'seller:finance_updated', {
+            isFinanciallyRestricted: false,
+            outstandingCommission: totalRemaining,
+          });
+          SocketService.get()?.emitGlobal('admin:risk_updated', {
+            sellerId,
+            isRestricted: false,
+            totalRemaining,
+          });
+
+          notificationEventBus.publish(
+            NotificationEventFactory.walletEvent({
+              eventType: 'WALLET_TOPUP_APPROVED',
+              recipientId: currentSeller.userId,
+              amount: totalRemaining,
+              currency: 'YER',
+              referenceId: `AUTO-UNBLOCK-${sellerId}`,
+            })
+          );
+        } catch (_) {}
+      }
     } else if (totalRemaining >= thresholds.criticalThreshold) {
       restrictionLevel = 'CRITICAL';
       await tx.seller.update({
@@ -940,6 +985,7 @@ export class SellerFinancialRiskService {
     isCodAvailable: boolean;
     reason?: string;
     sellerStatus: Record<string, { enabled: boolean; restricted: boolean }>;
+    customerCodEligibility?: CodEligibilityResult;
   }> {
     const isPlatformCodActive = await remoteConfigService.isFeatureActive('cash_on_delivery');
     if (!isPlatformCodActive) {
@@ -950,28 +996,27 @@ export class SellerFinancialRiskService {
       };
     }
 
-    // Customer COD Policy: COD is available only after completing at least 3 orders (DELIVERED status)
+    let customerCodResult: CodEligibilityResult | undefined;
+    // Customer COD Policy: Authoritative Backend COD Eligibility Evaluation
     if (params.customerId) {
-      const completedOrdersCount = await prisma.order.count({
-        where: {
-          userId: params.customerId,
-          status: 'DELIVERED',
-        },
-      });
-
-      const MIN_COMPLETED_ORDERS_FOR_COD = 3;
-      if (completedOrdersCount < MIN_COMPLETED_ORDERS_FOR_COD) {
-        const remaining = MIN_COMPLETED_ORDERS_FOR_COD - completedOrdersCount;
+      customerCodResult = await CustomerCodEligibilityService.getCustomerCodEligibility(params.customerId);
+      if (!customerCodResult.isCodAvailable) {
         return {
           isCodAvailable: false,
-          reason: `خدمة الدفع عند الاستلام (COD) متاحة للعميل بعد إكمال 3 طلبات ناجحة سابقة. (أكملت ${completedOrdersCount} من ${MIN_COMPLETED_ORDERS_FOR_COD}، متبقي ${remaining}). يرجى اختيار وسيلة دفع بديلة لإتمام طلبك.`,
+          reason: customerCodResult.reason,
           sellerStatus: {},
+          customerCodEligibility: customerCodResult,
         };
       }
     }
 
     if (!params.sellerIds || params.sellerIds.length === 0) {
-      return { isCodAvailable: false, reason: 'لا توجد متاجر في سلة الشراء', sellerStatus: {} };
+      return {
+        isCodAvailable: false,
+        reason: 'لا توجد متاجر في سلة الشراء',
+        sellerStatus: {},
+        customerCodEligibility: customerCodResult,
+      };
     }
 
     const sellers = await prisma.seller.findMany({
@@ -1023,6 +1068,7 @@ export class SellerFinancialRiskService {
       isCodAvailable: allEligible,
       reason: failureReason,
       sellerStatus,
+      customerCodEligibility: customerCodResult,
     };
   }
 
@@ -1404,6 +1450,145 @@ export class SellerFinancialRiskService {
     });
 
     return updated;
+  }
+
+  /**
+   * Allows a seller to immediately settle their outstanding debt directly from their available wallet balance.
+   * If debt falls below unblockThreshold, the account is unrestricted automatically.
+   */
+  public static async payOutstandingFromWalletBalance(params: {
+    sellerId: string;
+    amount?: number;
+    notes?: string;
+  }): Promise<{
+    amountPaid: number;
+    remainingDebt: number;
+    isAutoUnblocked: boolean;
+    availableBalanceAfter: number;
+  }> {
+    const { sellerId, amount: requestedAmount, notes } = params;
+
+    return await prisma.$transaction(async (tx) => {
+      // 1. Fetch and lock SellerBalance
+      const balance = await tx.sellerBalance.findUnique({
+        where: { sellerId },
+      });
+
+      if (!balance) {
+        throw new AppError('محفظة البائع غير موجودة', 404);
+      }
+
+      // Lock row
+      try {
+        await tx.$executeRaw`
+          SELECT "id", "availableBalance"
+          FROM "SellerBalance"
+          WHERE "id" = ${balance.id}
+          FOR UPDATE
+        `;
+      } catch (_) {}
+
+      const freshBalance = await tx.sellerBalance.findUnique({
+        where: { id: balance.id },
+      });
+      const currentAvailable = Math.max(0, Number(freshBalance?.availableBalance || 0));
+
+      if (currentAvailable <= 0) {
+        throw new AppError('رصيد المحفظة المتاح صفر. يرجى شحن المحفظة بسند إيداع لسداد المديونية.', 400);
+      }
+
+      // 2. Fetch open outstandings FIFO
+      const openOutstandings = await tx.sellerOutstanding.findMany({
+        where: { sellerId, status: { in: ['OPEN', 'PARTIALLY_PAID'] } },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      const totalOpenDebt = openOutstandings.reduce(
+        (sum: number, o: any) => sum + Number(o.remainingAmount || 0),
+        0
+      );
+
+      if (totalOpenDebt <= 0) {
+        throw new AppError('لا توجد مديونيات قائمة مستحقة السداد على هذا الحساب.', 400);
+      }
+
+      // 3. Determine amount to pay
+      let amountToDeduct = requestedAmount !== undefined && requestedAmount > 0
+        ? Math.min(requestedAmount, totalOpenDebt, currentAvailable)
+        : Math.min(totalOpenDebt, currentAvailable);
+
+      amountToDeduct = Math.round(amountToDeduct * 100) / 100;
+
+      if (amountToDeduct <= 0) {
+        throw new AppError('مبلغ السداد المطلوب غير صالح أو يتجاوز الرصيد المتاح بالمحفظة.', 400);
+      }
+
+      // 4. Deduct from available balance & decrement outstandingCommission
+      const newAvailable = TaxMath.subtract(currentAvailable, amountToDeduct);
+      await tx.sellerBalance.update({
+        where: { id: balance.id },
+        data: {
+          availableBalance: newAvailable,
+          outstandingCommission: { decrement: amountToDeduct },
+        },
+      });
+
+      // 5. Offset open liabilities FIFO
+      let unallocated = amountToDeduct;
+      for (const out of openOutstandings) {
+        if (unallocated <= 0) break;
+        const currentRemaining = Number(out.remainingAmount || 0);
+        const toPay = Math.min(unallocated, currentRemaining);
+        const newPaid = TaxMath.add(Number(out.paidAmount || 0), toPay);
+        const newRemaining = TaxMath.subtract(currentRemaining, toPay);
+        const newStatus = newRemaining <= 0.001 ? 'PAID' : 'PARTIALLY_PAID';
+
+        await tx.sellerOutstanding.update({
+          where: { id: out.id },
+          data: {
+            paidAmount: newPaid,
+            remainingAmount: Math.max(0, newRemaining),
+            status: newStatus,
+          },
+        });
+
+        // Record DebtRecoveryAllocation
+        await tx.debtRecoveryAllocation.create({
+          data: {
+            sellerId,
+            outstandingId: out.id,
+            amount: toPay,
+            currency: out.currency || 'YER',
+            recoveredFrom: 'WALLET',
+            transactionRef: `PAY-WLT-${Date.now().toString(36).toUpperCase()}`,
+            notes: notes || 'سداد فوري من رصيد المحفظة المتاح للتاجر',
+          },
+        });
+
+        unallocated = TaxMath.subtract(unallocated, toPay);
+      }
+
+      // 6. Record transaction in SellerTransaction
+      await tx.sellerTransaction.create({
+        data: {
+          sellerBalanceId: balance.id,
+          amount: -amountToDeduct,
+          type: 'OUTSTANDING_PAYMENT',
+          referenceId: `OUT-PAY-${Date.now()}`,
+          description: `سداد مديونية ومستحقات المنصة من الرصيد المتاح (${amountToDeduct} YER)`,
+        },
+      });
+
+      // 7. Re-evaluate restrictions & auto-unblock
+      const restrictionResult = await this.evaluateAndApplyRestrictions(tx, sellerId);
+
+      return {
+        amountPaid: amountToDeduct,
+        remainingDebt: restrictionResult.totalRemainingDebt,
+        isAutoUnblocked: !restrictionResult.isRestricted,
+        availableBalanceAfter: newAvailable,
+      };
+    });
   }
 
   /**

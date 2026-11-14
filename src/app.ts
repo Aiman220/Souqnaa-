@@ -5,6 +5,7 @@ import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import compression from 'compression';
 import path from 'path';
+import fs from 'fs';
 
 import { config } from './config';
 import { errorHandler } from './middleware/error.middleware';
@@ -446,6 +447,20 @@ export const createApp = (): Application => {
       ]);
     }
   );
+
+  // Static uploads directory fallback for legacy /uploads/... paths
+  const uploadDir = path.resolve(process.cwd(), config.storage.uploadDir || './uploads');
+  if (fs.existsSync(uploadDir)) {
+    app.use(
+      '/uploads',
+      express.static(uploadDir, {
+        maxAge: '1d',
+        setHeaders: (res) => {
+          res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+        },
+      })
+    );
+  }
 
   // Root welcome & API status
   app.get('/', (req: Request, res: Response) => {

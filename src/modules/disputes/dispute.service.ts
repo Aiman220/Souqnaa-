@@ -16,6 +16,7 @@ import { adminNotificationRouter } from '../notifications/services/admin-notific
 import { NotificationCategory, NotificationPriority } from '../notifications/notification.types';
 import { CustomerWalletService } from '../wallet/customer-wallet.service';
 import { RefundService } from '../refunds/services/refund.service';
+import { RemoteConfigService } from '../remote-config/remote-config.service';
 import { redis } from '../../database/redis';
 
 export interface CreateDisputeInput {
@@ -183,6 +184,21 @@ export class DisputeService {
           where: { orderId: order.id, customerId },
           orderBy: { createdAt: 'desc' },
         });
+
+    // If no existing refund request exists, creating a new dispute would initiate a new refund request.
+    // Validate feature flag server-side to prevent bypassing the Refunds OFF toggle.
+    if (!refundReq) {
+      const isRefundsActive = await RemoteConfigService.getInstance().isFeatureActive('refunds', {
+        userId: customerId,
+      });
+      if (!isRefundsActive) {
+        throw new AppError(
+          'تقديم طلبات الإرجاع واسترداد الأموال معطل حالياً لأسباب الصيانة التشغيلية.',
+          403,
+          'FEATURE_DISABLED'
+        );
+      }
+    }
 
     // Identify target seller
     let targetSeller: { id: string; userId: string } | undefined = order.sellerOrders[0]?.seller;

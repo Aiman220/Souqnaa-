@@ -250,12 +250,47 @@ export class FcmPushProvider implements NotificationProvider {
       }
     }
 
+    // Guarantee exact required push payload keys for refund requests (§3)
+    const rawType = params.data?.type || params.data?.eventType || resolvedEntityType;
+    if (rawType === 'SELLER_REFUND_REQUEST' || rawType === 'REFUND_REQUESTED') {
+      dataEntries['type'] = 'REFUND_REQUESTED';
+    } else if (rawType && !dataEntries['type']) {
+      dataEntries['type'] = String(rawType);
+    }
+
+    if (!dataEntries['refundId']) {
+      const refundId = String(params.data?.refundId || (resolvedEntityType === 'refund' ? resolvedEntityId : ''));
+      if (refundId) dataEntries['refundId'] = refundId;
+    }
+
+    if (!dataEntries['orderId']) {
+      const orderId = String(params.data?.orderId || '');
+      if (orderId) dataEntries['orderId'] = orderId;
+    }
+
+    if (!dataEntries['notificationId'] && params.notificationId) {
+      dataEntries['notificationId'] = String(params.notificationId);
+    }
+
+    // Strip customer and system sensitive data to prevent credential/PII leaks (§3)
+    const sensitiveKeys = [
+      'customerName', 'customerEmail', 'customerPhone', 'customerAddress',
+      'password', 'token', 'secret', 'creditCard', 'cardNumber', 'cvv', 'pin',
+    ];
+    for (const sKey of sensitiveKeys) {
+      delete dataEntries[sKey];
+    }
+
+    const isEn = params.data?.locale === 'en' || (params as any).locale === 'en';
+    const notifTitle = isEn && params.content.titleEn ? params.content.titleEn : (params.content.titleAr || params.content.titleEn || '');
+    const notifBody = isEn && params.content.bodyEn ? params.content.bodyEn : (params.content.bodyAr || params.content.bodyEn || '');
+
     return {
       message: {
         token,
         notification: {
-          title: params.content.titleAr,
-          body: params.content.bodyAr,
+          title: notifTitle,
+          body: notifBody,
           ...(params.content.imageUrl ? { image: params.content.imageUrl } : {}),
         },
         data: dataEntries,
@@ -391,43 +426,78 @@ export class FcmPushProvider implements NotificationProvider {
 
         for (const token of eligibleTokens) {
           const payload = this.buildFcmMessage(token, params);
-          try {
-            const res = await fetch(url, {
-              method: 'POST',
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify(payload),
-            });
+          let tokenDelivered = false;
+          let lastErrStatus: number | undefined;
+          let lastErrBody: string | undefined;
 
-            if (res.ok) {
-              const resJson = (await res.json()) as any;
-              successfulMessageIds.push(resJson.name || `msg_${Date.now()}`);
-              console.log(
-                `[FCM Push] [fcm_provider_accepted_or_rejected] status=ACCEPTED token=${this.sanitizeToken(token)} user=${params.recipientId} messageId=${resJson.name}`
-              );
-            } else {
-              const errBody = await res.text();
-              const sanitizedErr = errBody.replace(/[A-Za-z0-9_-]{20,}/g, '***');
-              errors.push(`Status ${res.status}: ${sanitizedErr}`);
-              console.warn(
-                `[FCM Push] [fcm_provider_accepted_or_rejected] status=REJECTED token=${this.sanitizeToken(token)} httpStatus=${res.status} error=${sanitizedErr}`
-              );
+          const maxTokenAttempts = 3;
+          for (let attempt = 1; attempt <= maxTokenAttempts; attempt++) {
+            try {
+              const res = await fetch(url, {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${accessToken}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload),
+              });
 
+              if (res.ok) {
+                const resJson = (await res.json()) as any;
+                successfulMessageIds.push(resJson.name || `msg_${Date.now()}`);
+                console.log(
+                  `[FCM Push] [fcm_provider_accepted_or_rejected] status=ACCEPTED token=${this.sanitizeToken(token)} user=${params.recipientId} messageId=${resJson.name}`
+                );
+                tokenDelivered = true;
+                break;
+              }
+
+              lastErrStatus = res.status;
+              lastErrBody = await res.text();
+
+              // Permanent client token invalidation errors - do not retry
               if (
                 res.status === 404 ||
-                errBody.includes('UNREGISTERED') ||
-                errBody.includes('NOT_FOUND') ||
-                errBody.includes('registration-token-not-registered') ||
-                errBody.includes('INVALID_ARGUMENT')
+                lastErrBody.includes('UNREGISTERED') ||
+                lastErrBody.includes('NOT_FOUND') ||
+                lastErrBody.includes('registration-token-not-registered') ||
+                lastErrBody.includes('INVALID_ARGUMENT')
               ) {
                 invalidTokens.push(token);
                 console.warn(`[FCM Push] Token invalid/unregistered: ${this.sanitizeToken(token)}`);
+                break;
               }
+
+              // Transient errors (HTTP 429 rate limit or 5xx server errors) - retry with exponential backoff
+              if (attempt < maxTokenAttempts && (res.status === 429 || res.status >= 500)) {
+                const backoffMs = 300 * Math.pow(2, attempt - 1);
+                console.warn(
+                  `[FCM Push] Transient error ${res.status} for token ${this.sanitizeToken(token)}. Retrying in ${backoffMs}ms (attempt ${attempt + 1}/${maxTokenAttempts})...`
+                );
+                await new Promise((r) => setTimeout(r, backoffMs));
+                continue;
+              }
+              break;
+            } catch (netErr: any) {
+              if (attempt < maxTokenAttempts) {
+                const backoffMs = 300 * Math.pow(2, attempt - 1);
+                console.warn(
+                  `[FCM Push] Network error for token ${this.sanitizeToken(token)}: ${netErr.message}. Retrying in ${backoffMs}ms...`
+                );
+                await new Promise((r) => setTimeout(r, backoffMs));
+                continue;
+              }
+              errors.push(netErr.message);
+              break;
             }
-          } catch (netErr: any) {
-            errors.push(netErr.message);
+          }
+
+          if (!tokenDelivered && lastErrStatus) {
+            const sanitizedErr = (lastErrBody || '').replace(/[A-Za-z0-9_-]{20,}/g, '***');
+            errors.push(`Status ${lastErrStatus}: ${sanitizedErr}`);
+            console.warn(
+              `[FCM Push] [fcm_provider_accepted_or_rejected] status=REJECTED token=${this.sanitizeToken(token)} httpStatus=${lastErrStatus} error=${sanitizedErr}`
+            );
           }
         }
       } catch (authErr: any) {

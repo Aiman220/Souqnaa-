@@ -628,6 +628,23 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagSeedDefinition[] = [
     dependencies: ['cash_on_delivery'],
   },
   {
+    key: 'customer_cod_eligibility',
+    enabled: true,
+    displayNameAr: 'أهلية وموثوقية الدفع عند الاستلام للعملاء (Customer COD Trust)',
+    displayNameEn: 'Customer COD Eligibility & Trust Engine',
+    descriptionAr: 'اشتراط إكمال العميل لـ 3 طلبات دفع مسبق ناجحة ومؤكدة لتفعيل خيار الدفع عند الاستلام',
+    descriptionEn: 'Require customers to complete at least 3 verified prepaid orders to unlock Cash on Delivery',
+    isSensitive: true,
+    rolloutPercentage: 100,
+    platforms: ['android', 'ios', 'windows', 'web'],
+    dependencies: ['cash_on_delivery'],
+    metadata: {
+      minQualifyingOrders: 3,
+      allowPartialRefundOrders: true,
+      maxHistoryRecordsPerFetch: 50,
+    },
+  },
+  {
     key: 'seller_commission_outstanding_enabled',
     enabled: true,
     displayNameAr: 'نظام مديونية عمولات المنصة لطلبات الدفع عند الاستلام',
@@ -885,13 +902,13 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagSeedDefinition[] = [
   },
   {
     key: 'refunds',
-    enabled: true, // Standard marketplace consumer rights
+    enabled: true, // Standard marketplace consumer rights: default true
     displayNameAr: 'نظام المرتجعات واسترداد المبالغ',
-    displayNameEn: 'Refunds & Returns',
-    descriptionAr: 'السماح للعملاء بطلب إرجاع المنتجات وفتح طلبات استرداد الأموال وفحصها',
-    descriptionEn: 'Enable customer product return requests and automated refund workflows',
-    maintenanceMessageAr: 'تقديم طلبات الإرجاع معلق مؤقتاً لأعمال الجرد والرقابة الدورية',
-    maintenanceMessageEn: 'Return requests are temporarily suspended for operational inventory reconciliation.',
+    displayNameEn: 'Refunds',
+    descriptionAr: 'تمكين أو تعطيل تقديم طلبات استرجاع المنتجات واسترداد المبالغ للعملاء.',
+    descriptionEn: 'Enable or disable customer refund requests and refund functionality.',
+    maintenanceMessageAr: 'تقديم طلبات الإرجاع واسترداد الأموال معلق مؤقتاً لأعمال الجرد والرقابة الدورية من إدارة المنصة',
+    maintenanceMessageEn: 'Return and refund requests are temporarily suspended for operational inventory reconciliation and audit.',
     isSensitive: true,
     rolloutPercentage: 100,
     platforms: ['android', 'ios', 'web'],

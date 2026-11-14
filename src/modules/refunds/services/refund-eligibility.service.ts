@@ -83,6 +83,17 @@ export class RefundEligibilityService {
       userId: customerId,
     });
     if (!isRefundsActive) {
+      const existingRefund = await prisma.refundRequest.findFirst({
+        where: { orderId: order.id, ...(customerId ? { customerId } : {}) },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, status: true },
+      });
+      const existingDispute = await prisma.dispute.findFirst({
+        where: { orderId: order.id, ...(customerId ? { customerId } : {}) },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, status: true },
+      });
+
       return {
         orderId: order.id,
         orderNumber: order.orderNumber,
@@ -100,6 +111,10 @@ export class RefundEligibilityService {
         pendingRefundTotal: 0,
         remainingRefundableTotal: 0,
         allowedRefundTypes: [],
+        activeRefundId: existingRefund?.id || null,
+        hasExistingRefund: Boolean(existingRefund),
+        existingRefundId: existingRefund?.id || null,
+        existingDisputeId: existingDispute?.id || null,
         items: [],
       };
     }
@@ -366,9 +381,11 @@ export class RefundEligibilityService {
           400
         );
       }
+      const isFeatureDisabled = eligibility.ineligibilityReason?.includes('معطلة مؤقتاً');
       throw new AppError(
         eligibility.ineligibilityReason || 'هذا الطلب غير مؤهل للاسترجاع حالياً',
-        400
+        isFeatureDisabled ? 403 : 400,
+        isFeatureDisabled ? 'FEATURE_DISABLED' : undefined
       );
     }
 

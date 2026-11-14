@@ -656,6 +656,12 @@ model User {
   // Customer Action Center Relations
   actionDismissals           CustomerActionDismissal[]
 
+  // Cash on Delivery (COD) Eligibility & Trust Relations
+  codProfile                 CustomerCodProfile?
+  codEligibilityHistory      CustomerCodEligibilityHistory[]
+  adminPaymentVerifications  PaymentVerificationAudit[]      @relation("AdminPaymentVerificationAudits")
+  customerPaymentVerifications PaymentVerificationAudit[]    @relation("CustomerPaymentVerifications")
+
   @@index([email])
   @@index([phone])
   @@index([role])
@@ -7173,6 +7179,123 @@ model SellerPerformanceEvent {
   @@index([sellerId, processed])
   @@index([createdAt])
   @@map("seller_performance_events")
+}
+
+// ==========================================
+// CUSTOMER CASH ON DELIVERY (COD) ELIGIBILITY & TRUST ENGINE
+// ==========================================
+
+enum CustomerCodStatus {
+  LOCKED
+  ELIGIBLE
+  SUSPENDED
+}
+
+enum QualifyingOrderStatus {
+  ACTIVE
+  INVALIDATED_REFUND
+  INVALIDATED_FRAUD
+  INVALIDATED_CANCEL
+}
+
+model CustomerCodProfile {
+  id                    String                         @id @default(uuid())
+  customerId            String                         @unique
+  user                  User                           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  status                CustomerCodStatus              @default(LOCKED)
+  qualifyingOrdersCount Int                            @default(0)
+  isSuspended           Boolean                        @default(false)
+  suspensionReason      String?
+  suspendedAt           DateTime?
+  suspendedBy           String?                        // Admin user ID
+  reinstatedAt          DateTime?
+  reinstatedBy          String?                        // Admin user ID
+  reinstateReason       String?
+  lastEvaluatedAt       DateTime                       @default(now())
+  createdAt             DateTime                       @default(now())
+  updatedAt             DateTime                       @updatedAt
+
+  qualifyingOrders      CustomerCodQualifyingOrder[]
+  history               CustomerCodEligibilityHistory[]
+
+  @@index([customerId])
+  @@index([status])
+  @@map("customer_cod_profiles")
+}
+
+model CustomerCodQualifyingOrder {
+  id                   String                 @id @default(uuid())
+  profileId            String
+  profile              CustomerCodProfile     @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  customerId           String
+  orderId              String                 @unique // database uniqueness/idempotency protection against duplicate qualification
+  paymentId            String?
+  paymentMethod        PaymentMethodType
+  paymentProvider      String?
+  transactionReference String?
+  orderTotal           Float
+  deliveredAt          DateTime
+  status               QualifyingOrderStatus  @default(ACTIVE)
+  invalidationReason   String?
+  invalidatedAt        DateTime?
+  qualifiedAt          DateTime               @default(now())
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+
+  @@index([profileId])
+  @@index([customerId])
+  @@index([orderId])
+  @@index([status])
+  @@map("customer_cod_qualifying_orders")
+}
+
+model CustomerCodEligibilityHistory {
+  id                 String             @id @default(uuid())
+  profileId          String
+  profile            CustomerCodProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  customerId         String
+  user               User               @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  previousStatus     CustomerCodStatus
+  newStatus          CustomerCodStatus
+  previousOrderCount Int
+  newOrderCount      Int
+  changeReason       String
+  triggeredBy        String             // ORDER_DELIVERED, REFUND_COMPLETED, FRAUD_SUSPENSION, ADMIN_REINSTATE, MANUAL_RECALCULATION
+  operatorId         String?            // Admin user id or SYSTEM
+  ipAddress          String?
+  userAgent          String?
+  createdAt          DateTime           @default(now())
+
+  @@index([profileId])
+  @@index([customerId])
+  @@index([createdAt(sort: Desc)])
+  @@map("customer_cod_eligibility_histories")
+}
+
+model PaymentVerificationAudit {
+  id                    String        @id @default(uuid())
+  paymentId             String
+  orderId               String
+  customerId            String
+  paymentProvider       String
+  transactionReference  String
+  verificationOperator  String        // Admin user ID
+  operator              User          @relation("AdminPaymentVerificationAudits", fields: [verificationOperator], references: [id])
+  customer              User          @relation("CustomerPaymentVerifications", fields: [customerId], references: [id])
+  previousPaymentStatus PaymentStatus
+  newPaymentStatus      PaymentStatus
+  amount                Float
+  currency              String        @default("YER")
+  note                  String?
+  verificationTimestamp DateTime      @default(now())
+  createdAt             DateTime      @default(now())
+
+  @@index([orderId])
+  @@index([customerId])
+  @@index([transactionReference])
+  @@index([verificationOperator])
+  @@index([verificationTimestamp(sort: Desc)])
+  @@map("payment_verification_audits")
 }
 
 

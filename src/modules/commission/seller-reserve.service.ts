@@ -11,6 +11,7 @@ import { SocketService } from '../../services/websocket/socket.service';
 import { notificationEventBus } from '../notifications/services/event-bus';
 import { NotificationEventFactory } from '../notifications/events/domain-events';
 import { remoteConfigService } from '../remote-config/remote-config.service';
+import { SellerFinancialRiskService } from './seller-financial-risk.service';
 
 export interface ReserveAllocationResult {
   allocationId: string;
@@ -340,6 +341,10 @@ export class SellerReserveService {
             }),
           },
         });
+
+        if (appliedDebt > 0) {
+          await SellerFinancialRiskService.evaluateAndApplyRestrictions(tx, alloc.sellerId);
+        }
 
         processedCount++;
         releasedAmount += released;
