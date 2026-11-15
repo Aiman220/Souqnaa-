@@ -490,11 +490,34 @@ router.patch('/me', async (req: Request, res: Response, next: NextFunction) => {
 router.get('/verification', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const seller = await getSeller(req.user!.userId);
+    const store = seller.stores.length > 0 ? seller.stores[0] : null;
+    let addressStr = '';
+    if (store) {
+      const addr = await prisma.address.findFirst({
+        where: { storeId: store.id },
+        include: { city: true, district: true },
+      });
+      if (addr) {
+        addressStr = [
+          (addr.city as any)?.nameAr || (addr.city as any)?.name,
+          (addr.district as any)?.nameAr || (addr.district as any)?.name,
+          addr.street,
+        ].filter(Boolean).join(' - ');
+      }
+    }
+
+    const sellerFullName = `${seller.user?.firstName || ''} ${seller.user?.lastName || ''}`.trim();
+
     ResponseUtil.success(res, {
       status: seller.status,
+      sellerName: sellerFullName,
+      storeName: store?.name || '',
+      phone: seller.user?.phone || '',
+      email: seller.user?.email || '',
+      address: addressStr,
       crNumber: seller.crNumber,
       taxNumber: seller.taxNumber,
-      businessType: seller.businessType,
+      businessType: seller.businessType || 'FREELANCE',
       idNumber: (seller as any).idNumber,
       idFrontUrl: (seller as any).idFrontUrl,
       idBackUrl: (seller as any).idBackUrl,
@@ -514,6 +537,10 @@ router.patch('/verification', async (req: Request, res: Response, next: NextFunc
   try {
     const seller = await getSeller(req.user!.userId);
     const {
+      sellerName,
+      storeName,
+      phone,
+      email,
       businessType,
       crNumber,
       taxNumber,
@@ -524,6 +551,34 @@ router.patch('/verification', async (req: Request, res: Response, next: NextFunc
       businessDocUrl,
     } = req.body;
 
+    // 1. Update User info if provided
+    if (seller.user && (sellerName !== undefined || phone !== undefined || email !== undefined)) {
+      const userUpdate: any = {};
+      if (sellerName !== undefined && typeof sellerName === 'string') {
+        const parts = sellerName.trim().split(/\s+/);
+        userUpdate.firstName = parts[0] || seller.user.firstName;
+        userUpdate.lastName = parts.slice(1).join(' ') || seller.user.lastName;
+      }
+      if (phone !== undefined) userUpdate.phone = phone.trim();
+      if (email !== undefined) userUpdate.email = email.trim();
+
+      if (Object.keys(userUpdate).length > 0) {
+        await prisma.user.update({
+          where: { id: seller.user.id },
+          data: userUpdate,
+        });
+      }
+    }
+
+    // 2. Update Store name if provided
+    if (storeName !== undefined && seller.stores.length > 0) {
+      await prisma.store.update({
+        where: { id: seller.stores[0].id },
+        data: { name: storeName.trim() },
+      });
+    }
+
+    // 3. Update Seller verification data
     const updated = await (prisma.seller as any).update({
       where: { id: seller.id },
       data: {

@@ -17,6 +17,14 @@ export interface PlatformAppIconConfig {
   deepLinkUrl: string;
   badgeText?: string;
   enabled: boolean;
+  seasonalEnabled?: boolean;
+  seasonalIconUrl?: string;
+  seasonalIconId?: string;
+  campaignName?: string;
+  campaignDeepLink?: string;
+  campaignStartAt?: string | Date | null;
+  campaignEndAt?: string | Date | null;
+  publishedVersion?: number;
 }
 
 export interface SeasonalIconConfig {

@@ -210,7 +210,7 @@ export class RemoteConfigService {
   /**
    * Broadcast configuration update to all connected clients in real time via WebSocket.
    */
-  public broadcastConfigUpdate(metadata?: { key?: string; action?: string; version?: number }): void {
+  public broadcastConfigUpdate(metadata?: { key?: string; action?: string; version?: number; [key: string]: any }): void {
     try {
       const socketSvc = SocketService.get();
       if (socketSvc) {
@@ -219,6 +219,7 @@ export class RemoteConfigService {
           version: metadata?.version || Date.now(),
           key: metadata?.key,
           action: metadata?.action || 'UPDATE',
+          ...metadata,
         };
         socketSvc.emitGlobal('remote_config:updated', payload);
         if (metadata?.key) {
@@ -260,6 +261,7 @@ export class RemoteConfigService {
       customerIconSetting,
       sellerIconSetting,
       platformWalletsSetting,
+      launcherConfigs,
     ] = await Promise.all([
       prisma.systemSetting.findUnique({ where: { key: 'remote_config_version' } }),
       prisma.systemSetting.findUnique({ where: { key: 'app_branding_config' } }),
@@ -267,6 +269,7 @@ export class RemoteConfigService {
       prisma.systemSetting.findUnique({ where: { key: 'customer_app_icon' } }),
       prisma.systemSetting.findUnique({ where: { key: 'seller_app_icon' } }),
       prisma.systemSetting.findUnique({ where: { key: 'platform_wallet_accounts' } }),
+      prisma.launcherIconConfig.findMany(),
     ]);
 
     const version = versionSetting ? parseInt(versionSetting.value, 10) || 1 : 1;
@@ -321,6 +324,108 @@ export class RemoteConfigService {
       sellerBranding.customerAppIcon = 'seller_default';
     }
 
+    // Authoritative overlay from LauncherIconConfig records (§1, §3, §4)
+    const custAndroid = launcherConfigs.find((c) => c.applicationType === 'CUSTOMER' && c.platform === 'ANDROID');
+    const custIos = launcherConfigs.find((c) => c.applicationType === 'CUSTOMER' && c.platform === 'IOS');
+    const selAndroid = launcherConfigs.find((c) => c.applicationType === 'SELLER' && c.platform === 'ANDROID');
+    const selIos = launcherConfigs.find((c) => c.applicationType === 'SELLER' && c.platform === 'IOS');
+
+    if (custAndroid) {
+      branding.platforms.android = {
+        ...branding.platforms.android,
+        iconUrl: custAndroid.defaultIconUrl || branding.platforms.android.iconUrl,
+        deepLinkUrl: custAndroid.campaignDeepLink || branding.platforms.android.deepLinkUrl,
+        badgeText: custAndroid.campaignName || branding.platforms.android.badgeText,
+        seasonalEnabled: custAndroid.seasonalEnabled,
+        seasonalIconUrl: custAndroid.seasonalIconUrl || '',
+        seasonalIconId: custAndroid.seasonalIconId || 'seasonal',
+        campaignName: custAndroid.campaignName || '',
+        campaignDeepLink: custAndroid.campaignDeepLink || '',
+        campaignStartAt: custAndroid.campaignStartAt ? custAndroid.campaignStartAt.toISOString() : null,
+        campaignEndAt: custAndroid.campaignEndAt ? custAndroid.campaignEndAt.toISOString() : null,
+        publishedVersion: custAndroid.publishedVersion,
+      };
+    }
+    if (custIos) {
+      branding.platforms.ios = {
+        ...branding.platforms.ios,
+        iconUrl: custIos.defaultIconUrl || branding.platforms.ios.iconUrl,
+        deepLinkUrl: custIos.campaignDeepLink || branding.platforms.ios.deepLinkUrl,
+        badgeText: custIos.campaignName || branding.platforms.ios.badgeText,
+        seasonalEnabled: custIos.seasonalEnabled,
+        seasonalIconUrl: custIos.seasonalIconUrl || '',
+        seasonalIconId: custIos.seasonalIconId || 'seasonal',
+        campaignName: custIos.campaignName || '',
+        campaignDeepLink: custIos.campaignDeepLink || '',
+        campaignStartAt: custIos.campaignStartAt ? custIos.campaignStartAt.toISOString() : null,
+        campaignEndAt: custIos.campaignEndAt ? custIos.campaignEndAt.toISOString() : null,
+        publishedVersion: custIos.publishedVersion,
+      };
+    }
+    const primaryCust = custAndroid || custIos;
+    if (primaryCust) {
+      branding.seasonalIcon = {
+        enabled: custAndroid ? custAndroid.seasonalEnabled : (custIos?.seasonalEnabled ?? false),
+        name: primaryCust.campaignName || branding.seasonalIcon.name || '',
+        iconUrl: primaryCust.seasonalIconUrl || branding.seasonalIcon.iconUrl || '',
+        deepLinkUrl: primaryCust.campaignDeepLink || branding.seasonalIcon.deepLinkUrl || '',
+        startDate: primaryCust.campaignStartAt ? primaryCust.campaignStartAt.toISOString() : null,
+        endDate: primaryCust.campaignEndAt ? primaryCust.campaignEndAt.toISOString() : null,
+      };
+      if (custAndroid) {
+        const res = launcherCampaignService.resolveLauncherIcon(custAndroid as any, new Date());
+        branding.customerAppIcon = res.activeIconId;
+      }
+    }
+
+    if (selAndroid) {
+      sellerBranding.platforms.android = {
+        ...sellerBranding.platforms.android,
+        iconUrl: selAndroid.defaultIconUrl || sellerBranding.platforms.android.iconUrl,
+        deepLinkUrl: selAndroid.campaignDeepLink || sellerBranding.platforms.android.deepLinkUrl,
+        badgeText: selAndroid.campaignName || sellerBranding.platforms.android.badgeText,
+        seasonalEnabled: selAndroid.seasonalEnabled,
+        seasonalIconUrl: selAndroid.seasonalIconUrl || '',
+        seasonalIconId: selAndroid.seasonalIconId || 'seller_seasonal',
+        campaignName: selAndroid.campaignName || '',
+        campaignDeepLink: selAndroid.campaignDeepLink || '',
+        campaignStartAt: selAndroid.campaignStartAt ? selAndroid.campaignStartAt.toISOString() : null,
+        campaignEndAt: selAndroid.campaignEndAt ? selAndroid.campaignEndAt.toISOString() : null,
+        publishedVersion: selAndroid.publishedVersion,
+      };
+    }
+    if (selIos) {
+      sellerBranding.platforms.ios = {
+        ...sellerBranding.platforms.ios,
+        iconUrl: selIos.defaultIconUrl || sellerBranding.platforms.ios.iconUrl,
+        deepLinkUrl: selIos.campaignDeepLink || sellerBranding.platforms.ios.deepLinkUrl,
+        badgeText: selIos.campaignName || sellerBranding.platforms.ios.badgeText,
+        seasonalEnabled: selIos.seasonalEnabled,
+        seasonalIconUrl: selIos.seasonalIconUrl || '',
+        seasonalIconId: selIos.seasonalIconId || 'seller_seasonal',
+        campaignName: selIos.campaignName || '',
+        campaignDeepLink: selIos.campaignDeepLink || '',
+        campaignStartAt: selIos.campaignStartAt ? selIos.campaignStartAt.toISOString() : null,
+        campaignEndAt: selIos.campaignEndAt ? selIos.campaignEndAt.toISOString() : null,
+        publishedVersion: selIos.publishedVersion,
+      };
+    }
+    const primarySel = selAndroid || selIos;
+    if (primarySel) {
+      sellerBranding.seasonalIcon = {
+        enabled: selAndroid ? selAndroid.seasonalEnabled : (selIos?.seasonalEnabled ?? false),
+        name: primarySel.campaignName || sellerBranding.seasonalIcon.name || '',
+        iconUrl: primarySel.seasonalIconUrl || sellerBranding.seasonalIcon.iconUrl || '',
+        deepLinkUrl: primarySel.campaignDeepLink || sellerBranding.seasonalIcon.deepLinkUrl || '',
+        startDate: primarySel.campaignStartAt ? primarySel.campaignStartAt.toISOString() : null,
+        endDate: primarySel.campaignEndAt ? primarySel.campaignEndAt.toISOString() : null,
+      };
+      if (selAndroid) {
+        const res = launcherCampaignService.resolveLauncherIcon(selAndroid as any, new Date());
+        sellerBranding.customerAppIcon = res.activeIconId;
+      }
+    }
+
     let platformWallets: PlatformWalletAccountConfig[] = DEFAULT_PLATFORM_WALLETS;
     if (platformWalletsSetting && platformWalletsSetting.value) {
       try {
@@ -336,6 +441,11 @@ export class RemoteConfigService {
     for (const f of flags) {
       if (f.updatedAt > latestUpdate) {
         latestUpdate = f.updatedAt;
+      }
+    }
+    for (const lc of launcherConfigs) {
+      if (lc.updatedAt > latestUpdate) {
+        latestUpdate = lc.updatedAt;
       }
     }
     if (brandingSetting && brandingSetting.updatedAt > latestUpdate) {
@@ -354,7 +464,10 @@ export class RemoteConfigService {
       latestUpdate = platformWalletsSetting.updatedAt;
     }
 
-    const etag = `W/"souqnaa-config-v${version}-${latestUpdate.getTime()}"`;
+    const launcherTag = launcherConfigs
+      .map((c) => `${c.applicationType}_${c.platform}:${c.publishedVersion}:${c.seasonalEnabled}`)
+      .join('-');
+    const etag = `W/"souqnaa-config-v${version}-${latestUpdate.getTime()}-${launcherTag}"`;
 
     this.memoryCache = {
       flags,
@@ -1249,6 +1362,46 @@ export class RemoteConfigService {
         ? launcherCampaignService.normalizeIconId(updates.seasonalIcon.iconUrl, appType, true)
         : (isCustomer ? 'seasonal' : 'seller_seasonal');
 
+      const androidSeasonalTarget = updates.platforms?.android?.seasonalIconUrl
+        ? launcherCampaignService.normalizeIconId(updates.platforms.android.seasonalIconUrl, appType, true)
+        : (updates.platforms?.android?.seasonalIconId || seasonalTarget);
+
+      const iosSeasonalTarget = updates.platforms?.ios?.seasonalIconUrl
+        ? launcherCampaignService.normalizeIconId(updates.platforms.ios.seasonalIconUrl, appType, true)
+        : (updates.platforms?.ios?.seasonalIconId || seasonalTarget);
+
+      const androidSeasonalEnabled = updates.platforms?.android?.seasonalEnabled !== undefined
+        ? Boolean(updates.platforms.android.seasonalEnabled)
+        : (updates.seasonalIcon?.enabled !== undefined ? Boolean(updates.seasonalIcon.enabled) : current.seasonalIcon?.enabled);
+
+      const iosSeasonalEnabled = updates.platforms?.ios?.seasonalEnabled !== undefined
+        ? Boolean(updates.platforms.ios.seasonalEnabled)
+        : (updates.seasonalIcon?.enabled !== undefined ? Boolean(updates.seasonalIcon.enabled) : current.seasonalIcon?.enabled);
+
+      const androidSeasonalIcon = updates.platforms?.android?.seasonalIconUrl !== undefined
+        ? updates.platforms.android.seasonalIconUrl
+        : (updates.seasonalIcon?.iconUrl !== undefined ? updates.seasonalIcon.iconUrl : current.seasonalIcon?.iconUrl);
+
+      const iosSeasonalIcon = updates.platforms?.ios?.seasonalIconUrl !== undefined
+        ? updates.platforms.ios.seasonalIconUrl
+        : (updates.seasonalIcon?.iconUrl !== undefined ? updates.seasonalIcon.iconUrl : current.seasonalIcon?.iconUrl);
+
+      const androidStartAt = updates.platforms?.android?.campaignStartAt !== undefined
+        ? updates.platforms.android.campaignStartAt
+        : (updates.seasonalIcon?.startDate !== undefined ? updates.seasonalIcon.startDate : current.seasonalIcon?.startDate);
+
+      const androidEndAt = updates.platforms?.android?.campaignEndAt !== undefined
+        ? updates.platforms.android.campaignEndAt
+        : (updates.seasonalIcon?.endDate !== undefined ? updates.seasonalIcon.endDate : current.seasonalIcon?.endDate);
+
+      const iosStartAt = updates.platforms?.ios?.campaignStartAt !== undefined
+        ? updates.platforms.ios.campaignStartAt
+        : (updates.seasonalIcon?.startDate !== undefined ? updates.seasonalIcon.startDate : current.seasonalIcon?.startDate);
+
+      const iosEndAt = updates.platforms?.ios?.campaignEndAt !== undefined
+        ? updates.platforms.ios.campaignEndAt
+        : (updates.seasonalIcon?.endDate !== undefined ? updates.seasonalIcon.endDate : current.seasonalIcon?.endDate);
+
       await Promise.all([
         launcherCampaignService.updateLauncherConfig(
           appType,
@@ -1256,13 +1409,13 @@ export class RemoteConfigService {
           {
             defaultIconId: launcherCampaignService.normalizeIconId(androidCandidate, appType),
             defaultIconUrl: androidCandidate || (isCustomer ? '/uploads/branding/souqnaa-app-icon.png' : '/uploads/branding/seller_app_icon.png'),
-            seasonalIconId: seasonalTarget,
-            seasonalIconUrl: updates.seasonalIcon?.iconUrl !== undefined ? updates.seasonalIcon.iconUrl : current.seasonalIcon?.iconUrl,
-            seasonalEnabled: updates.seasonalIcon?.enabled !== undefined ? updates.seasonalIcon.enabled : current.seasonalIcon?.enabled,
+            seasonalIconId: androidSeasonalTarget,
+            seasonalIconUrl: androidSeasonalIcon,
+            seasonalEnabled: androidSeasonalEnabled,
             campaignName: updates.seasonalIcon?.name !== undefined ? updates.seasonalIcon.name : current.seasonalIcon?.name,
             campaignDeepLink: updates.seasonalIcon?.deepLinkUrl !== undefined ? updates.seasonalIcon.deepLinkUrl : current.seasonalIcon?.deepLinkUrl,
-            campaignStartAt: updates.seasonalIcon?.startDate !== undefined ? updates.seasonalIcon.startDate : current.seasonalIcon?.startDate,
-            campaignEndAt: updates.seasonalIcon?.endDate !== undefined ? updates.seasonalIcon.endDate : current.seasonalIcon?.endDate,
+            campaignStartAt: androidStartAt,
+            campaignEndAt: androidEndAt,
           },
           adminUser
         ),
@@ -1272,13 +1425,13 @@ export class RemoteConfigService {
           {
             defaultIconId: launcherCampaignService.normalizeIconId(iosCandidate, appType),
             defaultIconUrl: iosCandidate || (isCustomer ? '/uploads/branding/souqnaa-app-icon.png' : '/uploads/branding/seller_app_icon.png'),
-            seasonalIconId: seasonalTarget,
-            seasonalIconUrl: updates.seasonalIcon?.iconUrl !== undefined ? updates.seasonalIcon.iconUrl : current.seasonalIcon?.iconUrl,
-            seasonalEnabled: updates.seasonalIcon?.enabled !== undefined ? updates.seasonalIcon.enabled : current.seasonalIcon?.enabled,
+            seasonalIconId: iosSeasonalTarget,
+            seasonalIconUrl: iosSeasonalIcon,
+            seasonalEnabled: iosSeasonalEnabled,
             campaignName: updates.seasonalIcon?.name !== undefined ? updates.seasonalIcon.name : current.seasonalIcon?.name,
             campaignDeepLink: updates.seasonalIcon?.deepLinkUrl !== undefined ? updates.seasonalIcon.deepLinkUrl : current.seasonalIcon?.deepLinkUrl,
-            campaignStartAt: updates.seasonalIcon?.startDate !== undefined ? updates.seasonalIcon.startDate : current.seasonalIcon?.startDate,
-            campaignEndAt: updates.seasonalIcon?.endDate !== undefined ? updates.seasonalIcon.endDate : current.seasonalIcon?.endDate,
+            campaignStartAt: iosStartAt,
+            campaignEndAt: iosEndAt,
           },
           adminUser
         ),
@@ -1352,7 +1505,7 @@ export class RemoteConfigService {
       action: 'UPDATE_BRANDING',
       version: newVersion,
     });
-    return updated;
+    return await this.getBrandingConfig(appType);
   }
 
   /**

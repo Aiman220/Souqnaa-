@@ -1,4 +1,5 @@
 import { launcherCampaignService } from '../../modules/remote-config/launcher-campaign.service';
+import { remoteConfigService } from '../../modules/remote-config/remote-config.service';
 
 export class LauncherCampaignScheduler {
   private static timer: NodeJS.Timeout | null = null;
@@ -36,6 +37,11 @@ export class LauncherCampaignScheduler {
         console.log(
           `[LauncherCampaignScheduler] Reconciled ${result.reconciledCount} expired campaign(s): ${result.changed.join(', ')}`
         );
+        remoteConfigService.invalidateCache();
+        remoteConfigService.broadcastConfigUpdate({
+          action: 'RECONCILE_EXPIRED_CAMPAIGNS',
+          reconciled: result.changed,
+        });
       }
     } catch (err: any) {
       console.warn('[LauncherCampaignScheduler] Reconciliation warning:', err.message);
