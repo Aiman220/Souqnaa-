@@ -34,6 +34,56 @@ export interface FinancialRiskThresholds {
   automaticDebtRecoveryEnabled: boolean; // e.g. true
 }
 
+export interface FinancialRiskWarning {
+  category: 'COMMISSION' | 'COD' | 'REFUND' | 'WALLET' | 'ACCOUNT_RESTRICTION';
+  titleAr: string;
+  titleEn: string;
+  messageAr: string;
+  messageEn: string;
+  severity: 'INFO' | 'WARNING' | 'CRITICAL' | 'RESTRICTED';
+  amount: number;
+  currency: string;
+  threshold: number;
+  utilizationPercentage: number;
+  triggeringRecords: Array<{
+    type: string;
+    reference: string;
+    amount: number;
+    status: string;
+    date: Date;
+  }>;
+  reasonCode: string;
+  requiredActionAr: string;
+  requiredActionEn: string;
+  isActive: boolean;
+}
+
+export interface CommissionSummary {
+  totalEarned: number;
+  alreadyPaid: number;
+  outstanding: number;
+  overdue: number;
+}
+
+export interface CodSummary {
+  collectedBySeller: number;
+  payableToPlatform: number;
+  walletDeducted: number;
+  verifiedPaid: number;
+  outstanding: number;
+}
+
+export interface RefundLiabilitySummary {
+  pendingRequestsCount: number;
+  pendingRequestsAmount: number;
+  approvedCount: number;
+  approvedAmount: number;
+  paidAmount: number;
+  outstandingLiability: number;
+  reservedAmount: number;
+  unsecuredExposure: number;
+}
+
 export interface SellerFinancialStanding {
   sellerId: string;
   storeName?: string;
@@ -51,6 +101,16 @@ export interface SellerFinancialStanding {
   pendingBalance: number;
   withdrawnBalance: number;
   outstandingCommission: number;
+  outstandingCod: number;
+  outstandingRefundLiabilities: number;
+  totalOutstandingLiabilities: number;
+  netFinancialPosition: number;
+  commissionSummary: CommissionSummary;
+  codSummary: CodSummary;
+  refundSummary: RefundLiabilitySummary;
+  financialWarnings: FinancialRiskWarning[];
+  primaryRestrictionCategory: 'COMMISSION' | 'COD' | 'REFUND' | 'WALLET' | 'COMPLIANCE' | 'NONE';
+  primaryRestrictionReason: string | null;
   totalReservedBalance: number;
   unsecuredExposure: number;
   currency: string;
@@ -781,14 +841,46 @@ export class SellerFinancialRiskService {
 
     const thresholds = await this.getRiskThresholds();
 
-    // Calculate sum of active outstanding liabilities
+    // ── 1. AUTHORITATIVE SEPARATION OF OUTSTANDING LIABILITIES ──
     const openOutstandings = seller.outstandings.filter(
       (o: any) => o.status === 'OPEN' || o.status === 'PARTIALLY_PAID'
     );
-    const authoritativeOutstanding = openOutstandings.reduce(
-      (sum: number, item: any) => sum + item.remainingAmount,
+
+    const commissionOutstandings = openOutstandings.filter(
+      (o: any) => o.sourceType === 'ORDER_COMMISSION' || o.sourceType === 'COMMISSION'
+    );
+    const codOutstandings = openOutstandings.filter(
+      (o: any) => o.sourceType === 'COD_OBLIGATION'
+    );
+    const refundOutstandings = openOutstandings.filter(
+      (o: any) => o.sourceType === 'REFUND_LIABILITY'
+    );
+    const otherOutstandings = openOutstandings.filter(
+      (o: any) => !['ORDER_COMMISSION', 'COMMISSION', 'COD_OBLIGATION', 'REFUND_LIABILITY'].includes(o.sourceType)
+    );
+
+    const outstandingCommission = commissionOutstandings.reduce(
+      (sum: number, item: any) => TaxMath.add(sum, item.remainingAmount || 0),
       0
     );
+    const outstandingCod = codOutstandings.reduce(
+      (sum: number, item: any) => TaxMath.add(sum, item.remainingAmount || 0),
+      0
+    );
+    const outstandingRefundLiabilities = refundOutstandings.reduce(
+      (sum: number, item: any) => TaxMath.add(sum, item.remainingAmount || 0),
+      0
+    );
+    const otherOutstanding = otherOutstandings.reduce(
+      (sum: number, item: any) => TaxMath.add(sum, item.remainingAmount || 0),
+      0
+    );
+
+    const totalOutstandingLiabilities = TaxMath.add(
+      TaxMath.add(outstandingCommission, outstandingCod),
+      TaxMath.add(outstandingRefundLiabilities, otherOutstanding)
+    );
+    const authoritativeOutstanding = totalOutstandingLiabilities;
 
     // Sync SellerBalance if any drift exists
     if (seller.balance && Math.abs(seller.balance.outstandingCommission - authoritativeOutstanding) > 0.01) {
@@ -799,14 +891,14 @@ export class SellerFinancialRiskService {
       seller.balance.outstandingCommission = authoritativeOutstanding;
     }
 
-    const availableBal = seller.balance?.availableBalance ?? 0;
-    const pendingBal = seller.balance?.pendingBalance ?? 0;
-    const withdrawnBal = seller.balance?.withdrawnBalance ?? 0;
+    const availableBal = Math.max(0, seller.balance?.availableBalance ?? 0);
+    const pendingBal = Math.max(0, seller.balance?.pendingBalance ?? 0);
+    const withdrawnBal = Math.max(0, seller.balance?.withdrawnBalance ?? 0);
     const currency = seller.balance?.currency || 'YER';
 
     // Calculate total reserved balance from active allocations
     const activeReserves = (seller.reserveAllocations || []).filter((r: any) => r.status === 'RESERVED');
-    const totalReservedBalance = activeReserves.reduce((sum: number, r: any) => sum + (r.amount || 0), 0);
+    const totalReservedBalance = activeReserves.reduce((sum: number, r: any) => TaxMath.add(sum, r.amount || 0), 0);
 
     // Withdrawable balance is available balance (which is already net of withheld reserve allocations)
     const withdrawableBalance = Math.max(0, availableBal);
@@ -815,18 +907,24 @@ export class SellerFinancialRiskService {
     const pendingRefunds = (seller.refundRequests || []).filter(
       (r: any) => r.status === 'SUBMITTED' || r.status === 'UNDER_SELLER_REVIEW' || r.status === 'ADMIN_REVIEW'
     );
-    const pendingExposure = pendingRefunds.reduce((sum: number, r: any) => sum + (r.requestedAmount || 0), 0);
-    const unsecuredExposure = Math.max(0, authoritativeOutstanding + pendingExposure - totalReservedBalance);
+    const pendingExposure = pendingRefunds.reduce((sum: number, r: any) => TaxMath.add(sum, r.requestedAmount || 0), 0);
+    const unsecuredExposure = Math.max(0, TaxMath.subtract(TaxMath.add(authoritativeOutstanding, pendingExposure), totalReservedBalance));
+
+    // Net Financial Position = (Liquid Assets + Pending) - All Outstanding Liabilities
+    const netFinancialPosition = TaxMath.subtract(
+      TaxMath.add(availableBal, pendingBal),
+      totalOutstandingLiabilities
+    );
 
     // Authoritative calculate amount needed to unblock
-    const amountNeededToUnblock = Math.max(0, authoritativeOutstanding - thresholds.unblockThreshold);
+    const amountNeededToUnblock = Math.max(0, TaxMath.subtract(totalOutstandingLiabilities, thresholds.unblockThreshold));
 
     let isRestricted = seller.isFinanciallyRestricted;
 
     // Self-healing: if marked financially restricted due to debt, but actual authoritative debt is below unblockThreshold (e.g. 0), auto-unblock!
-    if (isRestricted && authoritativeOutstanding <= thresholds.unblockThreshold) {
+    if (isRestricted && totalOutstandingLiabilities <= thresholds.unblockThreshold) {
       const activeNonDebtRestrictions = (seller.financialRestrictions || []).filter(
-        (r: any) => r.status === 'ACTIVE' && r.reasonCode !== 'OUTSTANDING_REFUND_DEBT'
+        (r: any) => r.status === 'ACTIVE' && !['OUTSTANDING_REFUND_DEBT', 'OUTSTANDING_COMMISSION', 'COD_REMITTANCE_OVERDUE', 'DEBT_THRESHOLD_EXCEEDED', 'COMMISSION_LIMIT_EXCEEDED'].includes(r.reasonCode)
       );
       if (activeNonDebtRestrictions.length === 0) {
         isRestricted = false;
@@ -835,30 +933,30 @@ export class SellerFinancialRiskService {
           where: { id: sellerId },
           data: {
             isFinanciallyRestricted: false,
-            financialRestrictionLevel: 'NORMAL',
+            financialRestrictionLevel: totalOutstandingLiabilities >= thresholds.warningThreshold ? 'WARNING' : 'NORMAL',
             financialRestrictionReason: null,
             financialRestrictedAt: null,
           },
         }).catch(() => {});
         prisma.financialRestriction.updateMany({
-          where: { sellerId, status: 'ACTIVE', reasonCode: 'OUTSTANDING_REFUND_DEBT' },
-          data: { status: 'RELEASED', releasedAt: new Date(), releaseReason: 'مديونية مسددة بالكامل' },
+          where: { sellerId, status: 'ACTIVE' },
+          data: { status: 'RELEASED', releasedAt: new Date(), releaseReason: 'مديونية مسددة بالكامل أو دون حد رفع التقييد' },
         }).catch(() => {});
       }
     }
 
     let calculatedLevel: 'NORMAL' | 'WARNING' | 'CRITICAL' | 'RESTRICTED' = 'NORMAL';
-    if (isRestricted || authoritativeOutstanding >= thresholds.blockThreshold) {
+    if (isRestricted || totalOutstandingLiabilities >= thresholds.blockThreshold) {
       calculatedLevel = 'RESTRICTED';
-    } else if (authoritativeOutstanding >= thresholds.criticalThreshold) {
+    } else if (totalOutstandingLiabilities >= thresholds.criticalThreshold) {
       calculatedLevel = 'CRITICAL';
-    } else if (authoritativeOutstanding >= thresholds.warningThreshold) {
+    } else if (totalOutstandingLiabilities >= thresholds.warningThreshold) {
       calculatedLevel = 'WARNING';
     }
 
-    const totalSales = seller.sellerOrders.reduce((sum: number, so: any) => sum + (so.subtotal || 0), 0);
-    const totalCommission = seller.sellerOrders.reduce((sum: number, so: any) => sum + (so.commissionAmount || 0), 0);
-    const totalPayout = seller.sellerOrders.reduce((sum: number, so: any) => sum + (so.sellerPayout || 0), 0);
+    const totalSales = seller.sellerOrders.reduce((sum: number, so: any) => TaxMath.add(sum, so.subtotal || 0), 0);
+    const totalCommission = seller.sellerOrders.reduce((sum: number, so: any) => TaxMath.add(sum, so.commissionAmount || 0), 0);
+    const totalPayout = seller.sellerOrders.reduce((sum: number, so: any) => TaxMath.add(sum, so.sellerPayout || 0), 0);
     const storeName = seller.stores[0]?.name || (seller.user ? `${seller.user.firstName || ''} ${seller.user.lastName || ''}`.trim() : '') || 'متجر سوقنا';
     const ownerName = `${seller.user?.firstName || ''} ${seller.user?.lastName || ''}`.trim();
 
@@ -868,6 +966,205 @@ export class SellerFinancialRiskService {
     const reserveHoldingDays = seller.riskProfile?.reserveHoldingDays ?? thresholds.reserveHoldingDays;
     const newOrdersPaused = seller.riskProfile?.newOrdersPaused ?? isRestricted;
     const withdrawalsRestricted = seller.riskProfile?.withdrawalsRestricted ?? isRestricted;
+
+    // ── 2. CATEGORY SUMMARIES ──
+    const totalCommissionEarned = seller.sellerOrders
+      .filter((so: any) => so.status === 'DELIVERED')
+      .reduce((sum: number, so: any) => TaxMath.add(sum, so.commissionAmount || 0), 0);
+    const commissionAlreadyPaid = seller.outstandings
+      .filter((o: any) => o.sourceType === 'ORDER_COMMISSION' || o.sourceType === 'COMMISSION')
+      .reduce((sum: number, o: any) => TaxMath.add(sum, o.paidAmount || 0), 0);
+    const overdueCommission = commissionOutstandings
+      .filter((o: any) => o.dueAt && new Date(o.dueAt) < new Date())
+      .reduce((sum: number, o: any) => TaxMath.add(sum, o.remainingAmount || 0), 0);
+
+    const commissionSummary: CommissionSummary = {
+      totalEarned: totalCommissionEarned,
+      alreadyPaid: commissionAlreadyPaid,
+      outstanding: outstandingCommission,
+      overdue: overdueCommission,
+    };
+
+    const codDeliveredOrders = seller.sellerOrders.filter((so: any) => so.status === 'DELIVERED' && (so.order?.payment?.method === 'CASH_ON_DELIVERY' || so.isCod));
+    const collectedBySeller = codDeliveredOrders.reduce((sum: number, so: any) => TaxMath.add(sum, so.subtotal || 0), 0);
+
+    const codSummary: CodSummary = {
+      collectedBySeller,
+      payableToPlatform: (seller.codObligations || []).reduce((sum: number, c: any) => TaxMath.add(sum, c.obligationAmount || 0), 0),
+      walletDeducted: (seller.codObligations || []).reduce((sum: number, c: any) => TaxMath.add(sum, c.walletDeduction || 0), 0),
+      verifiedPaid: (seller.codObligations || []).reduce((sum: number, c: any) => TaxMath.add(sum, c.verifiedPaymentAmount || 0), 0),
+      outstanding: outstandingCod,
+    };
+
+    const approvedRefunds = (seller.refundRequests || []).filter(
+      (r: any) => ['APPROVED', 'FUNDING_PENDING', 'REFUND_PROCESSING', 'REFUND_COMPLETED'].includes(r.status)
+    );
+    const completedRefunds = (seller.refundRequests || []).filter(
+      (r: any) => r.status === 'REFUND_COMPLETED'
+    );
+
+    const refundSummary: RefundLiabilitySummary = {
+      pendingRequestsCount: pendingRefunds.length,
+      pendingRequestsAmount: pendingExposure,
+      approvedCount: approvedRefunds.length,
+      approvedAmount: approvedRefunds.reduce((sum: number, r: any) => TaxMath.add(sum, r.approvedAmount || r.requestedAmount || 0), 0),
+      paidAmount: completedRefunds.reduce((sum: number, r: any) => TaxMath.add(sum, r.approvedAmount || r.requestedAmount || 0), 0),
+      outstandingLiability: outstandingRefundLiabilities,
+      reservedAmount: totalReservedBalance,
+      unsecuredExposure,
+    };
+
+    // ── 3. STRUCTURED FINANCIAL RISK WARNINGS ──
+    const financialWarnings: FinancialRiskWarning[] = [];
+
+    if (outstandingCommission > 0) {
+      const util = Math.min(100, Math.round((outstandingCommission / thresholds.blockThreshold) * 100));
+      const sev = outstandingCommission >= thresholds.blockThreshold ? 'RESTRICTED' : (outstandingCommission >= thresholds.criticalThreshold ? 'CRITICAL' : (outstandingCommission >= thresholds.warningThreshold ? 'WARNING' : 'INFO'));
+      financialWarnings.push({
+        category: 'COMMISSION',
+        titleAr: 'عمولات المنصة المستحقة',
+        titleEn: 'Outstanding Platform Commission',
+        messageAr: `توجد عمولات منصة مستحقة السداد بقيمة ${outstandingCommission} ${currency}. يرجى المبادرة بالسداد.`,
+        messageEn: `Outstanding platform commission of ${outstandingCommission} ${currency} requires settlement.`,
+        severity: sev,
+        amount: outstandingCommission,
+        currency,
+        threshold: thresholds.blockThreshold,
+        utilizationPercentage: util,
+        triggeringRecords: commissionOutstandings.map((o: any) => ({
+          type: 'COMMISSION_INVOICE',
+          reference: o.sourceReference || o.id,
+          amount: o.remainingAmount,
+          status: o.status,
+          date: o.createdAt,
+        })),
+        reasonCode: 'OUTSTANDING_COMMISSION',
+        requiredActionAr: 'سداد عمولات المنصة عبر المحفظة أو الحوالة البنكية المباشرة',
+        requiredActionEn: 'Pay platform commission via wallet balance or direct bank transfer',
+        isActive: sev !== 'INFO',
+      });
+    }
+
+    if (outstandingCod > 0) {
+      const util = Math.min(100, Math.round((outstandingCod / thresholds.blockThreshold) * 100));
+      const sev = outstandingCod >= thresholds.blockThreshold ? 'RESTRICTED' : (outstandingCod >= thresholds.criticalThreshold ? 'CRITICAL' : (outstandingCod >= thresholds.warningThreshold ? 'WARNING' : 'INFO'));
+      financialWarnings.push({
+        category: 'COD',
+        titleAr: 'مستحقات الدفع عند الاستلام المعلقة',
+        titleEn: 'Outstanding COD Obligations',
+        messageAr: `توجد التزامات دفع عند الاستلام معلقة بقيمة ${outstandingCod} ${currency}.`,
+        messageEn: `Outstanding COD obligations of ${outstandingCod} ${currency} pending remittance.`,
+        severity: sev,
+        amount: outstandingCod,
+        currency,
+        threshold: thresholds.blockThreshold,
+        utilizationPercentage: util,
+        triggeringRecords: codOutstandings.map((o: any) => ({
+          type: 'COD_OBLIGATION',
+          reference: o.sourceReference || o.id,
+          amount: o.remainingAmount,
+          status: o.status,
+          date: o.createdAt,
+        })),
+        reasonCode: 'COD_REMITTANCE_OVERDUE',
+        requiredActionAr: 'توريد مستحقات COD عبر خيارات السداد المعتمدة لضمان استمرار الخدمة',
+        requiredActionEn: 'Remit COD obligations via approved payment channels',
+        isActive: sev !== 'INFO',
+      });
+    }
+
+    if (outstandingRefundLiabilities > 0 || unsecuredExposure > thresholds.maxExposureLimit) {
+      const refAmt = outstandingRefundLiabilities > 0 ? outstandingRefundLiabilities : unsecuredExposure;
+      const util = Math.min(100, Math.round((refAmt / thresholds.blockThreshold) * 100));
+      const sev = refAmt >= thresholds.blockThreshold ? 'RESTRICTED' : (refAmt >= thresholds.criticalThreshold ? 'CRITICAL' : (refAmt >= thresholds.warningThreshold ? 'WARNING' : 'INFO'));
+      financialWarnings.push({
+        category: 'REFUND',
+        titleAr: 'التزامات استرجاع المنتجات',
+        titleEn: 'Customer Refund Liabilities',
+        messageAr: `توجد التزامات استرجاع مستحقة على المتجر بقيمة ${outstandingRefundLiabilities} ${currency}.`,
+        messageEn: `Customer refund liability of ${outstandingRefundLiabilities} ${currency} recorded for returned orders.`,
+        severity: sev,
+        amount: outstandingRefundLiabilities,
+        currency,
+        threshold: thresholds.blockThreshold,
+        utilizationPercentage: util,
+        triggeringRecords: refundOutstandings.map((o: any) => ({
+          type: 'REFUND_LIABILITY',
+          reference: o.sourceReference || o.id,
+          amount: o.remainingAmount,
+          status: o.status,
+          date: o.createdAt,
+        })),
+        reasonCode: 'OUTSTANDING_REFUND_DEBT',
+        requiredActionAr: 'سداد التزامات الاسترجاع لفك تقييد الحساب واستعادة العمليات التشغيلية',
+        requiredActionEn: 'Settle refund liabilities to lift restrictions',
+        isActive: sev !== 'INFO',
+      });
+    }
+
+    if (availableBal <= 0 && totalOutstandingLiabilities > 0) {
+      financialWarnings.push({
+        category: 'WALLET',
+        titleAr: 'رصيد المحفظة المتاح غير كافٍ',
+        titleEn: 'Insufficient Available Wallet Balance',
+        messageAr: `الرصيد المتاح بالمحفظة (0 ${currency}) لا يغطي الالتزامات المالية القائمة (${totalOutstandingLiabilities} ${currency}).`,
+        messageEn: `Available balance (0 ${currency}) insufficient to cover liabilities (${totalOutstandingLiabilities} ${currency}).`,
+        severity: isRestricted ? 'CRITICAL' : 'WARNING',
+        amount: availableBal,
+        currency,
+        threshold: totalOutstandingLiabilities,
+        utilizationPercentage: 0,
+        triggeringRecords: [],
+        reasonCode: 'INSUFFICIENT_FUNDS',
+        requiredActionAr: 'شحن المحفظة بسند إيداع لتغطية الالتزامات وسحب الأرباح',
+        requiredActionEn: 'Deposit funds to cover liabilities',
+        isActive: true,
+      });
+    }
+
+    // Determine PRIMARY RESTRICTION CATEGORY
+    let primaryRestrictionCategory: 'COMMISSION' | 'COD' | 'REFUND' | 'WALLET' | 'COMPLIANCE' | 'NONE' = 'NONE';
+    let primaryRestrictionReason: string | null = null;
+
+    if (isRestricted) {
+      if (outstandingRefundLiabilities >= thresholds.blockThreshold || (outstandingRefundLiabilities > 0 && outstandingRefundLiabilities >= outstandingCommission && outstandingRefundLiabilities >= outstandingCod)) {
+        primaryRestrictionCategory = 'REFUND';
+        primaryRestrictionReason = `تقييد المتجر لتجاوز التزامات المبالغ المستردة (${outstandingRefundLiabilities} ${currency})`;
+      } else if (outstandingCod >= thresholds.blockThreshold || (outstandingCod > 0 && outstandingCod >= outstandingCommission)) {
+        primaryRestrictionCategory = 'COD';
+        primaryRestrictionReason = `تقييد المتجر لتجاوز سقف مستحقات الدفع عند الاستلام (${outstandingCod} ${currency})`;
+      } else if (outstandingCommission >= thresholds.blockThreshold) {
+        primaryRestrictionCategory = 'COMMISSION';
+        primaryRestrictionReason = `تقييد المتجر لتجاوز سقف عمولات المنصة (${outstandingCommission} ${currency})`;
+      } else {
+        primaryRestrictionCategory = 'COMPLIANCE';
+        primaryRestrictionReason = seller.financialRestrictionReason || 'تقييد إداري للحساب لمراجعة الالتزامات المالية';
+      }
+
+      financialWarnings.unshift({
+        category: 'ACCOUNT_RESTRICTION',
+        titleAr: 'تقييد مالي على الحساب',
+        titleEn: 'Financial Account Restriction',
+        messageAr: primaryRestrictionReason || 'تقييد مالي على الحساب',
+        messageEn: `Account restricted due to ${primaryRestrictionCategory.toLowerCase()} obligations exceeding threshold.`,
+        severity: 'RESTRICTED',
+        amount: totalOutstandingLiabilities,
+        currency,
+        threshold: thresholds.blockThreshold,
+        utilizationPercentage: Math.min(100, Math.round((totalOutstandingLiabilities / thresholds.blockThreshold) * 100)),
+        triggeringRecords: openOutstandings.map((o: any) => ({
+          type: o.sourceType,
+          reference: o.sourceReference || o.id,
+          amount: o.remainingAmount,
+          status: o.status,
+          date: o.createdAt,
+        })),
+        reasonCode: primaryRestrictionCategory === 'REFUND' ? 'OUTSTANDING_REFUND_DEBT' : (primaryRestrictionCategory === 'COD' ? 'COD_REMITTANCE_OVERDUE' : 'OUTSTANDING_COMMISSION'),
+        requiredActionAr: `سداد مبلغ ${amountNeededToUnblock} ${currency} لفك التقييد واستئناف العمليات`,
+        requiredActionEn: `Pay ${amountNeededToUnblock} ${currency} to lift restriction`,
+        isActive: true,
+      });
+    }
 
     return {
       sellerId: seller.id,
@@ -885,13 +1182,23 @@ export class SellerFinancialRiskService {
       withdrawableBalance,
       pendingBalance: pendingBal,
       withdrawnBalance: withdrawnBal,
-      outstandingCommission: authoritativeOutstanding,
+      outstandingCommission,
+      outstandingCod,
+      outstandingRefundLiabilities,
+      totalOutstandingLiabilities,
+      netFinancialPosition,
+      commissionSummary,
+      codSummary,
+      refundSummary,
+      financialWarnings,
+      primaryRestrictionCategory,
+      primaryRestrictionReason,
       totalReservedBalance,
       unsecuredExposure,
       currency,
       isFinanciallyRestricted: isRestricted,
       financialRestrictionLevel: calculatedLevel,
-      financialRestrictionReason: isRestricted ? seller.financialRestrictionReason : null,
+      financialRestrictionReason: isRestricted ? (primaryRestrictionReason || seller.financialRestrictionReason) : null,
       financialRestrictedAt: isRestricted ? seller.financialRestrictedAt : null,
       cashOnDeliveryEnabled: seller.cashOnDeliveryEnabled,
       newOrdersPaused,

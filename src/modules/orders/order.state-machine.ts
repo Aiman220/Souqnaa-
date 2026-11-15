@@ -364,10 +364,14 @@ export class OrderStateMachine {
         // Revert seller pending balance atomically without race conditions
         const payout = sellerOrder.sellerPayout || 0;
         if (payout > 0) {
+          const currentBal = await tx.sellerBalance.findUnique({ where: { sellerId: sellerOrder.sellerId } });
+          const currentPending = Math.max(0, currentBal?.pendingBalance || 0);
+          const newPending = Math.max(0, TaxMath.subtract(currentPending, payout));
+
           await tx.sellerBalance.upsert({
             where: { sellerId: sellerOrder.sellerId },
             update: {
-              pendingBalance: { decrement: payout },
+              pendingBalance: newPending,
             },
             create: {
               sellerId: sellerOrder.sellerId,
@@ -509,13 +513,17 @@ export class OrderStateMachine {
         const isCodOrder = sellerOrder.order.payment?.method === 'CASH_ON_DELIVERY';
         const payout = sellerOrder.sellerPayout || 0;
 
+        const currentBal = await tx.sellerBalance.findUnique({ where: { sellerId: sellerOrder.sellerId } });
+        const currentPending = Math.max(0, currentBal?.pendingBalance || 0);
+        const newPending = Math.max(0, TaxMath.subtract(currentPending, payout));
+
         if (isCodOrder) {
           // COD: Cash is collected in person by seller/courier upon delivery.
           // Marketplace does NOT credit availableBalance to prevent double payout.
           await tx.sellerBalance.upsert({
             where: { sellerId: sellerOrder.sellerId },
             update: {
-              ...(payout > 0 ? { pendingBalance: { decrement: payout } } : {}),
+              pendingBalance: newPending,
             },
             create: {
               sellerId: sellerOrder.sellerId,
@@ -534,7 +542,7 @@ export class OrderStateMachine {
           const bal = await tx.sellerBalance.upsert({
             where: { sellerId: sellerOrder.sellerId },
             update: {
-              ...(payout > 0 ? { pendingBalance: { decrement: payout } } : {}),
+              pendingBalance: newPending,
               availableBalance: { increment: liquidPayout },
             },
             create: {
@@ -1314,13 +1322,17 @@ export class OrderStateMachine {
           const isCodOrder = order.payment?.method === 'CASH_ON_DELIVERY';
           const payout = so.sellerPayout || 0;
 
+          const currentBal = await tx.sellerBalance.findUnique({ where: { sellerId: so.sellerId } });
+          const currentPending = Math.max(0, currentBal?.pendingBalance || 0);
+          const newPending = Math.max(0, TaxMath.subtract(currentPending, payout));
+
           if (isCodOrder) {
             // COD: Cash is collected directly in-person by seller/courier.
             // Platform does not credit availableBalance to avoid double payout.
             await tx.sellerBalance.upsert({
               where: { sellerId: so.sellerId },
               update: {
-                ...(payout > 0 ? { pendingBalance: { decrement: payout } } : {}),
+                pendingBalance: newPending,
               },
               create: {
                 sellerId: so.sellerId,
@@ -1339,7 +1351,7 @@ export class OrderStateMachine {
             const bal = await tx.sellerBalance.upsert({
               where: { sellerId: so.sellerId },
               update: {
-                ...(payout > 0 ? { pendingBalance: { decrement: payout } } : {}),
+                pendingBalance: newPending,
                 availableBalance: { increment: liquidPayout },
               },
               create: {

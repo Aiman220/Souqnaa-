@@ -5,10 +5,14 @@ import { redis } from '../../database/redis';
 import { AppError } from '../../middleware/error.middleware';
 import { SocketService } from '../../services/websocket/socket.service';
 import { supportedAreasService } from '../locations/supported-areas.service';
+import { launcherCampaignService } from './launcher-campaign.service';
 import {
   AppBrandingConfig,
   APPROVED_CUSTOMER_APP_ICONS,
+  APPROVED_SELLER_APP_ICONS,
   DEFAULT_APP_BRANDING,
+  DEFAULT_CUSTOMER_BRANDING,
+  DEFAULT_SELLER_BRANDING,
   DEFAULT_FEATURE_FLAGS,
   DEFAULT_WALLET_PROVIDERS,
   FeatureFlagSeedDefinition,
@@ -16,10 +20,12 @@ import {
   WalletProviderConfig,
   PlatformWalletAccountConfig,
   DEFAULT_PLATFORM_WALLETS,
+  LauncherIconConfigRecord,
 } from './feature-flags.defaults';
 
 export interface ClientEvaluationContext {
   platform?: 'android' | 'ios' | 'web' | string;
+  appType?: 'customer' | 'seller' | 'admin' | string;
   userId?: string;
   deviceId?: string;
   userRole?: string;
@@ -66,6 +72,7 @@ export class RemoteConfigService {
   private memoryCache: {
     flags: any[];
     branding: AppBrandingConfig;
+    sellerBranding: AppBrandingConfig;
     platformWallets: PlatformWalletAccountConfig[];
     version: number;
     updatedAt: Date;
@@ -229,6 +236,7 @@ export class RemoteConfigService {
   private async getRawFlags(): Promise<{
     flags: any[];
     branding: AppBrandingConfig;
+    sellerBranding: AppBrandingConfig;
     platformWallets: PlatformWalletAccountConfig[];
     version: number;
     updatedAt: Date;
@@ -245,28 +253,37 @@ export class RemoteConfigService {
       orderBy: { createdAt: 'asc' },
     });
 
-    const [versionSetting, brandingSetting, customerIconSetting, platformWalletsSetting] = await Promise.all([
+    const [
+      versionSetting,
+      brandingSetting,
+      sellerBrandingSetting,
+      customerIconSetting,
+      sellerIconSetting,
+      platformWalletsSetting,
+    ] = await Promise.all([
       prisma.systemSetting.findUnique({ where: { key: 'remote_config_version' } }),
       prisma.systemSetting.findUnique({ where: { key: 'app_branding_config' } }),
+      prisma.systemSetting.findUnique({ where: { key: 'seller_branding_config' } }),
       prisma.systemSetting.findUnique({ where: { key: 'customer_app_icon' } }),
+      prisma.systemSetting.findUnique({ where: { key: 'seller_app_icon' } }),
       prisma.systemSetting.findUnique({ where: { key: 'platform_wallet_accounts' } }),
     ]);
 
     const version = versionSetting ? parseInt(versionSetting.value, 10) || 1 : 1;
 
-    let branding: AppBrandingConfig = { ...DEFAULT_APP_BRANDING };
+    let branding: AppBrandingConfig = { ...DEFAULT_CUSTOMER_BRANDING };
     if (brandingSetting && brandingSetting.value) {
       try {
         const parsed = JSON.parse(brandingSetting.value);
         branding = {
-          ...DEFAULT_APP_BRANDING,
+          ...DEFAULT_CUSTOMER_BRANDING,
           ...parsed,
           platforms: {
-            ...DEFAULT_APP_BRANDING.platforms,
+            ...DEFAULT_CUSTOMER_BRANDING.platforms,
             ...(parsed.platforms || {}),
           },
           seasonalIcon: {
-            ...DEFAULT_APP_BRANDING.seasonalIcon,
+            ...DEFAULT_CUSTOMER_BRANDING.seasonalIcon,
             ...(parsed.seasonalIcon || {}),
           },
         };
@@ -277,6 +294,31 @@ export class RemoteConfigService {
       branding.customerAppIcon = customerIconSetting.value;
     } else if (!branding.customerAppIcon) {
       branding.customerAppIcon = 'default';
+    }
+
+    let sellerBranding: AppBrandingConfig = { ...DEFAULT_SELLER_BRANDING };
+    if (sellerBrandingSetting && sellerBrandingSetting.value) {
+      try {
+        const parsed = JSON.parse(sellerBrandingSetting.value);
+        sellerBranding = {
+          ...DEFAULT_SELLER_BRANDING,
+          ...parsed,
+          platforms: {
+            ...DEFAULT_SELLER_BRANDING.platforms,
+            ...(parsed.platforms || {}),
+          },
+          seasonalIcon: {
+            ...DEFAULT_SELLER_BRANDING.seasonalIcon,
+            ...(parsed.seasonalIcon || {}),
+          },
+        };
+      } catch (_) {}
+    }
+
+    if (sellerIconSetting && sellerIconSetting.value) {
+      sellerBranding.customerAppIcon = sellerIconSetting.value;
+    } else if (!sellerBranding.customerAppIcon) {
+      sellerBranding.customerAppIcon = 'seller_default';
     }
 
     let platformWallets: PlatformWalletAccountConfig[] = DEFAULT_PLATFORM_WALLETS;
@@ -299,8 +341,14 @@ export class RemoteConfigService {
     if (brandingSetting && brandingSetting.updatedAt > latestUpdate) {
       latestUpdate = brandingSetting.updatedAt;
     }
+    if (sellerBrandingSetting && sellerBrandingSetting.updatedAt > latestUpdate) {
+      latestUpdate = sellerBrandingSetting.updatedAt;
+    }
     if (customerIconSetting && customerIconSetting.updatedAt > latestUpdate) {
       latestUpdate = customerIconSetting.updatedAt;
+    }
+    if (sellerIconSetting && sellerIconSetting.updatedAt > latestUpdate) {
+      latestUpdate = sellerIconSetting.updatedAt;
     }
     if (platformWalletsSetting && platformWalletsSetting.updatedAt > latestUpdate) {
       latestUpdate = platformWalletsSetting.updatedAt;
@@ -311,6 +359,7 @@ export class RemoteConfigService {
     this.memoryCache = {
       flags,
       branding,
+      sellerBranding,
       platformWallets,
       version,
       updatedAt: latestUpdate,
@@ -328,7 +377,10 @@ export class RemoteConfigService {
   public async getResolvedConfig(
     context: ClientEvaluationContext = {}
   ): Promise<ResolvedRemoteConfigResponse> {
-    const { flags, branding, version, updatedAt, etag } = await this.getRawFlags();
+    const raw = await this.getRawFlags();
+    const { flags, version, updatedAt, etag } = raw;
+    const isSeller = (context.appType || '').toUpperCase() === 'SELLER';
+    const rawBranding = isSeller ? raw.sellerBranding : raw.branding;
 
     if (context.ifNoneMatch) {
       const match = context.ifNoneMatch === etag ||
@@ -343,7 +395,7 @@ export class RemoteConfigService {
           features: {},
           details: {},
           walletProviders: {},
-          branding,
+          branding: rawBranding,
           platformWallets: [],
         };
       }
@@ -358,7 +410,7 @@ export class RemoteConfigService {
         features: {},
         details: {},
         walletProviders: {},
-        branding,
+        branding: rawBranding,
         platformWallets: [],
       };
     }
@@ -489,32 +541,60 @@ export class RemoteConfigService {
     }
 
     const activeBranding: AppBrandingConfig = {
-      ...branding,
-      platforms: { ...branding.platforms },
+      ...rawBranding,
+      platforms: { ...rawBranding.platforms },
     };
 
-    // Seasonal / Promotional Icon Override
-    if (activeBranding.seasonalIcon?.enabled && activeBranding.seasonalIcon.iconUrl) {
-      let isSeasonActive = true;
-      if (activeBranding.seasonalIcon.startDate && now < new Date(activeBranding.seasonalIcon.startDate)) {
-        isSeasonActive = false;
-      }
-      if (activeBranding.seasonalIcon.endDate && now > new Date(activeBranding.seasonalIcon.endDate)) {
-        isSeasonActive = false;
+    // Authoritative Launcher Icon Resolution via LauncherCampaignService (§4, §5, §6)
+    const appType: 'CUSTOMER' | 'SELLER' = isSeller ? 'SELLER' : 'CUSTOMER';
+    const clientPlatform = (context.platform || '').toLowerCase();
+    const targetPlatform: 'ANDROID' | 'IOS' = clientPlatform === 'ios' ? 'IOS' : 'ANDROID';
+
+    try {
+      const launcherConfig = await launcherCampaignService.getConfig(appType, targetPlatform);
+      const resolution = launcherCampaignService.resolveLauncherIcon(launcherConfig, now);
+
+      if (targetPlatform === 'ANDROID' && activeBranding.platforms.android) {
+        activeBranding.platforms.android = {
+          ...activeBranding.platforms.android,
+          iconUrl: resolution.activeIconUrl || activeBranding.platforms.android.iconUrl,
+          deepLinkUrl: resolution.deepLinkUrl || activeBranding.platforms.android.deepLinkUrl,
+          badgeText: resolution.campaignName || activeBranding.platforms.android.badgeText,
+        };
+      } else if (targetPlatform === 'IOS' && activeBranding.platforms.ios) {
+        activeBranding.platforms.ios = {
+          ...activeBranding.platforms.ios,
+          iconUrl: resolution.activeIconUrl || activeBranding.platforms.ios.iconUrl,
+          deepLinkUrl: resolution.deepLinkUrl || activeBranding.platforms.ios.deepLinkUrl,
+          badgeText: resolution.campaignName || activeBranding.platforms.ios.badgeText,
+        };
       }
 
-      if (isSeasonActive) {
+      // If active seasonal campaign, override platforms
+      if (resolution.isSeasonalActive) {
         for (const p of ['android', 'ios', 'tablet', 'desktop', 'web'] as const) {
           if (activeBranding.platforms[p]) {
             activeBranding.platforms[p] = {
               ...activeBranding.platforms[p],
-              iconUrl: activeBranding.seasonalIcon.iconUrl,
-              deepLinkUrl: activeBranding.seasonalIcon.deepLinkUrl || activeBranding.platforms[p].deepLinkUrl,
-              badgeText: activeBranding.seasonalIcon.name || activeBranding.platforms[p].badgeText,
+              iconUrl: resolution.activeIconUrl,
+              deepLinkUrl: resolution.deepLinkUrl || activeBranding.platforms[p].deepLinkUrl,
+              badgeText: resolution.campaignName || activeBranding.platforms[p].badgeText,
             };
           }
         }
       }
+
+      activeBranding.customerAppIcon = resolution.activeIconId;
+      activeBranding.seasonalIcon = {
+        enabled: launcherConfig.seasonalEnabled,
+        name: launcherConfig.campaignName || '',
+        iconUrl: launcherConfig.seasonalIconUrl || '',
+        deepLinkUrl: launcherConfig.campaignDeepLink || '',
+        startDate: launcherConfig.campaignStartAt ? new Date(launcherConfig.campaignStartAt).toISOString() : null,
+        endDate: launcherConfig.campaignEndAt ? new Date(launcherConfig.campaignEndAt).toISOString() : null,
+      };
+    } catch (_) {
+      // Fallback to in-memory branding if database lookup fails
     }
 
     const activePlatformWallets = (this.memoryCache?.platformWallets || DEFAULT_PLATFORM_WALLETS)
@@ -1067,56 +1147,36 @@ export class RemoteConfigService {
 
   /**
    * Admin: Get current App Branding, Icons & Deep-linking configuration.
+   * Supports independent configurations for CUSTOMER and SELLER.
    */
-  public async getBrandingConfig(): Promise<AppBrandingConfig> {
-    const [setting, customerIconSetting] = await Promise.all([
-      prisma.systemSetting.findUnique({
-        where: { key: 'app_branding_config' },
-      }),
-      prisma.systemSetting.findUnique({
-        where: { key: 'customer_app_icon' },
-      }),
-    ]);
-
-    let branding: AppBrandingConfig = { ...DEFAULT_APP_BRANDING };
-    if (setting && setting.value) {
-      try {
-        const parsed = JSON.parse(setting.value);
-        branding = {
-          ...DEFAULT_APP_BRANDING,
-          ...parsed,
-          platforms: {
-            ...DEFAULT_APP_BRANDING.platforms,
-            ...(parsed.platforms || {}),
-          },
-          seasonalIcon: {
-            ...DEFAULT_APP_BRANDING.seasonalIcon,
-            ...(parsed.seasonalIcon || {}),
-          },
-        };
-      } catch (_) {
-        branding = { ...DEFAULT_APP_BRANDING };
-      }
+  public async getBrandingConfig(appType: 'CUSTOMER' | 'SELLER' = 'CUSTOMER'): Promise<AppBrandingConfig> {
+    const raw = await this.getRawFlags();
+    if (appType === 'SELLER') {
+      return raw.sellerBranding || DEFAULT_SELLER_BRANDING;
     }
-
-    if (customerIconSetting && customerIconSetting.value) {
-      branding.customerAppIcon = customerIconSetting.value;
-    } else if (!branding.customerAppIcon) {
-      branding.customerAppIcon = 'default';
-    }
-
-    return branding;
+    return raw.branding;
   }
 
   /**
    * Admin: Update App Branding, Icons (Android, iPhone, Tablet, Desktop, Web) and Deep-link targets.
+   * Strictly isolates CUSTOMER and SELLER application configurations.
    */
   public async updateBrandingConfig(
     updates: Partial<AppBrandingConfig>,
     adminUser: { id: string; email?: string },
-    req?: Request
+    req?: Request,
+    appType: 'CUSTOMER' | 'SELLER' = 'CUSTOMER'
   ): Promise<AppBrandingConfig> {
-    // Validate candidate customer app icon identifier if provided
+    // 1. Validate campaign dates if provided
+    if (updates.seasonalIcon?.startDate && updates.seasonalIcon?.endDate) {
+      const s = new Date(updates.seasonalIcon.startDate).getTime();
+      const e = new Date(updates.seasonalIcon.endDate).getTime();
+      if (!isNaN(s) && !isNaN(e) && e <= s) {
+        throw new AppError('تاريخ نهاية الحملة يجب أن يكون بعد تاريخ البداية بشكل صحيح', 400);
+      }
+    }
+
+    // 2. Validate candidate app icon identifier if provided
     const rawCandidate =
       updates.customerAppIcon ||
       updates.platforms?.android?.iconUrl ||
@@ -1124,41 +1184,10 @@ export class RemoteConfigService {
 
     let canonicalIcon: string | undefined = undefined;
     if (rawCandidate) {
-      const trimmed = rawCandidate.trim();
-      const lower = trimmed.toLowerCase();
-
-      const matched = APPROVED_CUSTOMER_APP_ICONS.find(
-        (id) =>
-          lower === id ||
-          lower.includes(`app_icon_${id}`) ||
-          lower.includes(`_${id}.`) ||
-          lower.includes(`/${id}.`) ||
-          lower.endsWith(`/${id}`) ||
-          (id !== 'default' && lower.includes(id))
-      );
-
-      if (matched) {
-        canonicalIcon = matched;
-      } else if (
-        trimmed.startsWith('http://') ||
-        trimmed.startsWith('https://') ||
-        trimmed.startsWith('/uploads/') ||
-        trimmed.startsWith('uploads/') ||
-        trimmed.startsWith('/storage/') ||
-        trimmed.startsWith('storage/') ||
-        trimmed.startsWith('assets/') ||
-        /\.(png|jpg|jpeg|webp|svg|ico)$/i.test(trimmed)
-      ) {
-        canonicalIcon = trimmed;
-      } else {
-        throw new AppError(
-          'معرّف أيقونة التطبيق غير معتمد. المعرفات المعتمدة: default, orange, modern, minimal, seasonal',
-          400
-        );
-      }
+      canonicalIcon = launcherCampaignService.validateIconTarget(rawCandidate, appType);
     }
 
-    const current = await this.getBrandingConfig();
+    const current = await this.getBrandingConfig(appType);
     const updated: AppBrandingConfig = {
       ...current,
       ...updates,
@@ -1174,14 +1203,18 @@ export class RemoteConfigService {
       updatedAt: new Date().toISOString(),
     };
 
+    const isCustomer = appType === 'CUSTOMER';
+    const settingKey = isCustomer ? 'app_branding_config' : 'seller_branding_config';
+    const iconSettingKey = isCustomer ? 'customer_app_icon' : 'seller_app_icon';
+
     const oldValue = JSON.stringify(current);
     const newValue = JSON.stringify(updated);
 
-    // Persist to SystemSetting
+    // 3. Persist to SystemSetting
     await prisma.systemSetting.upsert({
-      where: { key: 'app_branding_config' },
+      where: { key: settingKey },
       create: {
-        key: 'app_branding_config',
+        key: settingKey,
         value: newValue,
         type: 'json',
         group: 'remote_config',
@@ -1191,12 +1224,12 @@ export class RemoteConfigService {
       },
     });
 
-    // Synchronize customer_app_icon in SystemSetting
+    // Synchronize icon setting in SystemSetting
     if (canonicalIcon) {
       await prisma.systemSetting.upsert({
-        where: { key: 'customer_app_icon' },
+        where: { key: iconSettingKey },
         create: {
-          key: 'customer_app_icon',
+          key: iconSettingKey,
           value: canonicalIcon,
           type: 'string',
           group: 'remote_config',
@@ -1207,7 +1240,52 @@ export class RemoteConfigService {
       });
     }
 
-    // Increment global system configuration version
+    // 4. Synchronize with authoritative LauncherIconConfig table for ANDROID and IOS
+    try {
+      const androidCandidate = updates.platforms?.android?.iconUrl || canonicalIcon || current.platforms.android.iconUrl;
+      const iosCandidate = updates.platforms?.ios?.iconUrl || canonicalIcon || current.platforms.ios.iconUrl;
+
+      const seasonalTarget = updates.seasonalIcon?.iconUrl
+        ? launcherCampaignService.normalizeIconId(updates.seasonalIcon.iconUrl, appType, true)
+        : (isCustomer ? 'seasonal' : 'seller_seasonal');
+
+      await Promise.all([
+        launcherCampaignService.updateLauncherConfig(
+          appType,
+          'ANDROID',
+          {
+            defaultIconId: launcherCampaignService.normalizeIconId(androidCandidate, appType),
+            defaultIconUrl: androidCandidate || (isCustomer ? '/uploads/branding/souqnaa-app-icon.png' : '/uploads/branding/seller_app_icon.png'),
+            seasonalIconId: seasonalTarget,
+            seasonalIconUrl: updates.seasonalIcon?.iconUrl !== undefined ? updates.seasonalIcon.iconUrl : current.seasonalIcon?.iconUrl,
+            seasonalEnabled: updates.seasonalIcon?.enabled !== undefined ? updates.seasonalIcon.enabled : current.seasonalIcon?.enabled,
+            campaignName: updates.seasonalIcon?.name !== undefined ? updates.seasonalIcon.name : current.seasonalIcon?.name,
+            campaignDeepLink: updates.seasonalIcon?.deepLinkUrl !== undefined ? updates.seasonalIcon.deepLinkUrl : current.seasonalIcon?.deepLinkUrl,
+            campaignStartAt: updates.seasonalIcon?.startDate !== undefined ? updates.seasonalIcon.startDate : current.seasonalIcon?.startDate,
+            campaignEndAt: updates.seasonalIcon?.endDate !== undefined ? updates.seasonalIcon.endDate : current.seasonalIcon?.endDate,
+          },
+          adminUser
+        ),
+        launcherCampaignService.updateLauncherConfig(
+          appType,
+          'IOS',
+          {
+            defaultIconId: launcherCampaignService.normalizeIconId(iosCandidate, appType),
+            defaultIconUrl: iosCandidate || (isCustomer ? '/uploads/branding/souqnaa-app-icon.png' : '/uploads/branding/seller_app_icon.png'),
+            seasonalIconId: seasonalTarget,
+            seasonalIconUrl: updates.seasonalIcon?.iconUrl !== undefined ? updates.seasonalIcon.iconUrl : current.seasonalIcon?.iconUrl,
+            seasonalEnabled: updates.seasonalIcon?.enabled !== undefined ? updates.seasonalIcon.enabled : current.seasonalIcon?.enabled,
+            campaignName: updates.seasonalIcon?.name !== undefined ? updates.seasonalIcon.name : current.seasonalIcon?.name,
+            campaignDeepLink: updates.seasonalIcon?.deepLinkUrl !== undefined ? updates.seasonalIcon.deepLinkUrl : current.seasonalIcon?.deepLinkUrl,
+            campaignStartAt: updates.seasonalIcon?.startDate !== undefined ? updates.seasonalIcon.startDate : current.seasonalIcon?.startDate,
+            campaignEndAt: updates.seasonalIcon?.endDate !== undefined ? updates.seasonalIcon.endDate : current.seasonalIcon?.endDate,
+          },
+          adminUser
+        ),
+      ]);
+    } catch (_) {}
+
+    // 5. Increment global system configuration version
     const versionSetting = await prisma.systemSetting.findUnique({
       where: { key: 'remote_config_version' },
     });
@@ -1220,14 +1298,14 @@ export class RemoteConfigService {
       update: { value: newVersion.toString() },
     });
 
-    // Record audit trail
+    // 6. Record audit trail
     await prisma.featureFlagAuditLog.create({
       data: {
-        featureKey: 'app_branding_config',
+        featureKey: settingKey,
         action: 'UPDATE',
         oldValue,
         newValue,
-        reason: 'تحديث أيقونات وتطبيقات المنصة وروابط الفتح عند النقر',
+        reason: `تحديث أيقونات وهوية التطبيق والحملات الترويجية لـ [${appType}]`,
         changedBy: adminUser.email || adminUser.id,
         ipAddress: req?.ip || req?.socket?.remoteAddress || null,
         userAgent: req?.headers ? (req.headers['user-agent'] as string) : null,
@@ -1237,11 +1315,11 @@ export class RemoteConfigService {
     if (canonicalIcon && current.customerAppIcon !== canonicalIcon) {
       await prisma.featureFlagAuditLog.create({
         data: {
-          featureKey: 'customer_app_icon',
+          featureKey: iconSettingKey,
           action: 'UPDATE',
-          oldValue: current.customerAppIcon || 'default',
+          oldValue: current.customerAppIcon || (isCustomer ? 'default' : 'seller_default'),
           newValue: canonicalIcon,
-          reason: 'تغيير أيقونة تطبيق العملاء',
+          reason: `تغيير أيقونة تطبيق [${appType}]`,
           changedBy: adminUser.email || adminUser.id,
           ipAddress: req?.ip || req?.socket?.remoteAddress || null,
           userAgent: req?.headers ? (req.headers['user-agent'] as string) : null,
@@ -1249,7 +1327,7 @@ export class RemoteConfigService {
       });
     }
 
-    // If appVersion was updated, sync active AppVersionPolicy in database
+    // 7. If appVersion was updated, sync active AppVersionPolicy in database
     if (updates.appVersion) {
       try {
         const cleanVer = updates.appVersion.trim();
@@ -1269,7 +1347,11 @@ export class RemoteConfigService {
     }
 
     this.invalidateCache();
-    this.broadcastConfigUpdate({ key: 'branding', action: 'UPDATE_BRANDING', version: newVersion });
+    this.broadcastConfigUpdate({
+      key: `branding_${appType.toLowerCase()}`,
+      action: 'UPDATE_BRANDING',
+      version: newVersion,
+    });
     return updated;
   }
 

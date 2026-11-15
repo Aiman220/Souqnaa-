@@ -2,6 +2,7 @@ import path from 'path';
 import multer from 'multer';
 import { Router, Request, Response, NextFunction } from 'express';
 import { remoteConfigService } from './remote-config.service';
+import { launcherCampaignService } from './launcher-campaign.service';
 import { authenticate, optionalAuth } from '../../middleware/auth.middleware';
 import { requireAdmin } from '../../middleware/rbac.middleware';
 import { ResponseUtil } from '../../utils/response.util';
@@ -44,6 +45,7 @@ remoteConfigPublicRoutes.get(
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const platform = (req.query.platform as string) || (req.headers['x-platform'] as string);
+      const appType = (req.query.app as string) || (req.headers['x-app-type'] as string) || 'customer';
       const deviceId = (req.query.device_id as string) || (req.headers['x-device-id'] as string);
       const clientVersionStr = req.query.version as string;
       const clientVersion = clientVersionStr ? parseInt(clientVersionStr, 10) : undefined;
@@ -52,6 +54,7 @@ remoteConfigPublicRoutes.get(
 
       const resolved = await remoteConfigService.getResolvedConfig({
         platform,
+        appType,
         deviceId,
         userId: req.user?.userId,
         userRole: req.user?.role,
@@ -81,11 +84,13 @@ remoteConfigPublicRoutes.get(
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const platform = (req.query.platform as string) || (req.headers['x-platform'] as string);
+      const appType = (req.query.app as string) || (req.headers['x-app-type'] as string) || 'customer';
       const deviceId = (req.query.device_id as string) || (req.headers['x-device-id'] as string);
       const ifNoneMatch = req.headers['if-none-match'];
 
       const resolved = await remoteConfigService.getResolvedConfig({
         platform,
+        appType,
         deviceId,
         userId: req.user?.userId,
         ifNoneMatch,
@@ -201,13 +206,59 @@ remoteConfigAdminRoutes.post(
 /**
  * GET /api/v1/admin/feature-flags/branding
  * Retrieves application branding, platform icons, and deep-link click actions.
+ * Supports ?app=customer or ?app=seller.
  */
 remoteConfigAdminRoutes.get(
   '/branding',
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const branding = await remoteConfigService.getBrandingConfig();
-      ResponseUtil.success(res, branding, 'تم استرجاع إعدادات الهوية وأيقونات التطبيقات بنجاح.');
+      const rawApp = (req.query.app as string) || (req.headers['x-app-type'] as string) || 'customer';
+      const appType = rawApp.toUpperCase() === 'SELLER' ? 'SELLER' : 'CUSTOMER';
+      const branding = await remoteConfigService.getBrandingConfig(appType);
+      ResponseUtil.success(res, branding, `تم استرجاع إعدادات الهوية وأيقونات التطبيق [${appType}] بنجاح.`);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * GET /api/v1/admin/feature-flags/branding/launcher-configs
+ * Returns all 4 strictly independent launcher configurations:
+ * CUSTOMER_ANDROID, CUSTOMER_IOS, SELLER_ANDROID, SELLER_IOS
+ */
+remoteConfigAdminRoutes.get(
+  '/branding/launcher-configs',
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const configs = await launcherCampaignService.getAllConfigs();
+      ResponseUtil.success(res, configs, 'تم استرجاع الإعدادات المستقلة لجميع المنصات بنجاح.');
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * PUT /api/v1/admin/feature-flags/branding/launcher-configs/:appType/:platform
+ * Direct update for one of the 4 independent launcher configurations.
+ */
+remoteConfigAdminRoutes.put(
+  '/branding/launcher-configs/:appType/:platform',
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const appType = String(req.params.appType).toUpperCase() as 'CUSTOMER' | 'SELLER';
+      const platform = String(req.params.platform).toUpperCase() as 'ANDROID' | 'IOS';
+      if (!['CUSTOMER', 'SELLER'].includes(appType) || !['ANDROID', 'IOS'].includes(platform)) {
+        throw new AppError('نوع التطبيق أو المنصة غير مدعوم', 400);
+      }
+      const updated = await launcherCampaignService.updateLauncherConfig(
+        appType,
+        platform,
+        req.body,
+        { id: req.user!.userId, email: req.user!.email }
+      );
+      ResponseUtil.success(res, updated, 'تم تحديث إعدادات الأيقونة للمنصة بنجاح.');
     } catch (error) {
       next(error);
     }
@@ -217,18 +268,22 @@ remoteConfigAdminRoutes.get(
 /**
  * PUT /api/v1/admin/feature-flags/branding
  * Updates application branding, platform icons (Android, iPhone, Tablet, Desktop, Web) and deep-linking.
+ * Supports ?app=customer or ?app=seller or body.applicationType.
  */
 remoteConfigAdminRoutes.put(
   '/branding',
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const updates = req.body;
+      const rawApp = (req.query.app as string) || (req.body.applicationType as string) || 'customer';
+      const appType = rawApp.toUpperCase() === 'SELLER' ? 'SELLER' : 'CUSTOMER';
       const updated = await remoteConfigService.updateBrandingConfig(
         updates,
         { id: req.user!.userId, email: req.user!.email },
-        req
+        req,
+        appType
       );
-      ResponseUtil.success(res, updated, 'تم حفظ إعدادات الهوية وأيقونات التطبيقات بنجاح.');
+      ResponseUtil.success(res, updated, `تم حفظ إعدادات الهوية وأيقونات التطبيق [${appType}] بنجاح.`);
     } catch (error) {
       next(error);
     }
@@ -248,7 +303,9 @@ remoteConfigAdminRoutes.post(
         throw new AppError('يرجى اختيار ملف صورة للأيقونة للرفع', 400);
       }
       const platform = (req.body.platform as string) || 'general';
-      const result = await storageService.uploadFile(req.file, `branding/${platform}`);
+      const rawApp = (req.body.appType as string) || (req.query.app as string) || 'general';
+      const folder = `branding/${rawApp.toLowerCase()}/${platform}`;
+      const result = await storageService.uploadFile(req.file, folder);
       ResponseUtil.created(res, result, 'تم رفع أيقونة التطبيق بنجاح.');
     } catch (error) {
       next(error);

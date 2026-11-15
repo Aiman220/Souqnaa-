@@ -26,6 +26,12 @@ export class AuthController {
        user.email.startsWith('facebook_') ||
        user.email.startsWith('google_'));
 
+    const isPhoneVerified = Boolean(
+      extra.isPhoneVerified !== undefined
+        ? extra.isPhoneVerified
+        : (user.isPhoneVerified || (user.phone && user.isVerified))
+    );
+
     return {
       id: user.id,
       email: isPlaceholderEmail ? '' : user.email,
@@ -34,6 +40,7 @@ export class AuthController {
       lastName: user.lastName,
       role: user.role.toLowerCase(),
       isVerified: isPlaceholderEmail ? true : user.isVerified,
+      isPhoneVerified,
       isActive: user.isActive,
       avatar: user.avatar,
       hasLinkedEmail: !isPlaceholderEmail && Boolean(user.email),
@@ -162,7 +169,15 @@ export class AuthController {
       await redis.setAuthoritative(`refresh:${user.id}`, tokens.refreshToken, 7 * 24 * 3600);
       await redis.setAuthoritative(`active_session:${user.id}`, tokens.sessionId, 7 * 24 * 3600);
 
-      const sanitizedUser = AuthController.sanitizeUser(user);
+      let isPhoneVerified = false;
+      if (user.phone) {
+        const phoneVerifiedInRedis = await redis.get(`phone_verified:${user.phone}`);
+        isPhoneVerified = phoneVerifiedInRedis === '1';
+      }
+
+      const sanitizedUser = AuthController.sanitizeUser(user, {
+        isPhoneVerified,
+      });
 
       // Centralized Notification Platform: Dispatch Welcome Email
       const locale = (req.headers['accept-language']?.includes('en') ? 'en' : 'ar') as 'ar' | 'en';
@@ -276,7 +291,14 @@ export class AuthController {
       await redis.setAuthoritative(`refresh:${user.id}`, tokens.refreshToken, 7 * 24 * 3600);
       await redis.setAuthoritative(`active_session:${user.id}`, tokens.sessionId, 7 * 24 * 3600);
 
+      let isPhoneVerified = false;
+      if (user.phone) {
+        const phoneVerifiedInRedis = await redis.get(`phone_verified:${user.phone}`);
+        isPhoneVerified = phoneVerifiedInRedis === '1';
+      }
+
       const sanitizedUser = AuthController.sanitizeUser(user, {
+        isPhoneVerified,
         adminRoles: adminRoles.length > 0 ? adminRoles : undefined,
       });
 
@@ -329,7 +351,15 @@ export class AuthController {
       if (!rotated) throw new AppError('Refresh token has already been used or revoked.', 401, 'REFRESH_TOKEN_REPLAYED');
       await redis.setAuthoritative(`active_session:${user.id}`, newTokens.sessionId, 7 * 24 * 3600);
 
-      const sanitizedUser = AuthController.sanitizeUser(user);
+      let isPhoneVerified = false;
+      if (user.phone) {
+        const phoneVerifiedInRedis = await redis.get(`phone_verified:${user.phone}`);
+        isPhoneVerified = phoneVerifiedInRedis === '1';
+      }
+
+      const sanitizedUser = AuthController.sanitizeUser(user, {
+        isPhoneVerified,
+      });
 
       ResponseUtil.success(res, {
         accessToken: newTokens.accessToken,
@@ -541,12 +571,17 @@ export class AuthController {
         if (phone === null || (typeof phone === 'string' && phone.trim() === '')) {
           dataToUpdate.phone = null;
         } else if (typeof phone === 'string') {
-          const cleanPhone = phone.trim().replace(/\s|-/g, '');
+          const cleanPhone = otpService.normalizeTarget(phone);
           const phoneRegex = /^\+?[0-9]{8,15}$/;
           if (!phoneRegex.test(cleanPhone)) {
             throw new AppError('رقم الهاتف غير صالح', 400);
           }
           const currentUser = await prisma.user.findUnique({ where: { id: userId } });
+          const isPhoneOtpVerified = await redis.get(`otp_verified:${cleanPhone}`);
+          if (isPhoneOtpVerified === '1') {
+            await redis.del(`otp_verified:${cleanPhone}`);
+            await redis.set(`phone_verified:${cleanPhone}`, '1', 31536000);
+          }
           if (cleanPhone !== currentUser?.phone) {
             const existingPhone = await prisma.user.findFirst({
               where: {
@@ -558,11 +593,6 @@ export class AuthController {
               throw new AppError('رقم الجوال مسجل مسبقاً بحساب آخر', 409);
             }
             dataToUpdate.phone = cleanPhone;
-            const isPhoneOtpVerified = await redis.get(`otp_verified:${cleanPhone}`);
-            if (isPhoneOtpVerified === '1') {
-              await redis.del(`otp_verified:${cleanPhone}`);
-              await redis.set(`phone_verified:${cleanPhone}`, '1', 31536000);
-            }
           }
         }
       }

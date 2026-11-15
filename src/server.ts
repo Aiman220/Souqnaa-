@@ -11,6 +11,7 @@ import { RewardsScheduler } from './services/jobs/rewards.job';
 import { NotificationScheduler } from './modules/notifications/services/notification-scheduler';
 import { CartAbandonmentJob } from './services/jobs/cart-abandonment.job';
 import { SellerReserveScheduler } from './services/jobs/seller-reserve.job';
+import { LauncherCampaignScheduler } from './services/jobs/launcher-campaign.job';
 import { prisma } from './database/prisma';
 import { redis } from './database/redis';
 import { remoteConfigService } from './modules/remote-config/remote-config.service';
@@ -63,6 +64,12 @@ const startServer = async () => {
     // Initialize SOUQNA Seller Financial Risk Reserve & Invariant Reconciliation Worker
     SellerReserveScheduler.start(60 * 60 * 1000); // Hourly check for 30-day mature releases
 
+    // Initialize Seasonal Campaign & Launcher Icon Scheduler
+    LauncherCampaignScheduler.init().catch((err) => {
+      console.warn('[LauncherCampaign] Init warning:', err?.message);
+    });
+    LauncherCampaignScheduler.start(60 * 1000);
+
     server.listen(config.port, () => {
       console.log(`
 🚀 سوقناا Backend API is running!
@@ -90,6 +97,7 @@ const startServer = async () => {
       RewardsScheduler.stop();
       CartAbandonmentJob.stop();
       SellerReserveScheduler.stop();
+      LauncherCampaignScheduler.stop();
 
       // Drain WebSocket real-time connections
       try {

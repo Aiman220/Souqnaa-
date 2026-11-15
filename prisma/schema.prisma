@@ -3589,6 +3589,31 @@ model SystemSetting {
   @@index([key])
 }
 
+/// SOUQNA Launcher Icon & Seasonal Campaign Configuration
+/// Four strictly independent configurations: CUSTOMER_ANDROID, CUSTOMER_IOS, SELLER_ANDROID, SELLER_IOS
+model LauncherIconConfig {
+  id               String          @id @default(uuid())
+  applicationType  AppTypeEnum
+  platform         AppPlatformEnum
+  defaultIconId    String          @default("default")
+  defaultIconUrl   String
+  seasonalIconId   String?
+  seasonalIconUrl  String?
+  seasonalEnabled  Boolean         @default(false)
+  campaignName     String?
+  campaignDeepLink String?
+  campaignStartAt  DateTime?
+  campaignEndAt    DateTime?
+  timezone         String          @default("Asia/Aden")
+  publishedVersion Int             @default(1)
+  updatedAt        DateTime        @updatedAt
+  updatedBy        String?
+
+  @@unique([applicationType, platform])
+  @@index([applicationType, platform])
+  @@index([seasonalEnabled])
+}
+
 // ==========================================
 // SOCIAL / FOLLOW SYSTEM
 // ==========================================

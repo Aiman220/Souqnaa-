@@ -1310,12 +1310,14 @@ router.get('/dashboard', async (req: Request, res: Response, next: NextFunction)
     const amountNeededToUnblock = standing.amountNeededToUnblock;
 
     // Self-heal: If seller is not restricted, normalize any inconsistent database state
-    if (!isFinanciallyRestricted && seller.financialRestrictionLevel === 'RESTRICTED') {
+    if (!isFinanciallyRestricted && (seller.financialRestrictionLevel === 'RESTRICTED' || seller.isFinanciallyRestricted)) {
       financialRestrictionLevel = 'NORMAL';
       await prisma.seller.update({
         where: { id: seller.id },
         data: {
+          isFinanciallyRestricted: false,
           financialRestrictionLevel: 'NORMAL',
+          financialRestrictionReason: null,
           financialRestrictedAt: null,
         },
       });
@@ -1336,13 +1338,22 @@ router.get('/dashboard', async (req: Request, res: Response, next: NextFunction)
     const payload = {
       revenue: earned,
       availableBalance: balance?.availableBalance || 0,
-      pendingBalance: balance?.pendingBalance || 0,
+      pendingBalance: Math.max(0, balance?.pendingBalance || 0),
       withdrawnBalance: balance?.withdrawnBalance || 0,
-      outstandingCommission,
+      outstandingCommission: standing.outstandingCommission,
+      outstandingCod: standing.outstandingCod,
+      outstandingRefundLiabilities: standing.outstandingRefundLiabilities,
+      totalOutstandingLiabilities: standing.totalOutstandingLiabilities,
+      netFinancialPosition: standing.netFinancialPosition,
       isFinanciallyRestricted,
       financialRestrictionLevel,
-      financialRestrictionReason: seller.financialRestrictionReason || null,
+      financialRestrictionReason: isFinanciallyRestricted
+        ? (seller.financialRestrictionReason || standing.primaryRestrictionReason || null)
+        : null,
+      primaryRestrictionCategory: standing.primaryRestrictionCategory,
+      primaryRestrictionReason: standing.primaryRestrictionReason,
       amountNeededToUnblock,
+      financialWarnings: standing.financialWarnings || [],
       cashOnDeliveryEnabled: seller.cashOnDeliveryEnabled ?? true,
       currency: (balance?.currency && balance.currency !== 'SAR') ? balance.currency : 'YER',
       totalOrders,
@@ -3302,9 +3313,19 @@ router.get('/me/balance', async (req: Request, res: Response, next: NextFunction
       sellerId: seller.id,
       availableBalance: standing.availableBalance,
       withdrawableBalance: standing.withdrawableBalance,
-      pendingBalance: standing.pendingBalance,
+      pendingBalance: Math.max(0, standing.pendingBalance),
       withdrawnBalance: standing.withdrawnBalance,
       outstandingCommission: standing.outstandingCommission,
+      outstandingCod: standing.outstandingCod,
+      outstandingRefundLiabilities: standing.outstandingRefundLiabilities,
+      totalOutstandingLiabilities: standing.totalOutstandingLiabilities,
+      netFinancialPosition: standing.netFinancialPosition,
+      commissionSummary: standing.commissionSummary,
+      codSummary: standing.codSummary,
+      refundSummary: standing.refundSummary,
+      financialWarnings: standing.financialWarnings || [],
+      primaryRestrictionCategory: standing.primaryRestrictionCategory,
+      primaryRestrictionReason: standing.primaryRestrictionReason,
       totalReservedBalance: standing.totalReservedBalance,
       unsecuredExposure: standing.unsecuredExposure,
       isFinanciallyRestricted: standing.isFinanciallyRestricted,
@@ -3493,6 +3514,9 @@ router.post('/me/outstandings/pay', async (req: Request, res: Response, next: Ne
       amount: amount !== undefined && amount !== null ? Number(amount) : undefined,
       notes,
     });
+
+    // Invalidate dashboard metrics cache so UI updates immediately
+    AnalyticsCacheService.invalidate(`seller_dashboard_metrics_${seller.id}`);
 
     ResponseUtil.success(res, {
       ...result,

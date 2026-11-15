@@ -131,6 +131,8 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       }
       return {
         ...item,
+        title: item.titleAr || item.titleEn || '',
+        body: item.bodyAr || item.bodyEn || '',
         data: parsedData,
       };
     });

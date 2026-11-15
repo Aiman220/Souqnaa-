@@ -23,11 +23,38 @@ export class OtpService {
   }
 
   /**
+   * Normalizes targets: emails to lowercase, Yemen phone numbers to +967XXXXXXXXX format.
+   */
+  public normalizeTarget(target: string): string {
+    const trimmed = (target || '').trim();
+    if (trimmed.includes('@')) {
+      return trimmed.toLowerCase();
+    }
+    let digits = trimmed.replace(/[^\d+]/g, '');
+    if (digits.startsWith('+967')) {
+      return digits;
+    }
+    if (digits.startsWith('00967')) {
+      return `+967${digits.slice(5)}`;
+    }
+    if (digits.startsWith('967') && digits.length > 9) {
+      return `+${digits}`;
+    }
+    if (digits.startsWith('0')) {
+      digits = digits.slice(1);
+    }
+    if (digits.startsWith('+')) {
+      digits = digits.slice(1);
+    }
+    return `+967${digits}`;
+  }
+
+  /**
    * Generates, stores, and dispatches an OTP code via the Notification Provider abstraction (SMS or Email).
    */
   async generateAndSendOtp(options: SendOtpOptions): Promise<{ sent: boolean; cooldownSeconds?: number }> {
     const { target, type, locale = 'ar' } = options;
-    const cleanTarget = target.trim();
+    const cleanTarget = this.normalizeTarget(target);
     const isEmail = cleanTarget.includes('@');
 
     // 1. Enforce resend cooldown (e.g. 60 seconds)
@@ -86,7 +113,7 @@ export class OtpService {
    * Verifies the submitted OTP against Redis.
    */
   async verifyOtp(target: string, code: string, type: string): Promise<boolean> {
-    const cleanTarget = target.trim();
+    const cleanTarget = this.normalizeTarget(target);
     const key = `otp:${type}:${cleanTarget}`;
     const stored = await redis.get(key);
 

@@ -21,15 +21,21 @@ export class RealtimeWebSocketProvider implements NotificationProvider {
       // Check if user is online
       const isOnline = socketSvc.isUserOnline(params.recipientId);
 
+      const isEn = params.data?.locale === 'en' || (params as any).locale === 'en';
+      const resolvedTitle = isEn && params.content.titleEn ? params.content.titleEn : (params.content.titleAr || params.content.titleEn || '');
+      const resolvedBody = isEn && params.content.bodyEn ? params.content.bodyEn : (params.content.bodyAr || params.content.bodyEn || '');
+
       const payload = {
         id: params.notificationId,
         category: params.category,
         priority: params.priority,
         type: (params.data?.eventType as string) || (params.category === 'REFUND' ? 'REFUND_DISPUTED' : 'SYSTEM'),
-        titleAr: params.content.titleAr,
-        titleEn: params.content.titleEn,
-        bodyAr: params.content.bodyAr,
-        bodyEn: params.content.bodyEn,
+        title: resolvedTitle,
+        body: resolvedBody,
+        titleAr: params.content.titleAr || resolvedTitle,
+        titleEn: params.content.titleEn || resolvedTitle,
+        bodyAr: params.content.bodyAr || resolvedBody,
+        bodyEn: params.content.bodyEn || resolvedBody,
         deepLink: params.content.deepLink,
         imageUrl: params.content.imageUrl,
         entityType: params.entityType,

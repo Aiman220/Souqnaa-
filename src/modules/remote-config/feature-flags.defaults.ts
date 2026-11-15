@@ -58,6 +58,47 @@ export const APPROVED_CUSTOMER_APP_ICONS = [
 
 export type ApprovedCustomerAppIcon = (typeof APPROVED_CUSTOMER_APP_ICONS)[number];
 
+export const ALL_CUSTOMER_APP_ICONS = [
+  ...APPROVED_CUSTOMER_APP_ICONS,
+  'customer_default',
+  'customer_orange',
+  'customer_modern',
+  'customer_minimal',
+  'customer_seasonal',
+] as const;
+
+export const APPROVED_SELLER_APP_ICONS = [
+  'default',
+  'seasonal',
+  'pro',
+  'gold',
+  'seller_default',
+  'seller_seasonal',
+  'seller_pro',
+  'seller_gold',
+] as const;
+
+export type ApprovedSellerAppIcon = (typeof APPROVED_SELLER_APP_ICONS)[number];
+
+export interface LauncherIconConfigRecord {
+  id: string;
+  applicationType: 'CUSTOMER' | 'SELLER';
+  platform: 'ANDROID' | 'IOS';
+  defaultIconId: string;
+  defaultIconUrl: string;
+  seasonalIconId?: string | null;
+  seasonalIconUrl?: string | null;
+  seasonalEnabled: boolean;
+  campaignName?: string | null;
+  campaignDeepLink?: string | null;
+  campaignStartAt?: string | Date | null;
+  campaignEndAt?: string | Date | null;
+  timezone: string;
+  publishedVersion: number;
+  updatedAt: string | Date;
+  updatedBy?: string | null;
+}
+
 export interface AppBrandingConfig {
   appNameAr: string;
   appNameEn: string;
@@ -77,7 +118,7 @@ export interface AppBrandingConfig {
   updatedAt: string;
 }
 
-export const DEFAULT_APP_BRANDING: AppBrandingConfig = {
+export const DEFAULT_CUSTOMER_BRANDING: AppBrandingConfig = {
   appNameAr: 'سوقناا',
   appNameEn: 'SOUQNAA',
   appVersion: '1.80.37',
@@ -127,6 +168,64 @@ export const DEFAULT_APP_BRANDING: AppBrandingConfig = {
     name: 'شعار الموسم الترويجي',
     iconUrl: '',
     deepLinkUrl: 'souqnaa://campaigns/special',
+    startDate: null,
+    endDate: null,
+  },
+  updatedAt: new Date().toISOString(),
+};
+
+export const DEFAULT_APP_BRANDING = DEFAULT_CUSTOMER_BRANDING;
+
+export const DEFAULT_SELLER_BRANDING: AppBrandingConfig = {
+  appNameAr: 'سوقناا التاجر',
+  appNameEn: 'SOUQNAA SELLER',
+  appVersion: '1.80.37',
+  customerAppIcon: 'seller_default',
+  defaultLogoUrl: '/uploads/branding/seller_app_logo.png',
+  defaultIconUrl: '/uploads/branding/seller_app_icon.png',
+  defaultDeepLink: 'souqnaa-seller://app/open',
+  platforms: {
+    android: {
+      iconUrl: '/uploads/branding/seller_app_icon.png',
+      splashLogoUrl: '/uploads/branding/seller_app_logo.png',
+      deepLinkUrl: 'souqnaa-seller://app/open',
+      badgeText: '',
+      enabled: true,
+    },
+    ios: {
+      iconUrl: '/uploads/branding/seller_app_icon.png',
+      splashLogoUrl: '/uploads/branding/seller_app_logo.png',
+      deepLinkUrl: 'souqnaa-seller://app/open',
+      badgeText: '',
+      enabled: true,
+    },
+    tablet: {
+      iconUrl: '/uploads/branding/seller_app_icon.png',
+      splashLogoUrl: '/uploads/branding/seller_app_logo.png',
+      deepLinkUrl: 'souqnaa-seller://app/open',
+      badgeText: '',
+      enabled: true,
+    },
+    desktop: {
+      iconUrl: '/uploads/branding/seller_app_icon.png',
+      splashLogoUrl: '/uploads/branding/seller_app_logo.png',
+      deepLinkUrl: 'https://souqnaa.ye/seller',
+      badgeText: '',
+      enabled: true,
+    },
+    web: {
+      iconUrl: '/uploads/branding/seller_app_icon.png',
+      splashLogoUrl: '/uploads/branding/seller_app_logo.png',
+      deepLinkUrl: 'https://souqnaa.ye/seller',
+      badgeText: '',
+      enabled: true,
+    },
+  },
+  seasonalIcon: {
+    enabled: false,
+    name: 'شعار الموسم الترويجي للتاجر',
+    iconUrl: '',
+    deepLinkUrl: 'souqnaa-seller://campaigns/special',
     startDate: null,
     endDate: null,
   },

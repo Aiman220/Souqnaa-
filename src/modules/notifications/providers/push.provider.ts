@@ -300,6 +300,9 @@ export class FcmPushProvider implements NotificationProvider {
     const notifTitle = isEn && params.content.titleEn ? params.content.titleEn : (params.content.titleAr || params.content.titleEn || '');
     const notifBody = isEn && params.content.bodyEn ? params.content.bodyEn : (params.content.bodyAr || params.content.bodyEn || '');
 
+    dataEntries['title'] = notifTitle;
+    dataEntries['body'] = notifBody;
+
     return {
       message: {
         token,
@@ -326,8 +329,8 @@ export class FcmPushProvider implements NotificationProvider {
           payload: {
             aps: {
               alert: {
-                title: params.content.titleAr,
-                body: params.content.bodyAr,
+                title: notifTitle,
+                body: notifBody,
               },
               badge: 1,
               ...(playSound ? { sound: 'default' } : {}),
@@ -340,10 +343,12 @@ export class FcmPushProvider implements NotificationProvider {
             Urgency: isP0 ? 'high' : 'normal',
           },
           notification: {
+            title: notifTitle,
+            body: notifBody,
             icon: '/icons/Icon-192.png',
             badge: '/icons/Icon-192.png',
-            dir: 'rtl',
-            lang: 'ar',
+            dir: isEn ? 'ltr' : 'rtl',
+            lang: isEn ? 'en' : 'ar',
             data: {
               deepLink: params.content.deepLink || '',
             },
@@ -527,25 +532,35 @@ export class FcmPushProvider implements NotificationProvider {
     } else if (serverKey) {
       // Legacy FCM HTTP Send fallback
       try {
-        const res = await fetch('https://fcm.googleapis.com/fcm/send', {
-          method: 'POST',
-          headers: {
-            Authorization: `key=${serverKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            registration_ids: fcmTokens,
-            notification: {
-              title: params.content.titleAr,
-              body: params.content.bodyAr,
+          const isEnLegacy = params.data?.locale === 'en' || (params as any).locale === 'en';
+          const notifTitleLegacy = isEnLegacy && params.content.titleEn ? params.content.titleEn : (params.content.titleAr || params.content.titleEn || '');
+          const notifBodyLegacy = isEnLegacy && params.content.bodyEn ? params.content.bodyEn : (params.content.bodyAr || params.content.bodyEn || '');
+
+          const res = await fetch('https://fcm.googleapis.com/fcm/send', {
+            method: 'POST',
+            headers: {
+              Authorization: `key=${serverKey}`,
+              'Content-Type': 'application/json',
             },
-            data: {
-              notificationId: params.notificationId || '',
-              category: params.category || 'SYSTEM',
-              deepLink: params.content.deepLink || '',
-            },
-          }),
-        });
+            body: JSON.stringify({
+              registration_ids: fcmTokens,
+              notification: {
+                title: notifTitleLegacy,
+                body: notifBodyLegacy,
+              },
+              data: {
+                notificationId: params.notificationId || '',
+                category: params.category || 'SYSTEM',
+                title: notifTitleLegacy,
+                body: notifBodyLegacy,
+                titleAr: params.content.titleAr || '',
+                titleEn: params.content.titleEn || '',
+                bodyAr: params.content.bodyAr || '',
+                bodyEn: params.content.bodyEn || '',
+                deepLink: params.content.deepLink || '',
+              },
+            }),
+          });
 
         if (res.ok) {
           const resJson = (await res.json()) as any;
