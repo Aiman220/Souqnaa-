@@ -13,6 +13,66 @@ async function runSeasonalLauncherEngineTests() {
 
   const adminUser = { id: 'admin-test-id', email: 'admin@souqnaa.ye' };
 
+  const restoreBaseline = async () => {
+    try {
+      await Promise.all([
+        launcherCampaignService.updateLauncherConfig(
+          'CUSTOMER',
+          'ANDROID',
+          {
+            defaultIconId: 'default',
+            defaultIconUrl: '/uploads/branding/souqnaa-app-icon.png',
+            seasonalIconId: 'seasonal',
+            seasonalIconUrl: '',
+            seasonalEnabled: false,
+          },
+          adminUser
+        ),
+        launcherCampaignService.updateLauncherConfig(
+          'CUSTOMER',
+          'IOS',
+          {
+            defaultIconId: 'default',
+            defaultIconUrl: '/uploads/branding/souqnaa-app-icon.png',
+            seasonalIconId: 'customer_seasonal',
+            seasonalIconUrl: '',
+            seasonalEnabled: false,
+          },
+          adminUser
+        ),
+        launcherCampaignService.updateLauncherConfig(
+          'SELLER',
+          'ANDROID',
+          {
+            defaultIconId: 'seller_default',
+            defaultIconUrl: '/uploads/branding/seller_app_icon.png',
+            seasonalIconId: 'seller_seasonal',
+            seasonalIconUrl: '',
+            seasonalEnabled: false,
+          },
+          adminUser
+        ),
+        launcherCampaignService.updateLauncherConfig(
+          'SELLER',
+          'IOS',
+          {
+            defaultIconId: 'seller_default',
+            defaultIconUrl: '/uploads/branding/seller_app_icon.png',
+            seasonalIconId: 'seller_seasonal',
+            seasonalIconUrl: '',
+            seasonalEnabled: false,
+          },
+          adminUser
+        ),
+      ]);
+      remoteConfigService.invalidateCache();
+    } catch (_) {}
+  };
+
+  await restoreBaseline();
+
+  try {
+
   // ═════════════════════════════════════════════════════════════════════════════
   // TEST 1: FOUR INDEPENDENT CONFIGURATION RECORDS IN DATABASE
   // ═════════════════════════════════════════════════════════════════════════════
@@ -290,11 +350,14 @@ async function runSeasonalLauncherEngineTests() {
     },
     adminUser
   );
-  console.log('  ✓ PASS: All 4 configurations cleanly restored');
+    console.log('  ✓ PASS: All 4 configurations cleanly restored');
 
-  console.log('\n================================================================');
-  console.log('🎉 ALL 8 SEASONAL LAUNCHER ENGINE INTEGRATION TESTS PASSED!');
-  console.log('================================================================\n');
+    console.log('\n================================================================');
+    console.log('🎉 ALL 8 SEASONAL LAUNCHER ENGINE INTEGRATION TESTS PASSED!');
+    console.log('================================================================\n');
+  } finally {
+    await restoreBaseline();
+  }
 }
 
 runSeasonalLauncherEngineTests()

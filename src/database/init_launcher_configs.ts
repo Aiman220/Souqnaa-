@@ -134,6 +134,16 @@ export async function initLauncherConfigsTable() {
         c.publishedVersion
       );
       console.log(`[LauncherConfig] Seeded initial config for ${c.applicationType}_${c.platform}`);
+    } else if (c.applicationType === 'SELLER') {
+      // Ensure SELLER configurations never retain customer 'default' icon identifier
+      await prisma.$executeRawUnsafe(
+        `UPDATE "LauncherIconConfig" 
+         SET "defaultIconId" = $1, "defaultIconUrl" = $2, "updatedAt" = CURRENT_TIMESTAMP
+         WHERE "applicationType" = 'SELLER'::"AppTypeEnum" AND "platform" = $3::"AppPlatformEnum" AND ("defaultIconId" = 'default' OR "defaultIconId" IS NULL)`,
+        c.defaultIconId,
+        c.defaultIconUrl,
+        c.platform
+      );
     }
   }
 

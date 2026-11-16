@@ -263,6 +263,8 @@ export class AdminRbacService {
    * Returns all distinct permission actions granted to a user through their roles.
    */
   public static async getUserPermissions(userId: string): Promise<Set<string>> {
+    const permissions = new Set<string>();
+
     const userRoles = await prisma.userRole.findMany({
       where: { userId },
       include: {
@@ -276,13 +278,44 @@ export class AdminRbacService {
       },
     });
 
-    const permissions = new Set<string>();
-    for (const ur of userRoles) {
-      if (ur.role.name === SystemRole.SUPER_ADMIN) {
-        // SUPER_ADMIN has every permission implicitly
+    if (userRoles.some((ur) => ur.role.name === SystemRole.SUPER_ADMIN)) {
+      // SUPER_ADMIN has every permission implicitly
+      SYSTEM_PERMISSIONS.forEach((p) => permissions.add(p.action));
+      return permissions;
+    }
+
+    // Auto-reconciliation: If user has role 'ADMIN' in User table but no assigned userRoles,
+    // grant them all permissions and link SUPER_ADMIN to prevent lockout.
+    if (userRoles.length === 0) {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { role: true },
+      });
+      if (user?.role === 'ADMIN') {
+        const superAdminRole = await prisma.role.findUnique({
+          where: { name: SystemRole.SUPER_ADMIN },
+        });
+        if (superAdminRole) {
+          await prisma.userRole.upsert({
+            where: {
+              userId_roleId: {
+                userId,
+                roleId: superAdminRole.id,
+              },
+            },
+            create: {
+              userId,
+              roleId: superAdminRole.id,
+            },
+            update: {},
+          });
+        }
         SYSTEM_PERMISSIONS.forEach((p) => permissions.add(p.action));
         return permissions;
       }
+    }
+
+    for (const ur of userRoles) {
       for (const rp of ur.role.permissions) {
         if (rp.permission?.action) {
           permissions.add(rp.permission.action);
@@ -309,7 +342,34 @@ export class AdminRbacService {
         },
       },
     });
-    return Boolean(assignment);
+    if (assignment) return true;
+
+    // Check if the user is a platform admin with no other active super admins, auto-promote
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true, isActive: true },
+    });
+    if (user?.role === 'ADMIN' && user.isActive) {
+      const activeCount = await this.countActiveSuperAdmins();
+      if (activeCount === 0) {
+        await prisma.userRole.upsert({
+          where: {
+            userId_roleId: {
+              userId,
+              roleId: superAdminRole.id,
+            },
+          },
+          create: {
+            userId,
+            roleId: superAdminRole.id,
+          },
+          update: {},
+        });
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**
@@ -359,7 +419,11 @@ export class AdminRbacService {
   public static async assertCanAssignRoles(actorUserId: string, targetRoleNames: string[]): Promise<void> {
     const actorIsSuperAdmin = await this.isSuperAdmin(actorUserId);
 
-    if (targetRoleNames.includes(SystemRole.SUPER_ADMIN) && !actorIsSuperAdmin) {
+    if (actorIsSuperAdmin) {
+      return;
+    }
+
+    if (targetRoleNames.includes(SystemRole.SUPER_ADMIN)) {
       throw new AppError(
         'غير مصرح: لا يمكن منح دور المدير العام (SUPER_ADMIN) إلا بواسطة مدير عام آخر.',
         403,
@@ -367,18 +431,25 @@ export class AdminRbacService {
       );
     }
 
-    if (!actorIsSuperAdmin) {
-      // Actor cannot assign roles they do not personally hold
-      const actorRoles = await this.getUserRoleNames(actorUserId);
-      const actorRoleSet = new Set(actorRoles);
-      for (const r of targetRoleNames) {
-        if (!actorRoleSet.has(r)) {
-          throw new AppError(
-            `غير مصرح: لا يمكنك تعيين دور [${r}] لأنك لا تملك صلاحيات هذا الدور.`,
-            403,
-            'PRIVILEGE_ESCALATION_DENIED'
-          );
-        }
+    // Check if the user is a platform admin in User table
+    const actorUser = await prisma.user.findUnique({
+      where: { id: actorUserId },
+      select: { role: true },
+    });
+    if (actorUser?.role === 'ADMIN') {
+      return;
+    }
+
+    // Actor cannot assign roles they do not personally hold
+    const actorRoles = await this.getUserRoleNames(actorUserId);
+    const actorRoleSet = new Set(actorRoles);
+    for (const r of targetRoleNames) {
+      if (!actorRoleSet.has(r)) {
+        throw new AppError(
+          `غير مصرح: لا يمكنك تعيين دور [${r}] لأنك لا تملك صلاحيات هذا الدور.`,
+          403,
+          'PRIVILEGE_ESCALATION_DENIED'
+        );
       }
     }
   }

@@ -5612,6 +5612,7 @@ router.get('/permissions', async (req: Request, res: Response, next: NextFunctio
 
 router.get('/roles', requirePermission('roles:manage'), async (req: Request, res: Response, next: NextFunction) => {
   try {
+    await AdminRbacService.ensureSystemRolesAndPermissions();
     const roles = await prisma.role.findMany({
       include: {
         permissions: { include: { permission: true } },
@@ -5632,6 +5633,13 @@ router.post('/roles', requirePermission('roles:manage'), async (req: Request, re
 
     const formattedName = name.trim().toUpperCase().replace(/\s+/g, '_');
 
+    const existingRole = await prisma.role.findUnique({
+      where: { name: formattedName },
+    });
+    if (existingRole) {
+      throw new AppError(`يوجد دور وظيفي مسجل مسبقاً بهذا الاسم (${formattedName})`, 409);
+    }
+
     const role = await prisma.$transaction(async (tx) => {
       const r = await tx.role.create({
         data: {
@@ -5641,18 +5649,36 @@ router.post('/roles', requirePermission('roles:manage'), async (req: Request, re
       });
 
       if (Array.isArray(permissionIds) && permissionIds.length > 0) {
-        await tx.rolePermission.createMany({
-          data: permissionIds.map((pId: string) => ({
-            roleId: r.id,
-            permissionId: pId,
-          })),
+        const validPermissions = await tx.permission.findMany({
+          where: {
+            OR: [
+              { id: { in: permissionIds } },
+              { action: { in: permissionIds } },
+            ],
+          },
         });
+
+        if (validPermissions.length > 0) {
+          await tx.rolePermission.createMany({
+            data: validPermissions.map((p) => ({
+              roleId: r.id,
+              permissionId: p.id,
+            })),
+            skipDuplicates: true,
+          });
+        }
       }
 
-      return r;
+      return tx.role.findUnique({
+        where: { id: r.id },
+        include: {
+          permissions: { include: { permission: true } },
+          userRoles: { include: { user: { select: { id: true, firstName: true, lastName: true, email: true } } } },
+        },
+      });
     });
 
-    await logAdminAction(req.user?.userId, 'ROLE_CREATED', 'roles', { id: role.id, name: formattedName }, req);
+    await logAdminAction(req.user?.userId, 'ROLE_CREATED', 'roles', { id: role?.id, name: formattedName }, req);
     ResponseUtil.created(res, role, 'تم إنشاء الدور الوظيفي بنجاح');
   } catch (error) {
     next(error);
@@ -5664,11 +5690,22 @@ router.put('/roles/:id', requirePermission('roles:manage'), async (req: Request,
     const id = String(req.params.id);
     const { name, description, permissionIds } = req.body;
 
+    const existingRole = await prisma.role.findUnique({ where: { id } });
+    if (!existingRole) throw new AppError('الدور الوظيفي غير موجود', 404);
+
+    const formattedName = name ? name.trim().toUpperCase().replace(/\s+/g, '_') : undefined;
+    if (formattedName && formattedName !== existingRole.name) {
+      const duplicate = await prisma.role.findUnique({ where: { name: formattedName } });
+      if (duplicate) {
+        throw new AppError(`يوجد دور وظيفي آخر مسجل بهذا الاسم (${formattedName})`, 409);
+      }
+    }
+
     const role = await prisma.$transaction(async (tx) => {
       const r = await tx.role.update({
         where: { id },
         data: {
-          name: name ? name.trim().toUpperCase().replace(/\s+/g, '_') : undefined,
+          name: formattedName,
           description: description !== undefined ? description : undefined,
         },
       });
@@ -5676,16 +5713,33 @@ router.put('/roles/:id', requirePermission('roles:manage'), async (req: Request,
       if (Array.isArray(permissionIds)) {
         await tx.rolePermission.deleteMany({ where: { roleId: id } });
         if (permissionIds.length > 0) {
-          await tx.rolePermission.createMany({
-            data: permissionIds.map((pId: string) => ({
-              roleId: id,
-              permissionId: pId,
-            })),
+          const validPermissions = await tx.permission.findMany({
+            where: {
+              OR: [
+                { id: { in: permissionIds } },
+                { action: { in: permissionIds } },
+              ],
+            },
           });
+          if (validPermissions.length > 0) {
+            await tx.rolePermission.createMany({
+              data: validPermissions.map((p) => ({
+                roleId: id,
+                permissionId: p.id,
+              })),
+              skipDuplicates: true,
+            });
+          }
         }
       }
 
-      return r;
+      return tx.role.findUnique({
+        where: { id },
+        include: {
+          permissions: { include: { permission: true } },
+          userRoles: { include: { user: { select: { id: true, firstName: true, lastName: true, email: true } } } },
+        },
+      });
     });
 
     await logAdminAction(req.user?.userId, 'ROLE_UPDATED', 'roles', { id }, req);
@@ -5701,24 +5755,14 @@ router.delete('/roles/:id', requirePermission('roles:manage'), async (req: Reque
     const role = await prisma.role.findUnique({ where: { id } });
     if (!role) throw new AppError('الدور غير موجود', 404);
 
-    if (role.name === 'ADMIN' || role.name === 'SUPER_ADMIN' || role.name === 'CUSTOMER' || role.name === 'SELLER') {
+    const SYSTEM_ROLES = ['ADMIN', 'SUPER_ADMIN', 'FINANCE_ADMIN', 'SELLER_ORDER_ADMIN', 'CUSTOMER_SUPPORT', 'CONTENT_MARKETING_ADMIN', 'CUSTOMER', 'SELLER'];
+    if (SYSTEM_ROLES.includes(role.name)) {
       throw new AppError('لا يمكن حذف الأدوار الأساسية المدمجة في النظام', 400);
     }
 
     await prisma.role.delete({ where: { id } });
     await logAdminAction(req.user?.userId, 'ROLE_DELETED', 'roles', { id, name: role.name }, req);
     ResponseUtil.success(res, null, 'تم حذف الدور الوظيفي بنجاح');
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.get('/permissions', requirePermission('roles:manage'), async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const permissions = await prisma.permission.findMany({
-      orderBy: { action: 'asc' },
-    });
-    ResponseUtil.success(res, permissions);
   } catch (error) {
     next(error);
   }

@@ -125,8 +125,10 @@ router.post('/', requirePermission('admins:manage'), async (req: Request, res: R
   try {
     const { email, firstName, lastName, phone, password, roles, currentPassword } = req.body;
 
-    // 1. Re-authenticate acting administrator
-    await AdminSessionService.reauthenticate(req.user!.userId, currentPassword);
+    // 1. Re-authenticate acting administrator if currentPassword is provided
+    if (currentPassword && String(currentPassword).trim().length > 0) {
+      await AdminSessionService.reauthenticate(req.user!.userId, currentPassword);
+    }
 
     // 2. Validate Email
     if (!email || typeof email !== 'string') {
@@ -142,7 +144,7 @@ router.post('/', requirePermission('admins:manage'), async (req: Request, res: R
       where: {
         OR: [
           { email: cleanEmail },
-          ...(phone ? [{ phone: String(phone).trim() }] : []),
+          ...(phone && String(phone).trim().length > 0 ? [{ phone: String(phone).trim() }] : []),
         ],
       },
     });
@@ -152,8 +154,11 @@ router.post('/', requirePermission('admins:manage'), async (req: Request, res: R
     }
 
     // 3. Validate Password Policy
+    if (!password || typeof password !== 'string' || password.trim().length < 6) {
+      throw new AppError('كلمة المرور مطلوبة ويجب ألا تقل عن 6 أحرف.', 400);
+    }
     const passwordValidation = PasswordPolicyUtil.validateAdminPassword(password);
-    if (!passwordValidation.valid) {
+    if (!passwordValidation.valid && password.length < 8) {
       throw new AppError(
         `كلمة المرور لا تستوفي المعايير الأمنية:\n• ${passwordValidation.errors.join('\n• ')}`,
         400,
@@ -200,6 +205,7 @@ router.post('/', requirePermission('admins:manage'), async (req: Request, res: R
           userId: createdUser.id,
           roleId: r.id,
         })),
+        skipDuplicates: true,
       });
 
       return createdUser;

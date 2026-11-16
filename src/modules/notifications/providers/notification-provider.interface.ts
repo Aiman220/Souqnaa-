@@ -25,6 +25,9 @@ export interface ProviderSendResult {
   messageId?: string;
   invalidTokens?: string[];
   error?: string;
+  errorCode?: string;
+  statusCode?: number;
+  correlationId?: string;
 }
 
 export interface NotificationProvider {

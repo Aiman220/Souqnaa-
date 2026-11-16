@@ -8,8 +8,9 @@ import { LocaleCode } from '../notifications/templates/email-templates';
 
 export interface SendOtpOptions {
   target: string; // Email or Phone number
-  type: 'verification' | 'login' | 'reset_password' | 'transaction';
+  type: string;
   locale?: LocaleCode;
+  correlationId?: string;
 }
 
 export class OtpService {
@@ -50,58 +51,125 @@ export class OtpService {
   }
 
   /**
+   * Validates Yemen mobile phone structure (+967 70/71/73/77/78 XXXXXXX)
+   */
+  public isValidYemenMobile(phone: string): boolean {
+    const clean = this.normalizeTarget(phone);
+    return /^\+967(70|71|73|77|78)\d{7}$/.test(clean);
+  }
+
+  /**
    * Generates, stores, and dispatches an OTP code via the Notification Provider abstraction (SMS or Email).
    */
   async generateAndSendOtp(options: SendOtpOptions): Promise<{ sent: boolean; cooldownSeconds?: number }> {
-    const { target, type, locale = 'ar' } = options;
+    const { target, type, locale = 'ar', correlationId } = options;
     const cleanTarget = this.normalizeTarget(target);
     const isEmail = cleanTarget.includes('@');
 
-    // 1. Enforce resend cooldown (e.g. 60 seconds)
+    // 1. Validate Target Phone or Email Format
+    if (!isEmail) {
+      if (!this.isValidYemenMobile(cleanTarget)) {
+        throw new AppError(
+          locale === 'ar'
+            ? 'رقم الهاتف غير صالح. يرجى إدخال رقم يمني صحيح (9 أرقام يبدأ بـ 70, 71, 73, 77 أو 78).'
+            : 'Invalid phone number. Please enter a valid Yemen mobile number (9 digits starting with 70, 71, 73, 77, or 78).',
+          400,
+          'INVALID_PHONE_NUMBER'
+        );
+      }
+    }
+
+    // 2. Enforce resend cooldown (e.g. 60 seconds)
     const cooldownKey = `otp_cooldown:${type}:${cleanTarget}`;
     const inCooldown = await redis.get(cooldownKey);
     if (inCooldown) {
       const ttl = await redis.ttl(cooldownKey);
       throw new AppError(
         locale === 'ar'
-          ? `يرجى الانتظار ${ttl > 0 ? ttl : 60} ثانية قبل إعادة إرسال رمز جديد.`
-          : `Please wait ${ttl > 0 ? ttl : 60} seconds before requesting a new code.`,
-        429
+          ? `تجاوزت الحد المسموح لإعادة إرسال الرمز. يرجى الانتظار ${ttl > 0 ? ttl : 60} ثانية.`
+          : `Rate limit exceeded. Please wait ${ttl > 0 ? ttl : 60} seconds before requesting a new code.`,
+        429,
+        'OTP_COOLDOWN_ACTIVE'
       );
     }
 
-    // 2. Generate 6-digit OTP code (cryptographically secure, with optional dev bypass)
+    // 3. Generate 6-digit OTP code (cryptographically secure)
     const code = this.generateCode();
     const expirySeconds = parseInt(process.env.OTP_EXPIRY_SECONDS || '600', 10); // 10 minutes default
     const cooldownSeconds = parseInt(process.env.OTP_COOLDOWN_SECONDS || '60', 10);
 
-    // 3. Store in Redis using the existing repository convention `otp:${type}:${target}`
+    // 4. Store in Redis using the existing repository convention `otp:${type}:${target}`
     await redis.set(`otp:${type}:${cleanTarget}`, code, expirySeconds);
     await redis.set(cooldownKey, '1', cooldownSeconds);
 
-    // Redact OTP code in server logs for security compliance (§4, §25)
-    console.log(`[OTP Service] Stored OTP for ${cleanTarget.replace(/(?<=.{3}).(?=.*@)/g, '*')} (${type}): [REDACTED] (TTL: ${expirySeconds}s)`);
+    // Redact OTP code in server logs for security compliance
+    const safeTarget = cleanTarget.includes('@')
+      ? cleanTarget.replace(/(?<=.{3}).(?=.*@)/g, '*')
+      : cleanTarget.replace(/\d(?=\d{3})/g, '*');
+    console.log(`[OTP Service] Stored OTP for ${safeTarget} (${type}): [REDACTED] (TTL: ${expirySeconds}s) | Corr: ${correlationId || 'none'}`);
 
-    // 4. Dispatch via Notification Provider Abstraction
+    // 5. Dispatch via Notification Provider Abstraction
     if (isEmail) {
-      // Send localized email via Email Provider
       const templateKey = type === 'reset_password' ? 'PASSWORD_RESET' : 'EMAIL_VERIFICATION';
       await smtpEmailProvider.sendTemplate(cleanTarget, templateKey, locale, {
         email: cleanTarget,
         otpCode: code,
       });
     } else {
-      // Send localized SMS via SMS Provider Gateway
-      const delivery = await smsNotificationProvider.sendOtpSms(cleanTarget, code, locale);
+      const delivery = await smsNotificationProvider.sendOtpSms(cleanTarget, code, locale, correlationId);
       if (!delivery.success) {
+        // Rollback stored OTP and cooldown on dispatch failure
         await Promise.all([
           redis.del(`otp:${type}:${cleanTarget}`),
           redis.del(cooldownKey),
         ]);
+
+        // Map provider error code to specific localized Arabic error message
+        const errCode = delivery.errorCode || 'PROVIDER_UNAVAILABLE';
+        if (errCode === 'TIMEOUT') {
+          throw new AppError(
+            locale === 'ar'
+              ? 'انتهت مهلة الاتصال، يرجى المحاولة مجدداً.'
+              : 'Connection timed out. Please try again.',
+            504,
+            'SMS_GATEWAY_TIMEOUT'
+          );
+        }
+        if (errCode === 'INVALID_PHONE') {
+          throw new AppError(
+            locale === 'ar'
+              ? 'رقم الهاتف غير صالح.'
+              : 'Invalid phone number.',
+            400,
+            'INVALID_PHONE_NUMBER'
+          );
+        }
+        if (errCode === 'DESTINATION_UNSUPPORTED') {
+          throw new AppError(
+            locale === 'ar'
+              ? 'تعذر إرسال الرمز إلى هذا الرقم.'
+              : 'Unable to deliver verification code to this phone number.',
+            400,
+            'DESTINATION_UNSUPPORTED'
+          );
+        }
+        if (errCode === 'RATE_LIMITED') {
+          throw new AppError(
+            locale === 'ar'
+              ? 'تجاوزت الحد المسموح لإعادة إرسال الرمز.'
+              : 'Rate limit exceeded for SMS sending.',
+            429,
+            'OTP_RATE_LIMITED'
+          );
+        }
+
+        // Generic gateway or service connection failure
         throw new AppError(
-          locale === 'ar' ? 'تعذر إرسال رمز التحقق حالياً. يرجى المحاولة لاحقاً.' : 'Unable to send the verification code right now. Please try again later.',
+          locale === 'ar'
+            ? 'تعذر الاتصال بخدمة إرسال الرسائل.'
+            : 'Unable to connect to SMS delivery service.',
           503,
-          'OTP_DELIVERY_FAILED'
+          'SMS_SERVICE_UNAVAILABLE'
         );
       }
     }
@@ -112,7 +180,7 @@ export class OtpService {
   /**
    * Verifies the submitted OTP against Redis.
    */
-  async verifyOtp(target: string, code: string, type: string): Promise<boolean> {
+  async verifyOtp(target: string, code: string, type: string, locale: LocaleCode = 'ar'): Promise<boolean> {
     const cleanTarget = this.normalizeTarget(target);
     const key = `otp:${type}:${cleanTarget}`;
     const stored = await redis.get(key);
@@ -123,7 +191,13 @@ export class OtpService {
 
     if (attempts >= MAX_OTP_ATTEMPTS) {
       await redis.del(key);
-      throw new AppError('لقد تم تجاوز الحد الأقصى لمحاولات التحقق. يرجى طلب رمز جديد.', 429, 'OTP_MAX_ATTEMPTS_EXCEEDED');
+      throw new AppError(
+        locale === 'ar'
+          ? 'تجاوزت الحد المسموح لإعادة إرسال الرمز. يرجى طلب رمز جديد.'
+          : 'Maximum OTP verification attempts exceeded. Please request a new code.',
+        429,
+        'OTP_MAX_ATTEMPTS_EXCEEDED'
+      );
     }
 
     // Check dev bypass code ONLY in local development when explicitly permitted
@@ -133,7 +207,13 @@ export class OtpService {
     const isDevMatch = Boolean(devCode && code === devCode);
 
     if (!stored && !isDevMatch) {
-      throw new AppError('Invalid or expired OTP code.', 400);
+      throw new AppError(
+        locale === 'ar'
+          ? 'رمز التحقق منتهي الصلاحية أو غير صحيح. يرجى طلب رمز جديد.'
+          : 'Invalid or expired OTP code. Please request a new code.',
+        400,
+        'OTP_EXPIRED_OR_INVALID'
+      );
     }
 
     if (stored && stored !== code && !isDevMatch) {
@@ -144,9 +224,21 @@ export class OtpService {
       const remainingAttempts = Math.max(0, MAX_OTP_ATTEMPTS - currentAttempts);
       if (remainingAttempts === 0) {
         await redis.del(key);
-        throw new AppError('تم تجاوز عدد المحاولات المسموح بها وتم إبطال الرمز. يرجى طلب رمز جديد.', 429, 'OTP_ATTEMPTS_EXCEEDED');
+        throw new AppError(
+          locale === 'ar'
+            ? 'تجاوزت الحد المسموح لإعادة إرسال الرمز وتم إبطال الرمز. يرجى طلب رمز جديد.'
+            : 'Maximum verification attempts exceeded. Code invalidated.',
+          429,
+          'OTP_ATTEMPTS_EXCEEDED'
+        );
       }
-      throw new AppError(`رمز التحقق غير صحيح. المحاولات المتبقية: ${remainingAttempts}`, 400, 'INVALID_OTP');
+      throw new AppError(
+        locale === 'ar'
+          ? `رمز التحقق غير صحيح. المحاولات المتبقية: ${remainingAttempts}`
+          : `Invalid verification code. Remaining attempts: ${remainingAttempts}`,
+        400,
+        'INVALID_OTP'
+      );
     }
 
     // Clear OTP and attempt counter after successful verification to prevent replay attacks
@@ -187,7 +279,6 @@ export class OtpService {
 
       console.log(`[Password Reset] Dispatched reset code for ${cleanEmail.replace(/(?<=.{2}).(?=.*@)/g, '*')}: [REDACTED]`);
 
-      // Dispatch via centralized localized email template
       await smtpEmailProvider.sendTemplate(cleanEmail, 'PASSWORD_RESET', locale, {
         email: cleanEmail,
         name: `${user.firstName} ${user.lastName}`.trim(),
@@ -203,7 +294,6 @@ export class OtpService {
     if (process.env.NODE_ENV === 'test' && process.env.OTP_TEST_STATIC_CODE) {
       return process.env.OTP_TEST_STATIC_CODE;
     }
-    // Cryptographically secure 6-digit code
     const num = crypto.randomInt(100000, 999999);
     return num.toString();
   }

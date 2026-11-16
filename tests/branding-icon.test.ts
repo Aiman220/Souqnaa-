@@ -10,6 +10,44 @@ async function runBrandingIconTests() {
 
   const adminUser = { id: 'test-admin-id', email: 'admin@souqnaa.ye' };
 
+  const restoreBaseline = async () => {
+    try {
+      await remoteConfigService.updateBrandingConfig(
+        {
+          customerAppIcon: 'default',
+          defaultIconUrl: '/uploads/branding/souqnaa-app-icon.png',
+          platforms: {
+            android: {
+              iconUrl: '/uploads/branding/souqnaa-app-icon.png',
+              splashLogoUrl: '/uploads/branding/souqnaa-logo.png',
+              deepLinkUrl: 'souqnaa://app/open',
+              badgeText: '',
+              enabled: true,
+              seasonalEnabled: false,
+              seasonalIconUrl: '',
+            },
+            ios: { iconUrl: 'default', splashLogoUrl: '', deepLinkUrl: '', badgeText: '', enabled: true, seasonalEnabled: false, seasonalIconUrl: '' },
+            tablet: { iconUrl: '', splashLogoUrl: '', deepLinkUrl: '', badgeText: '', enabled: true },
+            desktop: { iconUrl: '', splashLogoUrl: '', deepLinkUrl: '', badgeText: '', enabled: true },
+            web: { iconUrl: '', splashLogoUrl: '', deepLinkUrl: '', badgeText: '', enabled: true },
+          },
+          seasonalIcon: {
+            enabled: false,
+            name: '',
+            iconUrl: '',
+            deepLinkUrl: '',
+          },
+        },
+        adminUser
+      );
+      remoteConfigService.invalidateCache();
+    } catch (_) {}
+  };
+
+  await restoreBaseline();
+
+  try {
+
   // ═════════════════════════════════════════════════════════════════════════════
   // TEST 1: APPROVED ICON REGISTRY
   // ═════════════════════════════════════════════════════════════════════════════
@@ -308,11 +346,14 @@ async function runBrandingIconTests() {
   assert.strictEqual(resetBranding.customerAppIcon, 'default');
   const defaultRec = await prisma.systemSetting.findUnique({ where: { key: 'customer_app_icon' } });
   assert.strictEqual(defaultRec?.value, 'default');
-  console.log('  ✓ PASS: System cleanly restored to default icon');
+    console.log('  ✓ PASS: System cleanly restored to default icon');
 
-  console.log('\n================================================================');
-  console.log('🎉 ALL 11 BACKEND & STORAGE REGRESSION TESTS PASSED SUCCESSFULLY!');
-  console.log('================================================================\n');
+    console.log('\n================================================================');
+    console.log('🎉 ALL 11 BACKEND & STORAGE REGRESSION TESTS PASSED SUCCESSFULLY!');
+    console.log('================================================================\n');
+  } finally {
+    await restoreBaseline();
+  }
 }
 
 runBrandingIconTests()

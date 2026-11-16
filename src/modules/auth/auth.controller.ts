@@ -390,8 +390,9 @@ export class AuthController {
     try {
       const { target, type } = req.body;
       const locale = (req.headers['accept-language']?.includes('en') ? 'en' : 'ar') as 'ar' | 'en';
-      const result = await otpService.generateAndSendOtp({ target, type, locale });
-      ResponseUtil.success(res, result, 'OTP sent successfully');
+      const correlationId = (req.headers['x-correlation-id'] || req.headers['x-request-id'] || (req as any).requestId) as string | undefined;
+      const result = await otpService.generateAndSendOtp({ target, type, locale, correlationId });
+      ResponseUtil.success(res, result, locale === 'ar' ? 'تم إرسال رمز التحقق بنجاح' : 'OTP sent successfully');
     } catch (error) {
       next(error);
     }
@@ -400,8 +401,9 @@ export class AuthController {
   static async verifyOtp(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const { target, code, type } = req.body;
-      await otpService.verifyOtp(target, code, type);
-      ResponseUtil.success(res, { verified: true }, 'OTP verified successfully');
+      const locale = (req.headers['accept-language']?.includes('en') ? 'en' : 'ar') as 'ar' | 'en';
+      await otpService.verifyOtp(target, code, type, locale);
+      ResponseUtil.success(res, { verified: true }, locale === 'ar' ? 'تم التحقق من الرمز بنجاح' : 'OTP verified successfully');
     } catch (error) {
       next(error);
     }

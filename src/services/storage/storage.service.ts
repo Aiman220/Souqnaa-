@@ -588,6 +588,12 @@ class CloudflareR2StorageService implements IStorageService {
         const altPath = path.resolve(process.cwd(), config.storage.uploadDir, strippedKey);
         if (fs.existsSync(altPath)) {
           localPath = altPath;
+        } else {
+          // Check backend subdirectory when running from monorepo root
+          const backendPath = path.resolve(process.cwd(), 'backend', config.storage.uploadDir, strippedKey);
+          if (fs.existsSync(backendPath)) {
+            localPath = backendPath;
+          }
         }
       }
       if (fs.existsSync(localPath)) {
