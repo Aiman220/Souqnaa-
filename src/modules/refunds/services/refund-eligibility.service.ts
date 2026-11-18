@@ -237,7 +237,6 @@ export class RefundEligibilityService {
     const itemEligibilityList: RefundableItemCheck[] = [];
     let totalSuccessfulRefunded = 0;
     let totalPendingRefund = 0;
-    let totalOrderRemaining = 0;
 
     for (const sellerOrder of order.sellerOrders) {
       const isSuborderDelivered = isDelivered || sellerOrder.status === 'DELIVERED';
@@ -288,10 +287,6 @@ export class RefundEligibilityService {
           itemReason = 'انتهت مدة طلب الاسترجاع لهذا المنتج (14 يوماً من تاريخ التوصيل)';
         }
 
-        totalSuccessfulRefunded += alreadyRefundedAmount;
-        totalPendingRefund += pendingRefundAmount;
-        totalOrderRemaining += remainingAmount;
-
         itemEligibilityList.push({
           orderItemId: item.id,
           productId: item.productId,
@@ -309,6 +304,22 @@ export class RefundEligibilityService {
         });
       }
     }
+
+    // The refund request amount includes non-item components too (tax and delivery).
+    // Use the parent refund records here so those amounts reduce the remaining order balance.
+    totalSuccessfulRefunded = existingRefunds
+      .filter((refund) =>
+        refund.status === RefundStatus.REFUND_COMPLETED || refund.status === RefundStatus.REFUNDED
+      )
+      .reduce<number>((sum, refund) => sum + Number(refund.approvedAmount ?? refund.requestedAmount ?? 0), 0);
+    totalPendingRefund = existingRefunds
+      .filter((refund) =>
+        refund.status !== RefundStatus.REFUND_COMPLETED &&
+        refund.status !== RefundStatus.REFUNDED &&
+        refund.status !== RefundStatus.CANCELLED &&
+        refund.status !== RefundStatus.CLOSED
+      )
+      .reduce<number>((sum, refund) => sum + Number(refund.approvedAmount ?? refund.requestedAmount ?? 0), 0);
 
     const capturedAmount = order.payment?.amount ?? order.total;
     const authoritativeRemaining = Math.max(
@@ -367,6 +378,7 @@ export class RefundEligibilityService {
       authoritativeRefundAmount: number;
     }>;
     totalAuthoritativeAmount: number;
+    remainingRefundableTotal: number;
   }> {
     if (!requestedItems || requestedItems.length === 0) {
       throw new AppError('يجب تحديد منتج واحد على الأقل للاسترجاع', 400);
@@ -490,6 +502,7 @@ export class RefundEligibilityService {
       sellerOrderId: detectedSellerOrderId!,
       validatedItems,
       totalAuthoritativeAmount: parseFloat(totalAmount.toFixed(2)),
+      remainingRefundableTotal: eligibility.remainingRefundableTotal,
     };
   }
 }

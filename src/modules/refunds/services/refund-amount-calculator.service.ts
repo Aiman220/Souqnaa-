@@ -142,6 +142,22 @@ export class RefundAmountCalculator {
       throw new AppError('لم يتم العثور على أي من المنتجات المطلوبة في هذا الطلب', 400);
     }
 
+    const storedCustomerDeliveryCharge = Number(targetSellerOrder.customerDeliveryCharge || 0);
+    const legacyDeliveryFee = Number(targetSellerOrder.deliveryFee || 0);
+    const sellerDeliveryCharge = storedCustomerDeliveryCharge > 0 || legacyDeliveryFee <= 0
+      ? storedCustomerDeliveryCharge
+      : legacyDeliveryFee;
+    const sellerCollectedAmount = Math.max(
+      0,
+      TaxMath.subtract(
+        TaxMath.add(
+          TaxMath.add(Number(targetSellerOrder.subtotal || 0), sellerDeliveryCharge),
+          Number(targetSellerOrder.taxAmount || 0)
+        ),
+        Number(targetSellerOrder.voucherDiscountAmount || 0)
+      )
+    );
+
     // 3. Authoritative verification of actual collected funds from customer
     // Rules:
     // - If online payment: payment status must be PAID
@@ -155,10 +171,7 @@ export class RefundAmountCalculator {
         order.status === OrderStatus.DELIVERED;
       if (isSuborderDelivered) {
         isCashCollected = true;
-        actualCollectedAmount = TaxMath.add(
-          Number(targetSellerOrder.subtotal || 0),
-          Number(targetSellerOrder.deliveryFee || 0)
-        );
+        actualCollectedAmount = sellerCollectedAmount;
       } else {
         isCashCollected = false;
         actualCollectedAmount = 0;
@@ -168,10 +181,7 @@ export class RefundAmountCalculator {
       if (paymentStatus === PaymentStatus.PAID || paymentStatus === PaymentStatus.PARTIALLY_REFUNDED) {
         isCashCollected = true;
         // The customer paid for the entire order online. Target suborder's portion:
-        actualCollectedAmount = TaxMath.add(
-          Number(targetSellerOrder.subtotal || 0),
-          Number(targetSellerOrder.deliveryFee || 0)
-        );
+        actualCollectedAmount = sellerCollectedAmount;
       } else {
         isCashCollected = false;
         actualCollectedAmount = 0;
@@ -325,11 +335,10 @@ export class RefundAmountCalculator {
 
     // 6. Shipping Fee Refund Allocation:
     // Only refundable if:
-    // a) Policy allows shipping refunds
-    // b) Customer explicitly requested it or all items in the suborder are being refunded
-    // c) Order was actually delivered and shipping was paid
+    // A complete seller-order refund also returns the customer-paid delivery charge.
+    // Partial refunds can include delivery only when the refund policy explicitly allows it.
     let shippingRefundAmount = 0;
-    const shippingFeeCollected = Number(targetSellerOrder.deliveryFee || 0);
+    const shippingFeeCollected = sellerDeliveryCharge;
 
     const isAllItemsInSuborderRefunded = targetSellerOrder.items.every((soItem: any) => {
       const line = lineItems.find((l) => l.orderItemId === soItem.id);
@@ -342,7 +351,8 @@ export class RefundAmountCalculator {
       return reqQty + priorQty >= soItem.quantity;
     });
 
-    if (policyAllowShipping && requestShippingRefund && isAllItemsInSuborderRefunded && shippingFeeCollected > 0) {
+    const shouldRefundShipping = isAllItemsInSuborderRefunded || (policyAllowShipping && requestShippingRefund);
+    if (shouldRefundShipping && shippingFeeCollected > 0) {
       // Check if shipping was already refunded on a prior refund request
       const priorShippingRefunded = (order.refundRequests || []).some(
         (r: any) =>
@@ -355,9 +365,19 @@ export class RefundAmountCalculator {
       }
     }
 
+    // Include tax on refunded items, plus any shipping tax when the whole seller order is refunded.
+    const totalProductTax = targetSellerOrder.items.reduce(
+      (sum: number, item: any) => TaxMath.add(sum, Number(item.taxAmount || 0)),
+      0
+    );
+    const shippingTax = shippingRefundAmount > 0
+      ? Math.max(0, TaxMath.subtract(Number(targetSellerOrder.taxAmount || 0), totalProductTax))
+      : 0;
+    totalTaxAmount = TaxMath.add(totalTaxAmount, shippingTax);
+
     // 7. Final Authoritative Refund Amount:
-    // Total net line items + shipping, capped strictly by remainingOrderRefundableCap
-    const uncappedTotal = TaxMath.add(totalNetRequested, shippingRefundAmount);
+    // Net line items + applicable tax + customer-paid delivery, capped by collected funds.
+    const uncappedTotal = TaxMath.add(TaxMath.add(totalNetRequested, totalTaxAmount), shippingRefundAmount);
     const finalAuthoritativeRefundAmount = Math.min(uncappedTotal, remainingOrderRefundableCap);
 
     if (isCashCollected && finalAuthoritativeRefundAmount <= 0) {

@@ -22,7 +22,7 @@ async function runSeasonalLauncherEngineTests() {
           {
             defaultIconId: 'default',
             defaultIconUrl: '/uploads/branding/souqnaa-app-icon.png',
-            seasonalIconId: 'seasonal',
+            seasonalIconId: 'sale_1_1',
             seasonalIconUrl: '',
             seasonalEnabled: false,
           },
@@ -34,7 +34,7 @@ async function runSeasonalLauncherEngineTests() {
           {
             defaultIconId: 'default',
             defaultIconUrl: '/uploads/branding/souqnaa-app-icon.png',
-            seasonalIconId: 'customer_seasonal',
+            seasonalIconId: 'customer_sale_1_1',
             seasonalIconUrl: '',
             seasonalEnabled: false,
           },
@@ -99,13 +99,14 @@ async function runSeasonalLauncherEngineTests() {
   // TEST 2: CUSTOMER AND SELLER APPROVED REGISTRIES DO NOT CONFLICT
   // ═════════════════════════════════════════════════════════════════════════════
   console.log('\n2. Verifying separate customer and seller registries...');
-  assert(APPROVED_CUSTOMER_APP_ICONS.includes('orange'), 'Customer supports orange');
-  assert(APPROVED_CUSTOMER_APP_ICONS.includes('modern'), 'Customer supports modern');
+  assert(APPROVED_CUSTOMER_APP_ICONS.includes('sale_1_1'), 'Customer supports sale_1_1');
+  assert(APPROVED_CUSTOMER_APP_ICONS.includes('sale_11_11'), 'Customer supports sale_11_11');
+  assert(APPROVED_CUSTOMER_APP_ICONS.includes('sale_12_12'), 'Customer supports sale_12_12');
   assert(APPROVED_SELLER_APP_ICONS.includes('pro'), 'Seller supports pro');
   assert(APPROVED_SELLER_APP_ICONS.includes('gold'), 'Seller supports gold');
 
   // Normalization logic respects app type
-  assert.strictEqual(launcherCampaignService.normalizeIconId('orange', 'CUSTOMER'), 'orange');
+  assert.strictEqual(launcherCampaignService.normalizeIconId('sale_11_11', 'CUSTOMER'), 'sale_11_11');
   assert.strictEqual(launcherCampaignService.normalizeIconId('gold', 'SELLER'), 'gold');
   console.log('  ✓ PASS: Registries cleanly isolate customer and seller identifiers');
 
@@ -123,8 +124,8 @@ async function runSeasonalLauncherEngineTests() {
     platform: 'ANDROID' as const,
     defaultIconId: 'default',
     defaultIconUrl: '/uploads/branding/souqnaa-app-icon.png',
-    seasonalIconId: 'seasonal',
-    seasonalIconUrl: 'https://souqnaa.ye/uploads/branding/ramadan.png',
+    seasonalIconId: 'sale_11_11',
+    seasonalIconUrl: 'https://souqnaa.ye/uploads/branding/sale_11_11.png',
     seasonalEnabled: true,
     campaignName: 'موسم رمضان',
     campaignDeepLink: 'souqnaa-customer://campaign/ramadan',
@@ -159,15 +160,15 @@ async function runSeasonalLauncherEngineTests() {
     testConfig,
     new Date('2026-06-10T00:00:00.000Z') // Exact boundary start
   );
-  assert.strictEqual(activeResolution1.activeIconId, 'seasonal');
+  assert.strictEqual(activeResolution1.activeIconId, 'sale_11_11');
   assert.strictEqual(activeResolution1.isSeasonalActive, true);
 
   const activeResolution2 = launcherCampaignService.resolveLauncherIcon(
     testConfig,
     new Date('2026-06-15T12:00:00.000Z') // Inside window
   );
-  assert.strictEqual(activeResolution2.activeIconId, 'seasonal');
-  assert.strictEqual(activeResolution2.activeIconUrl, 'https://souqnaa.ye/uploads/branding/ramadan.png');
+  assert.strictEqual(activeResolution2.activeIconId, 'sale_11_11');
+  assert.strictEqual(activeResolution2.activeIconUrl, 'https://souqnaa.ye/uploads/branding/sale_11_11.png');
   assert.strictEqual(activeResolution2.isSeasonalActive, true);
   console.log('  ✓ PASS: Rule 3: campaignStartAt <= currentTime < campaignEndAt -> seasonalIcon');
 
@@ -270,7 +271,7 @@ async function runSeasonalLauncherEngineTests() {
     'IOS',
     {
       seasonalEnabled: true,
-      seasonalIconId: 'seasonal',
+      seasonalIconId: 'sale_11_11',
       seasonalIconUrl: 'https://souqnaa.ye/uploads/branding/past_fest.png',
       campaignStartAt: expiredPastStart,
       campaignEndAt: expiredPastEnd,

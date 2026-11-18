@@ -34,7 +34,7 @@ async function runEndToEndVerification() {
           {
             defaultIconId: 'default',
             defaultIconUrl: '/uploads/branding/souqnaa-app-icon.png',
-            seasonalIconId: 'seasonal',
+            seasonalIconId: 'sale_1_1',
             seasonalIconUrl: '',
             seasonalEnabled: false,
             campaignName: '',
@@ -50,7 +50,7 @@ async function runEndToEndVerification() {
           {
             defaultIconId: 'default',
             defaultIconUrl: '/uploads/branding/souqnaa-app-icon.png',
-            seasonalIconId: 'customer_seasonal',
+            seasonalIconId: 'customer_sale_1_1',
             seasonalIconUrl: '',
             seasonalEnabled: false,
             campaignName: '',
@@ -150,9 +150,9 @@ async function runEndToEndVerification() {
         {
           seasonalIcon: {
             enabled: true,
-            name: 'موسم رمضان المبارك 2026',
-            iconUrl: 'seasonal',
-            deepLinkUrl: 'souqnaa://campaigns/ramadan',
+            name: 'حملة 11.11 الكبرى 2026',
+            iconUrl: 'sale_11_11',
+            deepLinkUrl: 'souqnaa://campaigns/11-11',
             startDate: campaignStart.toISOString(),
             endDate: campaignEnd.toISOString(),
           },
@@ -162,9 +162,9 @@ async function runEndToEndVerification() {
               deepLinkUrl: 'souqnaa://app/open',
               enabled: true,
               seasonalEnabled: true,
-              seasonalIconUrl: 'seasonal',
-              seasonalIconId: 'seasonal',
-              campaignName: 'موسم رمضان المبارك 2026',
+              seasonalIconUrl: 'sale_11_11',
+              seasonalIconId: 'sale_11_11',
+              campaignName: 'حملة 11.11 الكبرى 2026',
               campaignStartAt: campaignStart.toISOString(),
               campaignEndAt: campaignEnd.toISOString(),
             },
@@ -174,7 +174,7 @@ async function runEndToEndVerification() {
               enabled: true,
               seasonalEnabled: false, // Keep iOS on default to prove platform isolation!
               seasonalIconUrl: '',
-              seasonalIconId: 'customer_seasonal',
+              seasonalIconId: 'customer_sale_1_1',
               campaignName: '',
               campaignStartAt: null,
               campaignEndAt: null,
@@ -200,7 +200,7 @@ async function runEndToEndVerification() {
       const readBranding = await remoteConfigService.getBrandingConfig('CUSTOMER');
       assert.strictEqual(readBranding.platforms.android.seasonalEnabled, true, 'Android seasonalEnabled must be true in read endpoint');
       assert.strictEqual(readBranding.platforms.ios.seasonalEnabled, false, 'iOS seasonalEnabled must be false (independent)');
-      assert.strictEqual(readBranding.seasonalIcon.name, 'موسم رمضان المبارك 2026');
+      assert.strictEqual(readBranding.seasonalIcon.name, 'حملة 11.11 الكبرى 2026');
       console.log('  ✓ Admin read endpoint returns latest persisted state without stale cache.');
       console.log('  ✓ PASS: Admin Feature Flags screen data is fresh and synchronized.\n');
 
@@ -213,7 +213,7 @@ async function runEndToEndVerification() {
         appType: 'customer',
       });
       console.log('  ✓ Customer Android resolved activeIconId: ' + custAndroidResolved.branding.customerAppIcon);
-      assert.strictEqual(custAndroidResolved.branding.customerAppIcon, 'seasonal', 'Customer Android active launcher icon must be seasonal');
+      assert.strictEqual(custAndroidResolved.branding.customerAppIcon, 'sale_11_11', 'Customer Android active launcher icon must be sale_11_11');
       console.log('  ✓ PASS: Customer Android resolves active seasonal launcher icon.\n');
 
       // -------------------------------------------------------------

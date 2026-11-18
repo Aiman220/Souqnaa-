@@ -31,12 +31,19 @@ export const catalogCategories: RootCategoryData[] = [
       { nameAr: 'إكسسوارات الهواتف', nameEn: 'Mobile Accessories', slug: 'mobile-accessories', icon: 'cable_rounded' },
       { nameAr: 'اللابتوبات والحواسيب', nameEn: 'Laptops & Computers', slug: 'laptops-computers', icon: 'laptop_mac_rounded' },
       { nameAr: 'ملحقات الحاسوب', nameEn: 'Computer Accessories', slug: 'computer-accessories', icon: 'mouse_rounded' },
-      { nameAr: 'الشبكات والراوترات', nameEn: 'Networking & Routers', slug: 'networking-routers', icon: 'router_rounded' },
+      { nameAr: 'مودمات الإنترنت وأجهزة الراوتر', nameEn: 'Internet Modems & Routers', slug: 'networking-routers', icon: 'router_rounded' },
       { nameAr: 'التلفزيونات والشاشات', nameEn: 'TVs & Monitors', slug: 'tvs-monitors', icon: 'tv_rounded' },
       { nameAr: 'الصوتيات والسماعات', nameEn: 'Audio & Headphones', slug: 'audio-headphones', icon: 'headphones_rounded' },
       { nameAr: 'الكاميرات والتصوير', nameEn: 'Cameras & Photography', slug: 'cameras-photography', icon: 'photo_camera_rounded' },
       { nameAr: 'الألعاب وأجهزة الألعاب', nameEn: 'Gaming & Consoles', slug: 'gaming-consoles', icon: 'sports_esports_rounded' },
       { nameAr: 'أجهزة المنزل الذكي', nameEn: 'Smart Home Devices', slug: 'smart-home-devices', icon: 'sensors_rounded' },
+      { nameAr: 'قطع غيار الهواتف', nameEn: 'Phone Spare Parts', slug: 'phone-spare-parts', icon: 'phonelink_setup_rounded' },
+      { nameAr: 'قطع غيار الحواسيب واللابتوبات', nameEn: 'Computer & Laptop Spare Parts', slug: 'computer-laptop-spare-parts', icon: 'developer_board_rounded' },
+      { nameAr: 'قطع غيار الشاشات والتلفزيونات', nameEn: 'TV & Monitor Spare Parts', slug: 'tv-monitor-spare-parts', icon: 'display_settings_rounded' },
+      { nameAr: 'قطع غيار الأجهزة الإلكترونية', nameEn: 'Electronic Device Spare Parts', slug: 'electronic-spare-parts', icon: 'memory_rounded' },
+      { nameAr: 'الذواكر (RAM وMemory Cards)', nameEn: 'RAM & Memory Cards', slug: 'ram-memory-cards', icon: 'sd_storage_rounded' },
+      { nameAr: 'وحدات USB والفلاشات', nameEn: 'USB & Flash Drives', slug: 'usb-flash-drives', icon: 'usb_rounded' },
+      { nameAr: 'الأقراص الصلبة HDD وSSD', nameEn: 'Hard Drives (HDD & SSD)', slug: 'hard-drives-hdd-ssd', icon: 'storage_rounded' },
     ],
   },
   {
@@ -106,13 +113,17 @@ export const catalogCategories: RootCategoryData[] = [
     sortOrder: 5,
     subcategories: [
       { nameAr: 'الثلاجات والفريزرات', nameEn: 'Refrigerators & Freezers', slug: 'refrigerators-freezers', icon: 'kitchen_rounded' },
-      { nameAr: 'الغسالات', nameEn: 'Washing Machines', slug: 'washing-machines', icon: 'local_laundry_service_rounded' },
+      { nameAr: 'الغسالات والنشافات', nameEn: 'Washing Machines & Dryers', slug: 'washing-machines', icon: 'local_laundry_service_rounded' },
       { nameAr: 'المكيفات', nameEn: 'Air Conditioners', slug: 'air-conditioners', icon: 'ac_unit_rounded' },
-      { nameAr: 'المراوح والمدافئ', nameEn: 'Fans & Heaters', slug: 'fans-heaters', icon: 'mode_fan_off_rounded' },
-      { nameAr: 'أجهزة المطبخ', nameEn: 'Kitchen Appliances', slug: 'kitchen-appliances', icon: 'blender_rounded' },
-      { nameAr: 'الأفران والطباخات', nameEn: 'Ovens & Cookers', slug: 'ovens-cookers', icon: 'microwave_rounded' },
-      { nameAr: 'برادات المياه', nameEn: 'Water Dispensers', slug: 'water-dispensers', icon: 'water_drop_rounded' },
+      { nameAr: 'المراوح والشفاطات', nameEn: 'Fans & Exhaust Fans', slug: 'fans-heaters', icon: 'wind_power_rounded' },
+      { nameAr: 'الأفران والطباخات', nameEn: 'Ovens & Cookers', slug: 'ovens-cookers', icon: 'countertops_rounded' },
+      { nameAr: 'أجهزة المطبخ الصغيرة', nameEn: 'Small Kitchen Appliances', slug: 'kitchen-appliances', icon: 'coffee_maker_rounded' },
+      { nameAr: 'الخلاطات والعصارات', nameEn: 'Blenders & Juicers', slug: 'blenders-juicers', icon: 'blender_rounded' },
+      { nameAr: 'الميكروويف', nameEn: 'Microwaves', slug: 'microwaves', icon: 'microwave_rounded' },
+      { nameAr: 'السخانات', nameEn: 'Heaters & Water Heaters', slug: 'heaters', icon: 'whatshot_rounded' },
       { nameAr: 'المكانس الكهربائية', nameEn: 'Vacuum Cleaners', slug: 'vacuum-cleaners', icon: 'cleaning_services_rounded' },
+      { nameAr: 'برادات المياه', nameEn: 'Water Dispensers', slug: 'water-dispensers', icon: 'water_drop_rounded' },
+      { nameAr: 'قطع غيار الأجهزة المنزلية', nameEn: 'Home Appliance Spare Parts', slug: 'home-appliance-spare-parts', icon: 'settings_rounded' },
     ],
   },
   {
@@ -125,9 +136,11 @@ export const catalogCategories: RootCategoryData[] = [
     subcategories: [
       { nameAr: 'قطع غيار السيارات', nameEn: 'Car Spare Parts', slug: 'car-spare-parts', icon: 'settings_applications_rounded' },
       { nameAr: 'قطع غيار الدراجات النارية', nameEn: 'Motorcycle Spare Parts', slug: 'motorcycle-spare-parts', icon: 'two_wheeler_rounded' },
-      { nameAr: 'الإطارات والعجلات', nameEn: 'Tires & Wheels', slug: 'tires-wheels', icon: 'album_rounded' },
+      { nameAr: 'الدراجات النارية والكهربائية', nameEn: 'Motorcycles & Electric Bikes', slug: 'motorcycles-electric-bikes', icon: 'electric_moped_rounded' },
+      { nameAr: 'الإطارات والعجلات', nameEn: 'Tires & Wheels', slug: 'tires-wheels', icon: 'tire_repair_rounded' },
       { nameAr: 'بطاريات السيارات', nameEn: 'Car Batteries', slug: 'car-batteries', icon: 'battery_charging_full_rounded' },
-      { nameAr: 'الزيوت والسوائل', nameEn: 'Oils & Fluids', slug: 'oils-fluids', icon: 'opacity_rounded' },
+      { nameAr: 'المحركات والبطاريات', nameEn: 'Engines & Batteries', slug: 'engines-batteries', icon: 'ev_station_rounded' },
+      { nameAr: 'زيوت ومستلزمات الصيانة', nameEn: 'Oils & Maintenance Supplies', slug: 'oils-fluids', icon: 'oil_barrel_rounded' },
       { nameAr: 'إلكترونيات السيارات', nameEn: 'Car Electronics', slug: 'car-electronics', icon: 'electric_car_rounded' },
       { nameAr: 'إكسسوارات السيارات', nameEn: 'Car Accessories', slug: 'car-accessories', icon: 'car_repair_rounded' },
       { nameAr: 'العناية بالسيارات', nameEn: 'Car Care & Cleaning', slug: 'car-care-cleaning', icon: 'local_car_wash_rounded' },
@@ -203,6 +216,13 @@ export const catalogCategories: RootCategoryData[] = [
       { nameAr: 'الدهانات والطلاءات', nameEn: 'Paints & Coatings', slug: 'paints-coatings', icon: 'format_paint_rounded' },
       { nameAr: 'معدات السلامة', nameEn: 'Safety Equipment', slug: 'safety-equipment', icon: 'security_rounded' },
       { nameAr: 'الأقفال والأمن', nameEn: 'Locks & Security', slug: 'locks-security', icon: 'lock_rounded' },
+      { nameAr: 'الأبواب الخشبية', nameEn: 'Wooden Doors', slug: 'wooden-doors', icon: 'door_front_door_rounded' },
+      { nameAr: 'الأبواب الحديدية', nameEn: 'Iron & Steel Doors', slug: 'iron-steel-doors', icon: 'door_back_door_rounded' },
+      { nameAr: 'الأبواب الألمنيوم', nameEn: 'Aluminum Doors', slug: 'aluminum-doors', icon: 'door_sliding_rounded' },
+      { nameAr: 'الأبواب البلاستيكية', nameEn: 'PVC & Plastic Doors', slug: 'plastic-pvc-doors', icon: 'meeting_room_rounded' },
+      { nameAr: 'إكسسوارات ومقابض الأبواب', nameEn: 'Door Handles & Accessories', slug: 'door-handles-accessories', icon: 'key_rounded' },
+      { nameAr: 'الأقفال والمفصلات', nameEn: 'Locks & Hinges', slug: 'locks-hinges', icon: 'lock_rounded' },
+      { nameAr: 'مستلزمات تركيب الأبواب', nameEn: 'Door Installation Supplies', slug: 'door-installation-supplies', icon: 'carpenter_rounded' },
     ],
   },
   {
@@ -268,6 +288,79 @@ export const catalogCategories: RootCategoryData[] = [
       { nameAr: 'بطاقات الألعاب', nameEn: 'Gaming Gift Cards', slug: 'gaming-gift-cards', icon: 'sports_esports_rounded' },
       { nameAr: 'الاشتراكات الرقمية', nameEn: 'Digital Subscriptions', slug: 'digital-subscriptions', icon: 'subscriptions_rounded' },
       { nameAr: 'البرامج والتراخيص', nameEn: 'Software & Licenses', slug: 'software-licenses', icon: 'terminal_rounded' },
+    ],
+  },
+  {
+    nameAr: 'الطاقة الشمسية ومستلزماتها',
+    nameEn: 'Solar Energy & Supplies',
+    slug: 'solar-energy-supplies',
+    icon: 'solar_power_rounded',
+    image: 'https://images.unsplash.com/photo-1509391366360-2e959784a276?w=800&q=80',
+    sortOrder: 15,
+    subcategories: [
+      { nameAr: 'ألواح الطاقة الشمسية', nameEn: 'Solar Panels', slug: 'solar-panels', icon: 'solar_power_rounded' },
+      { nameAr: 'بطاريات الطاقة الشمسية', nameEn: 'Solar Batteries', slug: 'solar-batteries', icon: 'battery_charging_full_rounded' },
+      { nameAr: 'الإنفرترات ومحولات الطاقة', nameEn: 'Inverters & Power Converters', slug: 'inverters-power-converters', icon: 'electric_bolt_rounded' },
+      { nameAr: 'منظمات الشحن', nameEn: 'Charge Controllers', slug: 'charge-controllers', icon: 'electric_meter_rounded' },
+      { nameAr: 'كابلات وأسلاك الطاقة الشمسية', nameEn: 'Solar Cables & Wires', slug: 'solar-cables-wires', icon: 'cable_rounded' },
+      { nameAr: 'هياكل وقواعد تثبيت الألواح', nameEn: 'Solar Mounting Structures & Racks', slug: 'solar-mounting-structures', icon: 'roofing_rounded' },
+      { nameAr: 'قواطع وفيوزات وحمايات كهربائية', nameEn: 'Circuit Breakers, Fuses & Electrical Protection', slug: 'circuit-breakers-fuses-protection', icon: 'shield_rounded' },
+      { nameAr: 'إكسسوارات ومستلزمات التركيب', nameEn: 'Solar Installation Accessories', slug: 'solar-installation-accessories', icon: 'settings_input_component_rounded' },
+      { nameAr: 'أنظمة الطاقة الشمسية المتكاملة', nameEn: 'Complete Solar Energy Systems', slug: 'complete-solar-systems', icon: 'energy_savings_leaf_rounded' },
+    ],
+  },
+  {
+    nameAr: 'الأزياء والمنتجات التراثية',
+    nameEn: 'Traditional Attire & Heritage Products',
+    slug: 'traditional-attire-heritage',
+    icon: 'workspace_premium_rounded',
+    image: 'https://images.unsplash.com/photo-1590073242678-70ee3fc28e8e?w=800&q=80',
+    sortOrder: 16,
+    subcategories: [
+      { nameAr: 'العُصُب ومستلزماتها', nameEn: 'Asib (Janabiya Belts) & Supplies', slug: 'asib-supplies', icon: 'style_rounded' },
+      { nameAr: 'الجنابي', nameEn: 'Janabiya (Traditional Daggers)', slug: 'janabiya', icon: 'military_tech_rounded' },
+      { nameAr: 'أحزمة الجنابي', nameEn: 'Janabiya Belts', slug: 'janabiya-belts', icon: 'texture_rounded' },
+      { nameAr: 'أغمدة الجنابي', nameEn: 'Janabiya Sheaths', slug: 'janabiya-sheaths', icon: 'cases_rounded' },
+      { nameAr: 'إكسسوارات الجنابي', nameEn: 'Janabiya Accessories', slug: 'janabiya-accessories', icon: 'diamond_rounded' },
+      { nameAr: 'الملابس والأزياء اليمنية التقليدية', nameEn: 'Traditional Yemeni Clothing & Attire', slug: 'yemeni-traditional-attire', icon: 'checkroom_rounded' },
+      { nameAr: 'مستلزمات الزي الشعبي', nameEn: 'Traditional Folk Costume Supplies', slug: 'folk-costume-supplies', icon: 'dry_cleaning_rounded' },
+    ],
+  },
+  {
+    nameAr: 'أجهزة المراقبة والحماية',
+    nameEn: 'Surveillance & Security Systems',
+    slug: 'surveillance-security',
+    icon: 'security_rounded',
+    image: 'https://images.unsplash.com/photo-1557597774-9d273605dfa9?w=800&q=80',
+    sortOrder: 17,
+    subcategories: [
+      { nameAr: 'كاميرات المراقبة', nameEn: 'Security & CCTV Cameras', slug: 'security-cameras', icon: 'camera_outdoor_rounded' },
+      { nameAr: 'أجهزة DVR وNVR', nameEn: 'DVR & NVR Recorders', slug: 'dvr-nvr-recorders', icon: 'dvr_rounded' },
+      { nameAr: 'أنظمة المراقبة المتكاملة', nameEn: 'Complete Surveillance Systems', slug: 'complete-surveillance-systems', icon: 'linked_camera_rounded' },
+      { nameAr: 'أجهزة الإنذار والحماية', nameEn: 'Alarm & Protection Systems', slug: 'alarm-protection-systems', icon: 'crisis_alert_rounded' },
+      { nameAr: 'أجهزة التحكم بالدخول', nameEn: 'Access Control Systems', slug: 'access-control-systems', icon: 'sensor_door_rounded' },
+      { nameAr: 'أجهزة البصمة', nameEn: 'Fingerprint & Biometric Devices', slug: 'fingerprint-biometric-devices', icon: 'fingerprint_rounded' },
+      { nameAr: 'حساسات الحركة', nameEn: 'Motion Sensors', slug: 'motion-sensors', icon: 'sensors_rounded' },
+      { nameAr: 'أقفال وأنظمة الحماية الذكية', nameEn: 'Smart Locks & Security Systems', slug: 'smart-locks-security', icon: 'phonelink_lock_rounded' },
+      { nameAr: 'كابلات وملحقات كاميرات المراقبة', nameEn: 'CCTV Cables & Accessories', slug: 'cctv-cables-accessories', icon: 'cable_rounded' },
+    ],
+  },
+  {
+    nameAr: 'الصحة والعناية الصحية',
+    nameEn: 'Health & Wellness',
+    slug: 'health-wellness',
+    icon: 'health_and_safety_rounded',
+    image: 'https://images.unsplash.com/photo-1505751172876-fa1923c5c528?w=800&q=80',
+    sortOrder: 18,
+    subcategories: [
+      { nameAr: 'الفيتامينات والمكملات', nameEn: 'Vitamins & Supplements', slug: 'vitamins-supplements', icon: 'medication_rounded' },
+      { nameAr: 'الأجهزة الطبية', nameEn: 'Medical Equipment', slug: 'medical-equipment', icon: 'monitor_heart_rounded' },
+      { nameAr: 'الإسعافات الأولية', nameEn: 'First Aid', slug: 'first-aid', icon: 'medical_services_rounded' },
+      { nameAr: 'المستلزمات الطبية', nameEn: 'Medical Supplies', slug: 'medical-supplies', icon: 'vaccines_rounded' },
+      { nameAr: 'أدوات الحركة والدعم', nameEn: 'Mobility & Support', slug: 'mobility-support', icon: 'accessible_rounded' },
+      { nameAr: 'العناية بالأسنان', nameEn: 'Dental Care', slug: 'dental-care', icon: 'sentiment_very_satisfied_rounded' },
+      { nameAr: 'العناية بالبصر', nameEn: 'Vision Care', slug: 'vision-care', icon: 'visibility_rounded' },
+      { nameAr: 'صحة الطفل', nameEn: 'Baby Health', slug: 'baby-health', icon: 'child_care_rounded' },
     ],
   },
 ];
@@ -346,7 +439,25 @@ export async function seedCategoriesCatalog(prismaClient?: PrismaClient) {
     }
   }
 
-  console.log(`✓ Completed catalog seeding: 14 root categories and 112 subcategories.`);
+  const totalSubcategories = catalogCategories.reduce(
+    (sum, cat) => sum + cat.subcategories.length,
+    0,
+  );
+  console.log(
+    `✓ Completed catalog seeding: ${catalogCategories.length} root categories and ${totalSubcategories} subcategories.`,
+  );
   return seededCategories;
+}
+
+if (require.main === module) {
+  const prisma = new PrismaClient();
+  seedCategoriesCatalog(prisma)
+    .catch((e) => {
+      console.error('Category seeding error:', e);
+      process.exit(1);
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
 }
 

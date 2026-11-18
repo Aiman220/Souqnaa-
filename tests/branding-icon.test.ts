@@ -52,13 +52,20 @@ async function runBrandingIconTests() {
   // TEST 1: APPROVED ICON REGISTRY
   // ═════════════════════════════════════════════════════════════════════════════
   console.log('1. Checking approved icon registry...');
-  assert(APPROVED_CUSTOMER_APP_ICONS.length === 5, 'APPROVED_CUSTOMER_APP_ICONS must contain 5 variants');
+  assert(APPROVED_CUSTOMER_APP_ICONS.length === 20, 'APPROVED_CUSTOMER_APP_ICONS must contain 20 variants (default + 7 seasonal + 1.1..12.12)');
   assert(APPROVED_CUSTOMER_APP_ICONS.includes('default'), 'Contains default');
-  assert(APPROVED_CUSTOMER_APP_ICONS.includes('orange'), 'Contains orange');
-  assert(APPROVED_CUSTOMER_APP_ICONS.includes('modern'), 'Contains modern');
-  assert(APPROVED_CUSTOMER_APP_ICONS.includes('minimal'), 'Contains minimal');
-  assert(APPROVED_CUSTOMER_APP_ICONS.includes('seasonal'), 'Contains seasonal');
-  console.log('  ✓ PASS: Approved icons registry contains default, orange, modern, minimal, seasonal');
+  assert(APPROVED_CUSTOMER_APP_ICONS.includes('ramadan'), 'Contains ramadan');
+  assert(APPROVED_CUSTOMER_APP_ICONS.includes('eid_adha'), 'Contains eid_adha');
+  assert(APPROVED_CUSTOMER_APP_ICONS.includes('mawlid'), 'Contains mawlid');
+  assert(APPROVED_CUSTOMER_APP_ICONS.includes('new_year'), 'Contains new_year');
+  assert(APPROVED_CUSTOMER_APP_ICONS.includes('valentine'), 'Contains valentine');
+  assert(APPROVED_CUSTOMER_APP_ICONS.includes('black_friday'), 'Contains black_friday');
+  assert(APPROVED_CUSTOMER_APP_ICONS.includes('brand_glossy'), 'Contains brand_glossy');
+  assert(APPROVED_CUSTOMER_APP_ICONS.includes('sale_1_1'), 'Contains sale_1_1');
+  assert(APPROVED_CUSTOMER_APP_ICONS.includes('sale_6_6'), 'Contains sale_6_6');
+  assert(APPROVED_CUSTOMER_APP_ICONS.includes('sale_11_11'), 'Contains sale_11_11');
+  assert(APPROVED_CUSTOMER_APP_ICONS.includes('sale_12_12'), 'Contains sale_12_12');
+  console.log('  ✓ PASS: Approved icons registry contains all 20 variants');
 
   // ═════════════════════════════════════════════════════════════════════════════
   // TEST 2: UPLOAD DEFAULT CUSTOMER APP ICON
@@ -126,16 +133,16 @@ async function runBrandingIconTests() {
   // ═════════════════════════════════════════════════════════════════════════════
   // TEST 5: SAVE BRANDING CONFIGURATION WITH UPLOAD PATH
   // ═════════════════════════════════════════════════════════════════════════════
-  console.log('\n5. Testing save branding configuration with "uploads/branding/app_icon_orange.png"...');
+  console.log('\n5. Testing save branding configuration with "uploads/branding/app_icon_sale_6_6.png"...');
   const savedBranding = await remoteConfigService.updateBrandingConfig(
     {
       appNameAr: 'سوقناا',
       appNameEn: 'SOUQNAA',
-      customerAppIcon: 'orange',
+      customerAppIcon: 'sale_6_6',
       defaultIconUrl: '/uploads/branding/souqnaa-app-icon.png',
       platforms: {
         android: {
-          iconUrl: 'uploads/branding/app_icon_orange.png',
+          iconUrl: 'uploads/branding/app_icon_sale_6_6.png',
           splashLogoUrl: '/uploads/branding/souqnaa-logo.png',
           deepLinkUrl: 'souqnaa://app/open',
           badgeText: '',
@@ -149,12 +156,12 @@ async function runBrandingIconTests() {
     },
     adminUser
   );
-  assert.strictEqual(savedBranding.customerAppIcon, 'orange', 'customerAppIcon persisted as orange');
-  assert.strictEqual(savedBranding.platforms.android.iconUrl, 'uploads/branding/app_icon_orange.png');
+  assert.strictEqual(savedBranding.customerAppIcon, 'sale_6_6', 'customerAppIcon persisted as sale_6_6');
+  assert.strictEqual(savedBranding.platforms.android.iconUrl, 'uploads/branding/app_icon_sale_6_6.png');
 
   // Check database persistence
   const dbIconSetting = await prisma.systemSetting.findUnique({ where: { key: 'customer_app_icon' } });
-  assert.strictEqual(dbIconSetting?.value, 'orange', 'Database customer_app_icon equals orange');
+  assert.strictEqual(dbIconSetting?.value, 'sale_6_6', 'Database customer_app_icon equals sale_6_6');
   console.log('  ✓ PASS: Configuration successfully persisted to PostgreSQL SystemSetting');
 
   // ═════════════════════════════════════════════════════════════════════════════
@@ -163,7 +170,7 @@ async function runBrandingIconTests() {
   console.log('\n6. Testing publish operation and ETag generation...');
   const resolved = await remoteConfigService.getResolvedConfig({ platform: 'android' });
   assert(resolved.etag && resolved.etag.startsWith('W/'), 'ETag generated with weak validator W/');
-  assert.strictEqual(resolved.branding.customerAppIcon, 'orange');
+  assert.strictEqual(resolved.branding.customerAppIcon, 'sale_6_6');
 
   // Conditional request with matching If-None-Match
   const cachedCheck = await remoteConfigService.getResolvedConfig({
@@ -222,7 +229,7 @@ async function runBrandingIconTests() {
   const disabledSeasonalResolved = await remoteConfigService.getResolvedConfig({ platform: 'android' });
   assert.strictEqual(
     disabledSeasonalResolved.branding.platforms.android.iconUrl,
-    'uploads/branding/app_icon_orange.png',
+    'uploads/branding/app_icon_sale_6_6.png',
     'Disabled seasonal icon restores base android iconUrl'
   );
   console.log('  ✓ PASS: Disabled seasonal icon correctly falls back to base Android icon');
@@ -247,7 +254,7 @@ async function runBrandingIconTests() {
   const beforeStartResolved = await remoteConfigService.getResolvedConfig({ platform: 'android' });
   assert.strictEqual(
     beforeStartResolved.branding.platforms.android.iconUrl,
-    'uploads/branding/app_icon_orange.png',
+    'uploads/branding/app_icon_sale_6_6.png',
     'Before start date falls back to base android iconUrl'
   );
   console.log('  ✓ PASS: Before campaign start date falls back to base icon');
@@ -272,7 +279,7 @@ async function runBrandingIconTests() {
   const afterEndResolved = await remoteConfigService.getResolvedConfig({ platform: 'android' });
   assert.strictEqual(
     afterEndResolved.branding.platforms.android.iconUrl,
-    'uploads/branding/app_icon_orange.png',
+    'uploads/branding/app_icon_sale_6_6.png',
     'After end date falls back to base android iconUrl'
   );
   console.log('  ✓ PASS: After campaign end date falls back to base icon');

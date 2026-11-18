@@ -43,7 +43,7 @@ export class LauncherCampaignService {
     isSeasonal = false
   ): string {
     const defaultVal = appType === 'CUSTOMER' ? 'default' : 'seller_default';
-    const seasonalVal = appType === 'CUSTOMER' ? 'seasonal' : 'seller_seasonal';
+    const seasonalVal = appType === 'CUSTOMER' ? 'sale_1_1' : 'seller_seasonal';
 
     if (!raw) return isSeasonal ? seasonalVal : defaultVal;
     const lower = raw.trim().toLowerCase();
@@ -56,29 +56,35 @@ export class LauncherCampaignService {
 
     const exact = approvedList.find((id) => lower === id);
     if (exact) {
-      return exact;
+      return exact.startsWith('customer_') ? exact.replace(/^customer_/, '') : exact;
     }
 
+    // Sort longest first so 'sale_11_11' matches before 'sale_1_1'
+    const sortedApproved = [...approvedList].sort((a, b) => b.length - a.length);
+
     if (isSeasonal) {
-      for (const id of approvedList) {
+      for (const id of sortedApproved) {
         if (
           id !== defaultVal &&
           id !== 'default' &&
-          (lower.includes(`_${id}`) || lower.includes(`_${id}.`) || lower.includes(`/${id}.`))
+          id !== 'customer_default' &&
+          (lower.includes(id) || lower.includes(`_${id}`) || lower.includes(`_${id}.`) || lower.includes(`/${id}.`))
         ) {
-          return id;
+          return id.startsWith('customer_') ? id.replace(/^customer_/, '') : id;
         }
       }
       return seasonalVal;
     }
 
-    for (const id of approvedList) {
+    for (const id of sortedApproved) {
       if (
+        lower.includes(`app_icon_${id}`) ||
+        lower.includes(`seller_icon_${id}`) ||
         lower.includes(`_${id}.`) ||
         lower.includes(`/${id}.`) ||
         lower.endsWith(`/${id}`)
       ) {
-        return id;
+        return id.startsWith('customer_') ? id.replace(/^customer_/, '') : id;
       }
     }
 
@@ -102,8 +108,9 @@ export class LauncherCampaignService {
       return exact;
     }
 
-    // 2. Filename and pattern matching
-    const matched = approvedList.find(
+    // 2. Filename and pattern matching (longest first so sale_11_11 matches before sale_1_1)
+    const sortedApproved = [...approvedList].sort((a, b) => b.length - a.length);
+    const matched = sortedApproved.find(
       (id) =>
         lower.includes(`app_icon_${id}`) ||
         lower.includes(`seller_icon_${id}`) ||
@@ -196,7 +203,7 @@ export class LauncherCampaignService {
       defaultIconUrl: isCustomer
         ? '/uploads/branding/souqnaa-app-icon.png'
         : '/uploads/branding/seller_app_icon.png',
-      seasonalIconId: isCustomer ? 'seasonal' : 'seller_seasonal',
+      seasonalIconId: isCustomer ? 'sale_1_1' : 'seller_seasonal',
       seasonalIconUrl: '',
       seasonalEnabled: false,
       campaignName: '',
@@ -316,7 +323,7 @@ export class LauncherCampaignService {
 
     // Active seasonal campaign window
     const activeSeasonalId =
-      seasonalIconId || (applicationType === 'CUSTOMER' ? 'seasonal' : 'seller_seasonal');
+      seasonalIconId || (applicationType === 'CUSTOMER' ? 'sale_1_1' : 'seller_seasonal');
 
     return {
       applicationType,
@@ -380,7 +387,7 @@ export class LauncherCampaignService {
       if (updates.seasonalIconId && updates.seasonalIconId.trim().length > 0) {
         seasonalIconId = this.validateIconTarget(updates.seasonalIconId, applicationType);
       } else {
-        seasonalIconId = applicationType === 'CUSTOMER' ? 'seasonal' : 'seller_seasonal';
+        seasonalIconId = applicationType === 'CUSTOMER' ? 'sale_1_1' : 'seller_seasonal';
       }
     }
 

@@ -142,8 +142,26 @@ export class RefundService {
     });
 
     // Validate requested items and compute authoritative refundable amounts
-    const { order, sellerId, sellerOrderId, validatedItems, totalAuthoritativeAmount } =
+    const {
+      order,
+      sellerId,
+      sellerOrderId,
+      validatedItems,
+      totalAuthoritativeAmount: itemRefundAmount,
+      remainingRefundableTotal,
+    } =
       await RefundEligibilityService.validateRequestedItems(orderId, customerId, items);
+
+    // The wallet refund includes the refunded items' tax and, for a complete seller-order
+    // return, the delivery charge. Keep it within both the seller-order and parent-order caps.
+    const totalAuthoritativeAmount = Math.min(
+      calculatedRefund.finalAuthoritativeRefundAmount,
+      calculatedRefund.remainingOrderRefundableCap,
+      remainingRefundableTotal
+    );
+    if (totalAuthoritativeAmount <= 0 || totalAuthoritativeAmount + 0.01 < itemRefundAmount) {
+      throw new AppError('لا يوجد رصيد مؤهل كافٍ لإتمام مبلغ الاسترجاع لهذا الطلب', 400);
+    }
 
     // Validate evidence
     const maxFiles = 10;

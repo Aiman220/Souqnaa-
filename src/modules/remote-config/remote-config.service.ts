@@ -338,7 +338,7 @@ export class RemoteConfigService {
         badgeText: custAndroid.campaignName || branding.platforms.android.badgeText,
         seasonalEnabled: custAndroid.seasonalEnabled,
         seasonalIconUrl: custAndroid.seasonalIconUrl || '',
-        seasonalIconId: custAndroid.seasonalIconId || 'seasonal',
+        seasonalIconId: custAndroid.seasonalIconId || 'sale_1_1',
         campaignName: custAndroid.campaignName || '',
         campaignDeepLink: custAndroid.campaignDeepLink || '',
         campaignStartAt: custAndroid.campaignStartAt ? custAndroid.campaignStartAt.toISOString() : null,
@@ -354,7 +354,7 @@ export class RemoteConfigService {
         badgeText: custIos.campaignName || branding.platforms.ios.badgeText,
         seasonalEnabled: custIos.seasonalEnabled,
         seasonalIconUrl: custIos.seasonalIconUrl || '',
-        seasonalIconId: custIos.seasonalIconId || 'seasonal',
+        seasonalIconId: custIos.seasonalIconId || 'sale_1_1',
         campaignName: custIos.campaignName || '',
         campaignDeepLink: custIos.campaignDeepLink || '',
         campaignStartAt: custIos.campaignStartAt ? custIos.campaignStartAt.toISOString() : null,
@@ -1360,7 +1360,7 @@ export class RemoteConfigService {
 
       const seasonalTarget = updates.seasonalIcon?.iconUrl
         ? launcherCampaignService.normalizeIconId(updates.seasonalIcon.iconUrl, appType, true)
-        : (isCustomer ? 'seasonal' : 'seller_seasonal');
+        : (isCustomer ? 'sale_1_1' : 'seller_seasonal');
 
       const androidSeasonalTarget = updates.platforms?.android?.seasonalIconUrl
         ? launcherCampaignService.normalizeIconId(updates.platforms.android.seasonalIconUrl, appType, true)
