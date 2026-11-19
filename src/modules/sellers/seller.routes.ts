@@ -21,6 +21,8 @@ import {
   SellerStatus,
   RefundDestination,
   NotificationType,
+  DigitalFulfillmentStatus,
+  DigitalDeliveryType,
 } from '@prisma/client';
 import { SocketService } from '../../services/websocket/socket.service';
 import { OrderStateMachine } from '../orders/order.state-machine';
@@ -28,7 +30,7 @@ import { WalletProviderRegistry } from '../payments/adapters/wallet-provider.ada
 import { OrderInvoiceService } from '../../services/orders/order-invoice.service';
 import { SellerOrderPrintService, PrintDocumentType, PrintFormat } from '../../services/orders/seller-order-print.service';
 import { remoteConfigService } from '../remote-config/remote-config.service';
-import { DigitalFulfillmentService } from '../../services/digital/digital-fulfillment.service';
+import { DigitalFulfillmentService, digitalFulfillmentService } from '../../services/digital/digital-fulfillment.service';
 import { UrlSecurityUtil } from '../../utils/url-security.util';
 import { AnalyticsCacheService } from '../analytics/services/analytics-cache.service';
 import { SellerFinancialRiskService } from '../commission/seller-financial-risk.service';
@@ -1516,6 +1518,7 @@ async function createSellerProduct(userId: string, body: any) {
     nameAr,
     nameEn,
     categoryId,
+    otherProductType,
     brandId,
     price,
     compareAtPrice,
@@ -1551,6 +1554,17 @@ async function createSellerProduct(userId: string, body: any) {
         },
       });
       targetCategoryId = defaultCat.id;
+    }
+  }
+
+  let trimmedOtherProductType: string | null = null;
+  if (targetCategoryId) {
+    const selectedCat = await prisma.category.findUnique({ where: { id: targetCategoryId } });
+    if (selectedCat && (selectedCat.slug.startsWith('other-') || selectedCat.nameEn.toLowerCase() === 'other' || selectedCat.nameAr === 'أخرى')) {
+      if (!otherProductType || typeof otherProductType !== 'string' || otherProductType.trim().length < 2 || otherProductType.trim().length > 100) {
+        throw new AppError('يرجى تحديد نوع المنتج عند اختيار قسم (أخرى) بين 2 و 100 حرف / Please specify product type (2-100 characters)', 400);
+      }
+      trimmedOtherProductType = otherProductType.trim();
     }
   }
 
@@ -1602,6 +1616,7 @@ async function createSellerProduct(userId: string, body: any) {
       data: {
         storeId: store.id,
         categoryId: targetCategoryId,
+        otherProductType: trimmedOtherProductType,
         brandId: brandId || null,
         nameAr: nameAr || 'منتج جديد',
         nameEn: nameEn || nameAr || 'New Product',
@@ -1612,6 +1627,25 @@ async function createSellerProduct(userId: string, body: any) {
         descriptionAr: descriptionAr || null,
         descriptionEn: descriptionEn || null,
         weight: weight !== undefined && weight !== '' ? parseFloat(weight) : null,
+        lengthCm: body.lengthCm ? parseFloat(String(body.lengthCm)) : null,
+        widthCm: body.widthCm ? parseFloat(String(body.widthCm)) : null,
+        heightCm: body.heightCm ? parseFloat(String(body.heightCm)) : null,
+        packageLengthCm: body.packageLengthCm ? parseFloat(String(body.packageLengthCm)) : null,
+        packageWidthCm: body.packageWidthCm ? parseFloat(String(body.packageWidthCm)) : null,
+        packageHeightCm: body.packageHeightCm ? parseFloat(String(body.packageHeightCm)) : null,
+        packageWeightKg: body.packageWeightKg ? parseFloat(String(body.packageWeightKg)) : null,
+        palletCount: body.palletCount ? parseInt(String(body.palletCount), 10) : null,
+        packagingType: body.packagingType ? String(body.packagingType) : null,
+        isFragile: Boolean(body.isFragile),
+        isOversized: Boolean(body.isOversized),
+        requiresForklift: Boolean(body.requiresForklift),
+        requiresCrane: Boolean(body.requiresCrane),
+        requiresSpecialVehicle: Boolean(body.requiresSpecialVehicle),
+        specialVehicleType: body.specialVehicleType ? String(body.specialVehicleType) : null,
+        loadingRequirements: body.loadingRequirements ? String(body.loadingRequirements) : null,
+        unloadingRequirements: body.unloadingRequirements ? String(body.unloadingRequirements) : null,
+        sellingUnit: body.sellingUnit ? String(body.sellingUnit) : null,
+        unitDimensionsJson: body.unitDimensionsJson ? (typeof body.unitDimensionsJson === 'object' ? JSON.stringify(body.unitDimensionsJson) : String(body.unitDimensionsJson)) : null,
         hasWarranty: Boolean(hasWarranty),
         warrantyPeriod: warrantyPeriod || null,
         warrantyPolicy: warrantyPolicy || null,
@@ -1710,6 +1744,7 @@ async function updateSellerProduct(userId: string, productId: string, body: any)
     nameAr,
     nameEn,
     categoryId,
+    otherProductType,
     brandId,
     sku,
     price,
@@ -1756,6 +1791,23 @@ async function updateSellerProduct(userId: string, productId: string, body: any)
     updatedDigitalFileUrl = null;
   }
 
+  let trimmedOtherProductType: string | null | undefined = undefined;
+  if (targetCat) {
+    const selectedCat = await prisma.category.findUnique({ where: { id: targetCat } });
+    if (selectedCat && (selectedCat.slug.startsWith('other-') || selectedCat.nameEn.toLowerCase() === 'other' || selectedCat.nameAr === 'أخرى')) {
+      if (otherProductType !== undefined) {
+        if (!otherProductType || typeof otherProductType !== 'string' || otherProductType.trim().length < 2 || otherProductType.trim().length > 100) {
+          throw new AppError('يرجى تحديد نوع المنتج عند اختيار قسم (أخرى) بين 2 و 100 حرف / Please specify product type (2-100 characters)', 400);
+        }
+        trimmedOtherProductType = otherProductType.trim();
+      } else if (!product.otherProductType) {
+        throw new AppError('يرجى تحديد نوع المنتج عند اختيار قسم (أخرى) بين 2 و 100 حرف / Please specify product type (2-100 characters)', 400);
+      }
+    } else {
+      trimmedOtherProductType = null;
+    }
+  }
+
   const updatedProduct = await prisma.$transaction(async (tx) => {
     const prod = await tx.product.update({
       where: { id: productId },
@@ -1763,6 +1815,7 @@ async function updateSellerProduct(userId: string, productId: string, body: any)
         nameAr: nameAr ?? product.nameAr,
         nameEn: nameEn ?? product.nameEn,
         categoryId: categoryId !== undefined ? categoryId : product.categoryId,
+        otherProductType: trimmedOtherProductType !== undefined ? trimmedOtherProductType : product.otherProductType,
         brandId: brandId !== undefined ? brandId : product.brandId,
         sku: sku ?? product.sku,
         price: price !== undefined ? parseFloat(price) : product.price,
@@ -1770,6 +1823,25 @@ async function updateSellerProduct(userId: string, productId: string, body: any)
         descriptionAr: descriptionAr !== undefined ? descriptionAr : product.descriptionAr,
         descriptionEn: descriptionEn !== undefined ? descriptionEn : product.descriptionEn,
         weight: weight !== undefined ? (weight ? parseFloat(weight) : null) : product.weight,
+        lengthCm: body.lengthCm !== undefined ? (body.lengthCm ? parseFloat(String(body.lengthCm)) : null) : product.lengthCm,
+        widthCm: body.widthCm !== undefined ? (body.widthCm ? parseFloat(String(body.widthCm)) : null) : product.widthCm,
+        heightCm: body.heightCm !== undefined ? (body.heightCm ? parseFloat(String(body.heightCm)) : null) : product.heightCm,
+        packageLengthCm: body.packageLengthCm !== undefined ? (body.packageLengthCm ? parseFloat(String(body.packageLengthCm)) : null) : product.packageLengthCm,
+        packageWidthCm: body.packageWidthCm !== undefined ? (body.packageWidthCm ? parseFloat(String(body.packageWidthCm)) : null) : product.packageWidthCm,
+        packageHeightCm: body.packageHeightCm !== undefined ? (body.packageHeightCm ? parseFloat(String(body.packageHeightCm)) : null) : product.packageHeightCm,
+        packageWeightKg: body.packageWeightKg !== undefined ? (body.packageWeightKg ? parseFloat(String(body.packageWeightKg)) : null) : product.packageWeightKg,
+        palletCount: body.palletCount !== undefined ? (body.palletCount ? parseInt(String(body.palletCount), 10) : null) : product.palletCount,
+        packagingType: body.packagingType !== undefined ? (body.packagingType ? String(body.packagingType) : null) : product.packagingType,
+        isFragile: body.isFragile !== undefined ? Boolean(body.isFragile) : product.isFragile,
+        isOversized: body.isOversized !== undefined ? Boolean(body.isOversized) : product.isOversized,
+        requiresForklift: body.requiresForklift !== undefined ? Boolean(body.requiresForklift) : product.requiresForklift,
+        requiresCrane: body.requiresCrane !== undefined ? Boolean(body.requiresCrane) : product.requiresCrane,
+        requiresSpecialVehicle: body.requiresSpecialVehicle !== undefined ? Boolean(body.requiresSpecialVehicle) : product.requiresSpecialVehicle,
+        specialVehicleType: body.specialVehicleType !== undefined ? (body.specialVehicleType ? String(body.specialVehicleType) : null) : product.specialVehicleType,
+        loadingRequirements: body.loadingRequirements !== undefined ? (body.loadingRequirements ? String(body.loadingRequirements) : null) : product.loadingRequirements,
+        unloadingRequirements: body.unloadingRequirements !== undefined ? (body.unloadingRequirements ? String(body.unloadingRequirements) : null) : product.unloadingRequirements,
+        sellingUnit: body.sellingUnit !== undefined ? (body.sellingUnit ? String(body.sellingUnit) : null) : product.sellingUnit,
+        unitDimensionsJson: body.unitDimensionsJson !== undefined ? (body.unitDimensionsJson ? (typeof body.unitDimensionsJson === 'object' ? JSON.stringify(body.unitDimensionsJson) : String(body.unitDimensionsJson)) : null) : product.unitDimensionsJson,
         hasWarranty: hasWarranty !== undefined ? Boolean(hasWarranty) : product.hasWarranty,
         warrantyPeriod: warrantyPeriod !== undefined ? (warrantyPeriod || null) : product.warrantyPeriod,
         warrantyPolicy: warrantyPolicy !== undefined ? (warrantyPolicy || null) : product.warrantyPolicy,
@@ -2692,10 +2764,25 @@ async function getFullSellerOrder(sellerOrderId: string) {
               id: true,
               nameAr: true,
               nameEn: true,
+              fulfillmentType: true,
+              digitalDeliveryType: true,
+              digitalInstructions: true,
               images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
             },
           },
           variant: { select: { id: true, nameAr: true, nameEn: true, sku: true, price: true, image: true } },
+          digitalFulfillment: {
+            select: {
+              id: true,
+              status: true,
+              deliveryType: true,
+              maskedPayload: true,
+              downloadUrl: true,
+              downloadExpiresAt: true,
+              failureReason: true,
+              fulfilledAt: true,
+            },
+          },
         },
       },
       deliveryMethod: true,
@@ -2816,6 +2903,118 @@ router.post(['/me/orders/:id/shipped', '/me/orders/:id/ship'], async (req: Reque
 
     const fullOrder = await getFullSellerOrder(resolvedId);
     ResponseUtil.success(res, fullOrder || result.sellerOrder, 'تم شحن الطلب بنجاح وهو بانتظار استلام العميل');
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /me/orders/:id/fulfill-digital — Execute digital fulfillment for seller's digital order items
+router.post('/me/orders/:id/fulfill-digital', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const seller = await getSeller(req.user!.userId);
+    const resolvedId = await resolveSellerOrderId(seller.id, String(req.params.id));
+
+    const sellerOrder = await prisma.sellerOrder.findUnique({
+      where: { id: resolvedId },
+      include: {
+        order: { include: { payment: true } },
+        items: {
+          where: { fulfillmentType: 'DIGITAL' },
+          include: { digitalFulfillment: true, product: true },
+        },
+      },
+    });
+
+    if (!sellerOrder) throw new AppError('طلب المتجر غير موجود', 404);
+
+    if (sellerOrder.items.length === 0) {
+      throw new AppError('لا يحتوي هذا الطلب على أي منتجات رقمية للتنفيذ', 400);
+    }
+
+    if (sellerOrder.order?.payment?.status !== PaymentStatus.PAID) {
+      throw new AppError('لا يمكن تنفيذ التسليم الرقمي قبل تأكيد واعتماد سداد الطلب', 400, 'PAYMENT_VERIFICATION_REQUIRED');
+    }
+
+    const { itemId, manualPayload } = req.body;
+    const itemsToFulfill = itemId
+      ? sellerOrder.items.filter((it) => it.id === itemId)
+      : sellerOrder.items.filter((it) => it.digitalFulfillmentStatus !== DigitalFulfillmentStatus.FULFILLED);
+
+    if (itemsToFulfill.length === 0) {
+      const fullOrder = await getFullSellerOrder(resolvedId);
+      return ResponseUtil.success(res, fullOrder, 'جميع المنتجات الرقمية مسلّمة بالفعل');
+    }
+
+    const fulfillmentResults = [];
+    for (const it of itemsToFulfill) {
+      if (manualPayload && it.id === itemId) {
+        // Manual override for special service, voucher or license key
+        const enc = digitalFulfillmentService.encryptSensitivePayload(manualPayload);
+        const masked = digitalFulfillmentService.maskCode(manualPayload);
+        const updatedDf = await prisma.digitalFulfillment.upsert({
+          where: { orderItemId: it.id },
+          update: {
+            status: DigitalFulfillmentStatus.FULFILLED,
+            encryptedPayload: enc,
+            maskedPayload: masked,
+            failureReason: null,
+            fulfilledAt: new Date(),
+          },
+          create: {
+            orderItemId: it.id,
+            orderId: sellerOrder.orderId,
+            sellerOrderId: sellerOrder.id,
+            productId: it.productId,
+            customerId: sellerOrder.order.userId,
+            deliveryType: it.product.digitalDeliveryType || DigitalDeliveryType.CODE,
+            status: DigitalFulfillmentStatus.FULFILLED,
+            idempotencyKey: `seller_ful_${it.id}_${Date.now()}`,
+            encryptedPayload: enc,
+            maskedPayload: masked,
+            fulfilledAt: new Date(),
+          },
+        });
+        await prisma.orderItem.update({
+          where: { id: it.id },
+          data: { digitalFulfillmentStatus: DigitalFulfillmentStatus.FULFILLED },
+        });
+        fulfillmentResults.push(updatedDf);
+      } else {
+        const resFmt = await digitalFulfillmentService.fulfillDigitalItem({
+          orderItemId: it.id,
+          actorId: req.user!.userId,
+          actorRole: 'SELLER',
+          ipAddress: req.ip,
+          userAgent: req.headers['user-agent'],
+        });
+        fulfillmentResults.push(resFmt.fulfillment);
+      }
+    }
+
+    // If all items in this sellerOrder are digital and now fulfilled, transition seller order to DELIVERED
+    const allSellerItems = await prisma.orderItem.findMany({
+      where: { sellerOrderId: resolvedId },
+    });
+    const allAreDigitalAndFulfilled = allSellerItems.every(
+      (it) => it.fulfillmentType === 'DIGITAL' && it.digitalFulfillmentStatus === DigitalFulfillmentStatus.FULFILLED
+    );
+
+    if (allAreDigitalAndFulfilled) {
+      try {
+        await OrderStateMachine.transitionSellerOrder({
+          sellerOrderId: resolvedId,
+          targetStatus: SellerOrderStatus.DELIVERED,
+          changedBy: req.user!.userId,
+          changedByRole: 'SELLER',
+          note: 'تم إتمام التسليم الرقمي بنجاح للعميل',
+        });
+      } catch (transErr: any) {
+        console.warn('[SellerDigitalFulfillment] failed to transition to DELIVERED:', transErr.message);
+      }
+    }
+
+    const fullOrder = await getFullSellerOrder(resolvedId);
+    ResponseUtil.success(res, fullOrder, 'تم إتمام التسليم الرقمي بنجاح');
   } catch (error) {
     next(error);
   }

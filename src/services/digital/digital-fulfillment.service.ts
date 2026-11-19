@@ -9,6 +9,8 @@ import {
 } from '@prisma/client';
 import { AppError } from '../../middleware/error.middleware';
 import { UrlSecurityUtil } from '../../utils/url-security.util';
+import { notificationDispatcher } from '../../modules/notifications/services/notification-dispatcher';
+import { NotificationEventFactory } from '../../modules/notifications/events/domain-events';
 
 export const ELIGIBLE_DIGITAL_SUBCATEGORY_SLUGS = Object.freeze([
   'mobile-recharge',
@@ -17,6 +19,8 @@ export const ELIGIBLE_DIGITAL_SUBCATEGORY_SLUGS = Object.freeze([
   'gaming-gift-cards',
   'digital-subscriptions',
   'software-licenses',
+  'other-digital-products',
+  'digital-gift-cards',
 ]);
 
 /**
@@ -227,6 +231,7 @@ export class DigitalFulfillmentService {
         product: true,
         sellerOrder: {
           include: {
+            seller: { select: { userId: true } },
             order: {
               include: { payment: true },
             },
@@ -373,6 +378,49 @@ export class DigitalFulfillmentService {
       },
     });
 
+    // Dispatch push notifications based on digital fulfillment outcome
+    try {
+      if (fulfillmentStatus === DigitalFulfillmentStatus.FULFILLED) {
+        if (order.userId) {
+          notificationDispatcher.dispatch(
+            NotificationEventFactory.digitalOrderFulfilledEvent({
+              recipientId: order.userId,
+              orderId: order.id,
+              orderNumber: order.orderNumber,
+              totalAmount: Number(order.total || 0),
+            })
+          ).catch(() => {});
+        }
+        const sellerUserId = orderItem.sellerOrder.seller?.userId;
+        if (sellerUserId) {
+          notificationDispatcher.dispatch(
+            NotificationEventFactory.sellerDigitalOrderFulfilledEvent({
+              recipientId: sellerUserId,
+              orderId: order.id,
+              sellerOrderId: orderItem.sellerOrderId,
+              orderNumber: orderItem.sellerOrder.sellerOrderNumber || order.orderNumber,
+              totalAmount: Number(orderItem.totalPrice || 0),
+            })
+          ).catch(() => {});
+        }
+      } else if (fulfillmentStatus === DigitalFulfillmentStatus.PENDING && failureReason === 'OUT_OF_DIGITAL_CODES') {
+        const sellerUserId = orderItem.sellerOrder.seller?.userId;
+        if (sellerUserId) {
+          notificationDispatcher.dispatch(
+            NotificationEventFactory.sellerDigitalStockEmptyEvent({
+              recipientId: sellerUserId,
+              orderId: order.id,
+              sellerOrderId: orderItem.sellerOrderId,
+              orderNumber: orderItem.sellerOrder.sellerOrderNumber || order.orderNumber,
+              productName: product.nameAr || product.nameEn,
+            })
+          ).catch(() => {});
+        }
+      }
+    } catch (notifErr: any) {
+      console.warn('[DigitalFulfillment] Failed to dispatch notifications:', notifErr.message);
+    }
+
     return { fulfillment, alreadyFulfilled: false };
   }
 
@@ -457,6 +505,21 @@ export class DigitalFulfillmentService {
         details: JSON.stringify({ accessedAt: new Date().toISOString() }),
       },
     });
+
+    // Security notification to customer when code is revealed
+    try {
+      if (customerId) {
+        notificationDispatcher.dispatch(
+          NotificationEventFactory.digitalCodeAccessedEvent({
+            recipientId: customerId,
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+          })
+        ).catch(() => {});
+      }
+    } catch (notifErr: any) {
+      console.warn('[DigitalFulfillment] Failed to dispatch code access security notification:', notifErr.message);
+    }
 
     return {
       orderItemId: orderItem.id,

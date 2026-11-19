@@ -43,7 +43,7 @@ export class LauncherCampaignService {
     isSeasonal = false
   ): string {
     const defaultVal = appType === 'CUSTOMER' ? 'default' : 'seller_default';
-    const seasonalVal = appType === 'CUSTOMER' ? 'sale_1_1' : 'seller_seasonal';
+    const seasonalVal = appType === 'CUSTOMER' ? 'sale_1_1' : 'seller_sale_1_1';
 
     if (!raw) return isSeasonal ? seasonalVal : defaultVal;
     const lower = raw.trim().toLowerCase();
@@ -56,7 +56,11 @@ export class LauncherCampaignService {
 
     const exact = approvedList.find((id) => lower === id);
     if (exact) {
-      return exact.startsWith('customer_') ? exact.replace(/^customer_/, '') : exact;
+      if (exact.startsWith('customer_')) return exact.replace(/^customer_/, '');
+      if (appType === 'SELLER' && !exact.startsWith('seller_') && exact !== 'default') {
+        return `seller_${exact}`;
+      }
+      return exact;
     }
 
     // Sort longest first so 'sale_11_11' matches before 'sale_1_1'
@@ -70,7 +74,9 @@ export class LauncherCampaignService {
           id !== 'customer_default' &&
           (lower.includes(id) || lower.includes(`_${id}`) || lower.includes(`_${id}.`) || lower.includes(`/${id}.`))
         ) {
-          return id.startsWith('customer_') ? id.replace(/^customer_/, '') : id;
+          if (id.startsWith('customer_')) return id.replace(/^customer_/, '');
+          if (appType === 'SELLER' && !id.startsWith('seller_')) return `seller_${id}`;
+          return id;
         }
       }
       return seasonalVal;
@@ -84,7 +90,9 @@ export class LauncherCampaignService {
         lower.includes(`/${id}.`) ||
         lower.endsWith(`/${id}`)
       ) {
-        return id.startsWith('customer_') ? id.replace(/^customer_/, '') : id;
+        if (id.startsWith('customer_')) return id.replace(/^customer_/, '');
+        if (appType === 'SELLER' && !id.startsWith('seller_') && id !== 'default') return `seller_${id}`;
+        return id;
       }
     }
 

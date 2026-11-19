@@ -52,7 +52,7 @@ async function runBrandingIconTests() {
   // TEST 1: APPROVED ICON REGISTRY
   // ═════════════════════════════════════════════════════════════════════════════
   console.log('1. Checking approved icon registry...');
-  assert(APPROVED_CUSTOMER_APP_ICONS.length === 20, 'APPROVED_CUSTOMER_APP_ICONS must contain 20 variants (default + 7 seasonal + 1.1..12.12)');
+  assert(APPROVED_CUSTOMER_APP_ICONS.length === 23, 'APPROVED_CUSTOMER_APP_ICONS must contain 23 variants (default + 10 seasonal + 1.1..12.12)');
   assert(APPROVED_CUSTOMER_APP_ICONS.includes('default'), 'Contains default');
   assert(APPROVED_CUSTOMER_APP_ICONS.includes('ramadan'), 'Contains ramadan');
   assert(APPROVED_CUSTOMER_APP_ICONS.includes('eid_adha'), 'Contains eid_adha');
@@ -60,12 +60,15 @@ async function runBrandingIconTests() {
   assert(APPROVED_CUSTOMER_APP_ICONS.includes('new_year'), 'Contains new_year');
   assert(APPROVED_CUSTOMER_APP_ICONS.includes('valentine'), 'Contains valentine');
   assert(APPROVED_CUSTOMER_APP_ICONS.includes('black_friday'), 'Contains black_friday');
+  assert(APPROVED_CUSTOMER_APP_ICONS.includes('white_friday'), 'Contains white_friday');
+  assert(APPROVED_CUSTOMER_APP_ICONS.includes('winter'), 'Contains winter');
+  assert(APPROVED_CUSTOMER_APP_ICONS.includes('hijri_new_year'), 'Contains hijri_new_year');
   assert(APPROVED_CUSTOMER_APP_ICONS.includes('brand_glossy'), 'Contains brand_glossy');
   assert(APPROVED_CUSTOMER_APP_ICONS.includes('sale_1_1'), 'Contains sale_1_1');
   assert(APPROVED_CUSTOMER_APP_ICONS.includes('sale_6_6'), 'Contains sale_6_6');
   assert(APPROVED_CUSTOMER_APP_ICONS.includes('sale_11_11'), 'Contains sale_11_11');
   assert(APPROVED_CUSTOMER_APP_ICONS.includes('sale_12_12'), 'Contains sale_12_12');
-  console.log('  ✓ PASS: Approved icons registry contains all 20 variants');
+  console.log('  ✓ PASS: Approved icons registry contains all 23 variants');
 
   // ═════════════════════════════════════════════════════════════════════════════
   // TEST 2: UPLOAD DEFAULT CUSTOMER APP ICON

@@ -162,6 +162,117 @@ export class NotificationEventFactory {
     });
   }
 
+  // ── Digital Products ────────────────────────────────────────────────────────
+  static digitalOrderFulfilledEvent(params: {
+    recipientId: string;
+    orderId: string;
+    orderNumber: string;
+    totalAmount?: number;
+  }): DomainNotificationEvent {
+    return {
+      eventId: randomUUID(),
+      idempotencyKey: `dig_ful_${params.orderId}_${params.recipientId}`,
+      eventType: 'DIGITAL_ORDER_FULFILLED',
+      category: NotificationCategory.ORDER,
+      priority: NotificationPriority.HIGH,
+      recipientId: params.recipientId,
+      recipientType: AppType.CUSTOMER,
+      entityType: 'order',
+      entityId: params.orderId,
+      data: {
+        orderId: params.orderId,
+        orderNumber: params.orderNumber,
+        totalAmount: params.totalAmount,
+      },
+      bypassQuietHours: true,
+      bypassRateLimit: true,
+      createdAt: new Date(),
+    };
+  }
+
+  static digitalCodeAccessedEvent(params: {
+    recipientId: string;
+    orderId: string;
+    orderNumber: string;
+  }): DomainNotificationEvent {
+    return {
+      eventId: randomUUID(),
+      idempotencyKey: `dig_sec_${params.orderId}_${Date.now()}`,
+      eventType: 'DIGITAL_CODE_ACCESSED',
+      category: NotificationCategory.SECURITY,
+      priority: NotificationPriority.URGENT,
+      recipientId: params.recipientId,
+      recipientType: AppType.CUSTOMER,
+      entityType: 'order',
+      entityId: params.orderId,
+      data: {
+        orderId: params.orderId,
+        orderNumber: params.orderNumber,
+      },
+      bypassQuietHours: true,
+      bypassRateLimit: true,
+      createdAt: new Date(),
+    };
+  }
+
+  static sellerDigitalOrderFulfilledEvent(params: {
+    recipientId: string;
+    orderId: string;
+    sellerOrderId: string;
+    orderNumber: string;
+    totalAmount?: number;
+  }): DomainNotificationEvent {
+    return {
+      eventId: randomUUID(),
+      idempotencyKey: `seller_dig_${params.sellerOrderId}_${params.recipientId}`,
+      eventType: 'SELLER_DIGITAL_ORDER_FULFILLED',
+      category: NotificationCategory.SELLER,
+      priority: NotificationPriority.HIGH,
+      recipientId: params.recipientId,
+      recipientType: AppType.SELLER,
+      entityType: 'sellerOrder',
+      entityId: params.sellerOrderId,
+      data: {
+        orderId: params.orderId,
+        sellerOrderId: params.sellerOrderId,
+        orderNumber: params.orderNumber,
+        totalAmount: params.totalAmount,
+      },
+      bypassQuietHours: false,
+      bypassRateLimit: true,
+      createdAt: new Date(),
+    };
+  }
+
+  static sellerDigitalStockEmptyEvent(params: {
+    recipientId: string;
+    orderId: string;
+    sellerOrderId: string;
+    orderNumber: string;
+    productName?: string;
+  }): DomainNotificationEvent {
+    return {
+      eventId: randomUUID(),
+      idempotencyKey: `seller_dig_empty_${params.sellerOrderId}_${params.recipientId}`,
+      eventType: 'SELLER_DIGITAL_STOCK_EMPTY',
+      category: NotificationCategory.STOCK_ALERT,
+      priority: NotificationPriority.URGENT,
+      recipientId: params.recipientId,
+      recipientType: AppType.SELLER,
+      entityType: 'sellerOrder',
+      entityId: params.sellerOrderId,
+      data: {
+        orderId: params.orderId,
+        sellerOrderId: params.sellerOrderId,
+        orderNumber: params.orderNumber,
+        productName: params.productName,
+      },
+      bypassQuietHours: true,
+      bypassRateLimit: true,
+      createdAt: new Date(),
+    };
+  }
+
   // ── Payments ──────────────────────────────────────────────────────────────
   static paymentEvent(params: {
     eventType:

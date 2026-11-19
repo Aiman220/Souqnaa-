@@ -122,9 +122,12 @@ export function formatProductForClient(product: any, campaignPresentation?: any)
     ? rawSold
     : (typeof rawSold === 'string' ? parseInt(rawSold, 10) || 0 : 0);
 
-  const presentation = campaignPresentation !== undefined
-    ? campaignPresentation
-    : (product.campaignPresentation ?? null);
+  const isDigital = product.fulfillmentType === 'DIGITAL';
+  const presentation = isDigital
+    ? null
+    : (campaignPresentation !== undefined
+      ? campaignPresentation
+      : (product.campaignPresentation ?? null));
 
   return {
     ...product,
@@ -142,7 +145,7 @@ export function formatProductForClient(product: any, campaignPresentation?: any)
     images,
     store,
     fulfillmentType: product.fulfillmentType || 'PHYSICAL',
-    isDigital: product.fulfillmentType === 'DIGITAL',
+    isDigital,
     digitalDeliveryType: product.digitalDeliveryType || null,
     digitalInstructions: product.digitalInstructions || null,
     campaignPresentation: presentation,

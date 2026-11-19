@@ -189,6 +189,13 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       if (destination && stores.length > 0) {
         await Promise.all(
           stores.map(async (s: any) => {
+            const isStoreDigitalOnly = s.items.length > 0 && s.items.every((it: any) => it.product?.fulfillmentType === 'DIGITAL');
+            if (isStoreDigitalOnly) {
+              s.isDeliverable = true;
+              s.deliveryReason = 'DIGITAL_FULFILLMENT';
+              s.deliveryReasonAr = 'تسليم رقمي فوري لجميع المدن والمحافظات';
+              return;
+            }
             const evalRes = await deliveryServiceabilityService.evaluateStoreServiceability(s.store, destination);
             s.isDeliverable = evalRes.isDeliverable;
             s.deliveryReason = evalRes.reason;
@@ -197,6 +204,11 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
           })
         );
       }
+    }
+
+    const isCartDigitalOnly = cart.items.length > 0 && cart.items.every((it: any) => it.product?.fulfillmentType === 'DIGITAL');
+    if (isCartDigitalOnly) {
+      allStoresDeliverable = true;
     }
 
     ResponseUtil.success(res, {

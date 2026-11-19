@@ -9,6 +9,7 @@ import { supportedAreasService, STRICTLY_SUPPORTED_AREAS } from '../../modules/l
 import { RemoteConfigService } from '../../modules/remote-config/remote-config.service';
 import { config } from '../../config';
 import { deliverySlotService } from './delivery-slot.service';
+import { type HeavyProductShippingInput } from './heavy-delivery.service';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
@@ -25,6 +26,9 @@ export interface SellerOrderInput {
   heightCm?: number;
   isRemoteArea?: boolean;
   isSpecialHandling?: boolean;
+  heavyItems?: HeavyProductShippingInput[];
+  accessSurcharge?: number;
+  isDigital?: boolean;
 }
 
 export interface StoreAvailabilityStatus {
@@ -207,7 +211,15 @@ export class DeliveryQuoteService {
     } = request;
 
     // 0. Handle digital-only orders (no physical delivery fees, no address/distance checks)
-    if (request.isDigitalOnly) {
+    const isDigitalOnlyOrder = Boolean(
+      request.isDigitalOnly ||
+      (sellerOrders.length > 0 && sellerOrders.every((so) =>
+        so.isDigital ||
+        (so.heavyItems && so.heavyItems.length > 0 && so.heavyItems.every((it) => it.isDigital))
+      ))
+    );
+
+    if (isDigitalOnlyOrder) {
       return {
         deliveryAvailable: true,
         isDigitalOnly: true,
@@ -374,6 +386,38 @@ export class DeliveryQuoteService {
         isRemoteArea,
         isSpecialHandling,
       } = soInput;
+
+      // Authoritative Digital Seller Check (§1, §2):
+      // If this seller sub-order only contains digital products, delivery fee is strictly zero.
+      const isSellerDigitalOnly = Boolean(
+        soInput.isDigital ||
+        (soInput.heavyItems && soInput.heavyItems.length > 0 && soInput.heavyItems.every((it) => it.isDigital))
+      );
+
+      if (isSellerDigitalOnly) {
+        return {
+          deliveryAvailable: true,
+          sellerId: sellerId || storeMap.get(storeId)?.sellerId || storeMap.get(sellerId)?.sellerId || 'seller',
+          storeId: storeId || 'store',
+          storeName: storeMap.get(storeId)?.name || 'التسليم الرقمي',
+          distanceKm: 0,
+          durationMinutes: 0,
+          zoneId: null,
+          zoneName: 'التسليم الرقمي',
+          baseFee: 0,
+          extraSellerFee: 0,
+          weightFee: 0,
+          slotFee: 0,
+          expressFee: 0,
+          deliveryDiscount: 0,
+          deliveryFee: 0,
+          currency: config.marketplace.currency || 'YER',
+          pricingVersion: 'digital-v1',
+          isExpress: false,
+          isDigital: true,
+        };
+      }
+
       const store = (storeId ? storeMap.get(storeId) : null) || (sellerId ? storeMap.get(sellerId) : null);
 
       if (store) {
@@ -395,6 +439,20 @@ export class DeliveryQuoteService {
         ? itemExpress
         : (itemDeliveryMethod?.toLowerCase() === 'express' || isExpress);
 
+      // In mixed orders, filter out digital items so only physical items contribute weight and volume
+      const physicalHeavyItems = soInput.heavyItems
+        ? soInput.heavyItems.filter((it) => !it.isDigital)
+        : undefined;
+
+      let effectiveWeightKg = weightKg;
+      if (soInput.heavyItems && soInput.heavyItems.length > 0) {
+        const physicalWeight = (physicalHeavyItems || []).reduce(
+          (sum, it) => sum + ((it.weightKg || it.packageWeightKg || 0) * (it.quantity || 1)),
+          0
+        );
+        effectiveWeightKg = physicalWeight;
+      }
+
       const options: DeliveryFeeOptions = {
         isExpress: sellerIsExpress,
         discountAmount,
@@ -403,12 +461,15 @@ export class DeliveryQuoteService {
         deliveryMethodCode: itemDeliveryMethod || deliveryMethod || 'intercity_transport',
         originAreaId,
         destinationAreaId,
-        weightKg,
+        weightKg: effectiveWeightKg,
         lengthCm,
         widthCm,
         heightCm,
         isRemoteArea,
         isSpecialHandling,
+        heavyItems: physicalHeavyItems,
+        accessSurcharge: soInput.accessSurcharge,
+        isDigital: false,
       };
 
       const quote = await deliveryFeeService.calculateFee(
@@ -597,6 +658,22 @@ export class DeliveryQuoteService {
       }),
     } : {};
 
+    const heavySnapshotData = {
+      deliveryMode: quote.deliveryMode || (quote.isInterGovernorate ? 'HEAVY_INTER_GOVERNORATE' : 'STANDARD_PARCEL'),
+      vehicleClass: quote.vehicleClass,
+      vehicleClassNameAr: quote.vehicleClassNameAr,
+      vehicleClassNameEn: quote.vehicleClassNameEn,
+      quoteType: quote.quoteType || 'AUTOMATIC_QUOTE',
+      quoteReason: quote.quoteReason,
+      palletCount: quote.palletCount,
+      loadingFee: quote.loadingFee ?? 0,
+      unloadingFee: quote.unloadingFee ?? 0,
+      forkliftFee: quote.forkliftFee ?? 0,
+      craneFee: quote.craneFee ?? 0,
+      accessSurcharge: quote.accessSurcharge ?? 0,
+      requiresManualQuote: Boolean(quote.requiresManualQuote),
+    };
+
     await prisma.deliveryQuoteSnapshot.upsert({
       where: { sellerOrderId },
       update: {
@@ -618,6 +695,7 @@ export class DeliveryQuoteService {
         zonePricingId: quote.zoneId,
         ...slotData,
         ...interGovSnapshotData,
+        ...heavySnapshotData,
       },
       create: {
         sellerOrderId,
@@ -638,6 +716,7 @@ export class DeliveryQuoteService {
         zonePricingId: quote.zoneId,
         ...slotData,
         ...interGovSnapshotData,
+        ...heavySnapshotData,
       },
     });
 

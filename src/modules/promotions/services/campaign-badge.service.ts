@@ -488,11 +488,22 @@ export class CampaignBadgeService {
       storeId?: string | null;
       store?: { sellerId?: string | null; id?: string | null } | null;
       isActive?: boolean;
+      fulfillmentType?: string | null;
+      isDigital?: boolean;
     },
     activeCampaigns: CachedActiveCampaign[],
     locale = 'ar'
   ): CampaignPresentationDTO | null {
     if (!product || !activeCampaigns || activeCampaigns.length === 0) {
+      return null;
+    }
+
+    // Business Rule: Digital products must never have promotional/shipping campaign badges attached
+    if (
+      product.isDigital === true ||
+      (typeof product.fulfillmentType === 'string' &&
+        product.fulfillmentType.toUpperCase() === 'DIGITAL')
+    ) {
       return null;
     }
 
@@ -603,6 +614,14 @@ export class CampaignBadgeService {
 
     for (const prod of products) {
       if (!prod || !prod.id) continue;
+      // Digital products must never have promotional/shipping campaign badges attached
+      if (
+        prod.isDigital === true ||
+        (typeof prod.fulfillmentType === 'string' &&
+          prod.fulfillmentType.toUpperCase() === 'DIGITAL')
+      ) {
+        continue;
+      }
       const presentation = this.resolvePresentationForProduct(prod, activeCampaigns, locale);
       if (presentation) {
         resultMap.set(prod.id, presentation);

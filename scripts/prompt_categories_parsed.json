@@ -1,0 +1,1374 @@
+[
+  {
+    "index": 1,
+    "nameEn": "Electronics & Technology",
+    "nameAr": "الإلكترونيات والتقنية",
+    "subcategories": [
+      {
+        "nameEn": "Mobile Phones",
+        "nameAr": "الهواتف المحمولة"
+      },
+      {
+        "nameEn": "Tablets",
+        "nameAr": "الأجهزة اللوحية"
+      },
+      {
+        "nameEn": "Mobile Phone Accessories",
+        "nameAr": "إكسسوارات الهواتف"
+      },
+      {
+        "nameEn": "Laptop Computers",
+        "nameAr": "أجهزة اللابتوب"
+      },
+      {
+        "nameEn": "Desktop Computers",
+        "nameAr": "أجهزة الكمبيوتر المكتبية"
+      },
+      {
+        "nameEn": "Computer Accessories",
+        "nameAr": "إكسسوارات الكمبيوتر"
+      },
+      {
+        "nameEn": "Computer Components",
+        "nameAr": "مكونات الكمبيوتر"
+      },
+      {
+        "nameEn": "RAM",
+        "nameAr": "ذاكرة الوصول العشوائي"
+      },
+      {
+        "nameEn": "USB Flash Drives",
+        "nameAr": "وحدات تخزين USB"
+      },
+      {
+        "nameEn": "Hard Disk Drives (HDD)",
+        "nameAr": "الأقراص الصلبة"
+      },
+      {
+        "nameEn": "Solid State Drives (SSD)",
+        "nameAr": "أقراص SSD"
+      },
+      {
+        "nameEn": "Memory Cards",
+        "nameAr": "بطاقات الذاكرة"
+      },
+      {
+        "nameEn": "Electronic Spare Parts",
+        "nameAr": "قطع غيار الإلكترونيات"
+      },
+      {
+        "nameEn": "Mobile Phone Spare Parts",
+        "nameAr": "قطع غيار الهواتف"
+      },
+      {
+        "nameEn": "Computer Spare Parts",
+        "nameAr": "قطع غيار الكمبيوتر"
+      },
+      {
+        "nameEn": "Networking Equipment",
+        "nameAr": "معدات الشبكات"
+      },
+      {
+        "nameEn": "Internet Routers",
+        "nameAr": "أجهزة الراوتر"
+      },
+      {
+        "nameEn": "Internet Modems",
+        "nameAr": "أجهزة المودم"
+      },
+      {
+        "nameEn": "Network Accessories",
+        "nameAr": "إكسسوارات الشبكات"
+      },
+      {
+        "nameEn": "Televisions",
+        "nameAr": "أجهزة التلفزيون"
+      },
+      {
+        "nameEn": "Monitors & Displays",
+        "nameAr": "الشاشات"
+      },
+      {
+        "nameEn": "Audio Equipment",
+        "nameAr": "الأجهزة الصوتية"
+      },
+      {
+        "nameEn": "Headphones & Speakers",
+        "nameAr": "سماعات الرأس ومكبرات الصوت"
+      },
+      {
+        "nameEn": "Cameras & Photography",
+        "nameAr": "الكاميرات والتصوير"
+      },
+      {
+        "nameEn": "Gaming Consoles & Accessories",
+        "nameAr": "أجهزة الألعاب وملحقاتها"
+      },
+      {
+        "nameEn": "Smart Home Devices",
+        "nameAr": "أجهزة المنزل الذكي"
+      },
+      {
+        "nameEn": "Electronic Components & Accessories",
+        "nameAr": "المكونات والإكسسوارات الإلكترونية"
+      },
+      {
+        "nameEn": "Other",
+        "nameAr": "أخرى"
+      }
+    ]
+  },
+  {
+    "index": 2,
+    "nameEn": "Fashion, Clothing & Jewelry",
+    "nameAr": "الأزياء والملابس والمجوهرات",
+    "subcategories": [
+      {
+        "nameEn": "Men's Clothing",
+        "nameAr": "ملابس رجالية"
+      },
+      {
+        "nameEn": "Women's Clothing",
+        "nameAr": "ملابس نسائية"
+      },
+      {
+        "nameEn": "Children's Clothing",
+        "nameAr": "ملابس الأطفال"
+      },
+      {
+        "nameEn": "Men's Shoes",
+        "nameAr": "أحذية رجالية"
+      },
+      {
+        "nameEn": "Women's Shoes",
+        "nameAr": "أحذية نسائية"
+      },
+      {
+        "nameEn": "Children's Shoes",
+        "nameAr": "أحذية الأطفال"
+      },
+      {
+        "nameEn": "Bags & Wallets",
+        "nameAr": "الحقائب والمحافظ"
+      },
+      {
+        "nameEn": "Watches",
+        "nameAr": "الساعات"
+      },
+      {
+        "nameEn": "Gold Jewelry",
+        "nameAr": "مجوهرات الذهب"
+      },
+      {
+        "nameEn": "Silver Jewelry",
+        "nameAr": "مجوهرات الفضة"
+      },
+      {
+        "nameEn": "Diamond Jewelry",
+        "nameAr": "مجوهرات الألماس"
+      },
+      {
+        "nameEn": "Rings",
+        "nameAr": "الخواتم"
+      },
+      {
+        "nameEn": "Necklaces",
+        "nameAr": "القلائد"
+      },
+      {
+        "nameEn": "Bracelets",
+        "nameAr": "الأساور"
+      },
+      {
+        "nameEn": "Earrings",
+        "nameAr": "الأقراط"
+      },
+      {
+        "nameEn": "Jewelry Sets",
+        "nameAr": "أطقم المجوهرات"
+      },
+      {
+        "nameEn": "Yemeni Traditional Jewelry",
+        "nameAr": "المجوهرات اليمنية التقليدية"
+      },
+      {
+        "nameEn": "Jewelry Boxes & Accessories",
+        "nameAr": "علب وإكسسوارات المجوهرات"
+      },
+      {
+        "nameEn": "Fashion Accessories",
+        "nameAr": "إكسسوارات الأزياء"
+      },
+      {
+        "nameEn": "Yemeni Traditional Clothing",
+        "nameAr": "الملابس اليمنية التقليدية"
+      },
+      {
+        "nameEn": "Jambiyas",
+        "nameAr": "الجنابي"
+      },
+      {
+        "nameEn": "Jambiya Belts & Accessories",
+        "nameAr": "أحزمة الجنابي ومستلزماتها"
+      },
+      {
+        "nameEn": "Yemeni Traditional Belts",
+        "nameAr": "الأحزمة اليمنية التقليدية"
+      },
+      {
+        "nameEn": "Shawls",
+        "nameAr": "الشيلان"
+      },
+      {
+        "nameEn": "Traditional Headwear (Al-Osob)",
+        "nameAr": "العُصُب وأغطية الرأس التقليدية"
+      },
+      {
+        "nameEn": "Other",
+        "nameAr": "أخرى"
+      }
+    ]
+  },
+  {
+    "index": 3,
+    "nameEn": "Beauty & Personal Care",
+    "nameAr": "الجمال والعناية الشخصية",
+    "subcategories": [
+      {
+        "nameEn": "Skincare",
+        "nameAr": "العناية بالبشرة"
+      },
+      {
+        "nameEn": "Makeup & Cosmetics",
+        "nameAr": "المكياج ومستحضرات التجميل"
+      },
+      {
+        "nameEn": "Hair Care Products",
+        "nameAr": "منتجات العناية بالشعر"
+      },
+      {
+        "nameEn": "Hair Styling Tools",
+        "nameAr": "أدوات تصفيف الشعر"
+      },
+      {
+        "nameEn": "Perfumes & Fragrances",
+        "nameAr": "العطور"
+      },
+      {
+        "nameEn": "Men's Grooming",
+        "nameAr": "العناية الشخصية للرجال"
+      },
+      {
+        "nameEn": "Bath & Body Products",
+        "nameAr": "منتجات الاستحمام والعناية بالجسم"
+      },
+      {
+        "nameEn": "Personal Hygiene",
+        "nameAr": "النظافة الشخصية"
+      },
+      {
+        "nameEn": "Beauty Accessories",
+        "nameAr": "إكسسوارات التجميل"
+      },
+      {
+        "nameEn": "Other",
+        "nameAr": "أخرى"
+      }
+    ]
+  },
+  {
+    "index": 4,
+    "nameEn": "Home & Furniture",
+    "nameAr": "المنزل والأثاث",
+    "subcategories": [
+      {
+        "nameEn": "Living Room Furniture",
+        "nameAr": "أثاث غرف المعيشة"
+      },
+      {
+        "nameEn": "Bedroom Furniture",
+        "nameAr": "أثاث غرف النوم"
+      },
+      {
+        "nameEn": "Dining Room Furniture",
+        "nameAr": "أثاث غرف الطعام"
+      },
+      {
+        "nameEn": "Office Furniture",
+        "nameAr": "أثاث المكاتب"
+      },
+      {
+        "nameEn": "Home Decoration",
+        "nameAr": "ديكورات المنزل"
+      },
+      {
+        "nameEn": "Home Lighting",
+        "nameAr": "إضاءة المنزل"
+      },
+      {
+        "nameEn": "Curtains & Blinds",
+        "nameAr": "الستائر"
+      },
+      {
+        "nameEn": "Carpets & Rugs",
+        "nameAr": "السجاد والموكيت"
+      },
+      {
+        "nameEn": "Bedding & Mattresses",
+        "nameAr": "المفروشات والمراتب"
+      },
+      {
+        "nameEn": "Bathroom Accessories",
+        "nameAr": "إكسسوارات الحمامات"
+      },
+      {
+        "nameEn": "Home Storage & Organization",
+        "nameAr": "التخزين والتنظيم المنزلي"
+      },
+      {
+        "nameEn": "Plastic Storage Cabinets",
+        "nameAr": "الخزنات والدواليب البلاستيكية"
+      },
+      {
+        "nameEn": "Plastic Drawers & Organizers",
+        "nameAr": "الأدراج والمنظمات البلاستيكية"
+      },
+      {
+        "nameEn": "Shelves & Racks",
+        "nameAr": "الأرفف وحوامل التخزين"
+      },
+      {
+        "nameEn": "Home Accessories",
+        "nameAr": "مستلزمات وإكسسوارات المنزل"
+      },
+      {
+        "nameEn": "Other",
+        "nameAr": "أخرى"
+      }
+    ]
+  },
+  {
+    "index": 5,
+    "nameEn": "Home Appliances",
+    "nameAr": "الأجهزة المنزلية",
+    "subcategories": [
+      {
+        "nameEn": "Refrigerators & Freezers",
+        "nameAr": "الثلاجات والمجمدات"
+      },
+      {
+        "nameEn": "Washing Machines",
+        "nameAr": "الغسالات"
+      },
+      {
+        "nameEn": "Dryers",
+        "nameAr": "المجففات"
+      },
+      {
+        "nameEn": "Air Conditioners",
+        "nameAr": "مكيفات الهواء"
+      },
+      {
+        "nameEn": "Fans & Exhaust Fans",
+        "nameAr": "المراوح وشفاطات الهواء"
+      },
+      {
+        "nameEn": "Heaters",
+        "nameAr": "أجهزة التدفئة"
+      },
+      {
+        "nameEn": "Kitchen Appliances",
+        "nameAr": "أجهزة المطبخ"
+      },
+      {
+        "nameEn": "Ovens & Cookers",
+        "nameAr": "الأفران والطباخات"
+      },
+      {
+        "nameEn": "Microwaves",
+        "nameAr": "أفران الميكروويف"
+      },
+      {
+        "nameEn": "Blenders & Juicers",
+        "nameAr": "الخلاطات والعصارات"
+      },
+      {
+        "nameEn": "Water Dispensers",
+        "nameAr": "مبردات وموزعات المياه"
+      },
+      {
+        "nameEn": "Vacuum Cleaners",
+        "nameAr": "المكانس الكهربائية"
+      },
+      {
+        "nameEn": "Small Home Appliances",
+        "nameAr": "الأجهزة المنزلية الصغيرة"
+      },
+      {
+        "nameEn": "Home Appliance Spare Parts",
+        "nameAr": "قطع غيار الأجهزة المنزلية"
+      },
+      {
+        "nameEn": "Other",
+        "nameAr": "أخرى"
+      }
+    ]
+  },
+  {
+    "index": 6,
+    "nameEn": "Automotive & Motorcycles",
+    "nameAr": "السيارات والدراجات النارية",
+    "subcategories": [
+      {
+        "nameEn": "Cars",
+        "nameAr": "السيارات"
+      },
+      {
+        "nameEn": "Motorcycles",
+        "nameAr": "الدراجات النارية"
+      },
+      {
+        "nameEn": "Electric Motorcycles",
+        "nameAr": "الدراجات النارية الكهربائية"
+      },
+      {
+        "nameEn": "Car Spare Parts",
+        "nameAr": "قطع غيار السيارات"
+      },
+      {
+        "nameEn": "Motorcycle Spare Parts",
+        "nameAr": "قطع غيار الدراجات النارية"
+      },
+      {
+        "nameEn": "Electric Motorcycle Spare Parts",
+        "nameAr": "قطع غيار الدراجات النارية الكهربائية"
+      },
+      {
+        "nameEn": "Motorcycle Accessories",
+        "nameAr": "إكسسوارات الدراجات النارية"
+      },
+      {
+        "nameEn": "Electric Motorcycle Accessories",
+        "nameAr": "إكسسوارات الدراجات النارية الكهربائية"
+      },
+      {
+        "nameEn": "Motorcycle Batteries & Charging Accessories",
+        "nameAr": "بطاريات الدراجات النارية ومستلزمات الشحن"
+      },
+      {
+        "nameEn": "Tires & Wheels",
+        "nameAr": "الإطارات والعجلات"
+      },
+      {
+        "nameEn": "Car Batteries",
+        "nameAr": "بطاريات السيارات"
+      },
+      {
+        "nameEn": "Motorcycle Engines & Components",
+        "nameAr": "محركات ومكونات الدراجات النارية"
+      },
+      {
+        "nameEn": "Oils & Automotive Fluids",
+        "nameAr": "الزيوت والسوائل"
+      },
+      {
+        "nameEn": "Car Electronics",
+        "nameAr": "إلكترونيات السيارات"
+      },
+      {
+        "nameEn": "Car Accessories",
+        "nameAr": "إكسسوارات السيارات"
+      },
+      {
+        "nameEn": "Vehicle Care & Cleaning",
+        "nameAr": "العناية بالمركبات والتنظيف"
+      },
+      {
+        "nameEn": "Helmets & Safety Equipment",
+        "nameAr": "الخوذ ومعدات السلامة"
+      },
+      {
+        "nameEn": "Car Engines",
+        "nameAr": "محركات السيارات"
+      },
+      {
+        "nameEn": "Other",
+        "nameAr": "أخرى"
+      }
+    ]
+  },
+  {
+    "index": 7,
+    "nameEn": "Solar Energy & Power Equipment",
+    "nameAr": "الطاقة الشمسية ومعدات الطاقة",
+    "subcategories": [
+      {
+        "nameEn": "Solar Panels",
+        "nameAr": "الألواح الشمسية"
+      },
+      {
+        "nameEn": "Solar Batteries",
+        "nameAr": "بطاريات الطاقة الشمسية"
+      },
+      {
+        "nameEn": "Solar Inverters",
+        "nameAr": "محولات الطاقة الشمسية"
+      },
+      {
+        "nameEn": "Solar Charge Controllers",
+        "nameAr": "منظمات الشحن"
+      },
+      {
+        "nameEn": "Solar Cables & Connectors",
+        "nameAr": "كابلات وموصلات الطاقة الشمسية"
+      },
+      {
+        "nameEn": "Solar Mounting Systems",
+        "nameAr": "هياكل تثبيت الألواح"
+      },
+      {
+        "nameEn": "Solar Protection Equipment",
+        "nameAr": "معدات الحماية الشمسية"
+      },
+      {
+        "nameEn": "Complete Solar Systems",
+        "nameAr": "أنظمة الطاقة الشمسية المتكاملة"
+      },
+      {
+        "nameEn": "Solar Installation Equipment & Accessories",
+        "nameAr": "معدات ومستلزمات تركيب الطاقة الشمسية"
+      },
+      {
+        "nameEn": "Electric Generators",
+        "nameAr": "المولدات الكهربائية"
+      },
+      {
+        "nameEn": "Diesel Generators",
+        "nameAr": "مولدات الديزل"
+      },
+      {
+        "nameEn": "Generator Spare Parts",
+        "nameAr": "قطع غيار المولدات"
+      },
+      {
+        "nameEn": "UPS Systems",
+        "nameAr": "أنظمة الطاقة غير المنقطعة"
+      },
+      {
+        "nameEn": "Backup Power Systems",
+        "nameAr": "أنظمة الطاقة الاحتياطية"
+      },
+      {
+        "nameEn": "Voltage Stabilizers",
+        "nameAr": "مثبتات ومنظمات الجهد"
+      },
+      {
+        "nameEn": "Transformers",
+        "nameAr": "المحولات الكهربائية"
+      },
+      {
+        "nameEn": "Electrical Motors",
+        "nameAr": "المحركات الكهربائية"
+      },
+      {
+        "nameEn": "Power Distribution Equipment",
+        "nameAr": "معدات توزيع الطاقة"
+      },
+      {
+        "nameEn": "Electrical Protection Equipment",
+        "nameAr": "معدات الحماية الكهربائية"
+      },
+      {
+        "nameEn": "Circuit Breakers",
+        "nameAr": "قواطع الكهرباء"
+      },
+      {
+        "nameEn": "Electrical Panels & Distribution Boards",
+        "nameAr": "لوحات الكهرباء والتوزيع"
+      },
+      {
+        "nameEn": "Power Cables & Connectors",
+        "nameAr": "كابلات وموصلات الطاقة"
+      },
+      {
+        "nameEn": "Power Supplies & Adapters",
+        "nameAr": "مزودات الطاقة والمحولات"
+      },
+      {
+        "nameEn": "Batteries & Energy Storage Systems",
+        "nameAr": "البطاريات وأنظمة تخزين الطاقة"
+      },
+      {
+        "nameEn": "Energy Monitoring Devices",
+        "nameAr": "أجهزة مراقبة الطاقة"
+      },
+      {
+        "nameEn": "Power Accessories & Spare Parts",
+        "nameAr": "إكسسوارات وقطع غيار معدات الطاقة"
+      },
+      {
+        "nameEn": "Other",
+        "nameAr": "أخرى"
+      }
+    ]
+  },
+  {
+    "index": 8,
+    "nameEn": "Water Systems & Equipment",
+    "nameAr": "أنظمة ومعدات المياه",
+    "subcategories": [
+      {
+        "nameEn": "Water Pumps",
+        "nameAr": "مضخات المياه"
+      },
+      {
+        "nameEn": "Water Tanks",
+        "nameAr": "خزانات المياه"
+      },
+      {
+        "nameEn": "Water Filters",
+        "nameAr": "فلاتر المياه"
+      },
+      {
+        "nameEn": "Water Purification Systems",
+        "nameAr": "أنظمة تنقية المياه"
+      },
+      {
+        "nameEn": "Water Pipes & Fittings",
+        "nameAr": "أنابيب ووصلات المياه"
+      },
+      {
+        "nameEn": "Water Level Controllers",
+        "nameAr": "أجهزة التحكم بمستوى المياه"
+      },
+      {
+        "nameEn": "Water Pressure Systems",
+        "nameAr": "أنظمة ضغط المياه"
+      },
+      {
+        "nameEn": "Pump Spare Parts",
+        "nameAr": "قطع غيار المضخات"
+      },
+      {
+        "nameEn": "Water System Accessories",
+        "nameAr": "إكسسوارات أنظمة المياه"
+      },
+      {
+        "nameEn": "Other",
+        "nameAr": "أخرى"
+      }
+    ]
+  },
+  {
+    "index": 9,
+    "nameEn": "Security & Surveillance",
+    "nameAr": "أجهزة المراقبة والحماية",
+    "subcategories": [
+      {
+        "nameEn": "CCTV Cameras",
+        "nameAr": "كاميرات المراقبة"
+      },
+      {
+        "nameEn": "DVR & NVR Recorders",
+        "nameAr": "أجهزة التسجيل DVR وNVR"
+      },
+      {
+        "nameEn": "Complete Surveillance Systems",
+        "nameAr": "أنظمة المراقبة المتكاملة"
+      },
+      {
+        "nameEn": "Alarm Systems",
+        "nameAr": "أنظمة الإنذار"
+      },
+      {
+        "nameEn": "Access Control Systems",
+        "nameAr": "أنظمة التحكم بالدخول"
+      },
+      {
+        "nameEn": "Fingerprint Devices",
+        "nameAr": "أجهزة البصمة"
+      },
+      {
+        "nameEn": "Motion Sensors",
+        "nameAr": "حساسات الحركة"
+      },
+      {
+        "nameEn": "Smart Locks",
+        "nameAr": "الأقفال الذكية"
+      },
+      {
+        "nameEn": "Security Equipment",
+        "nameAr": "معدات الحماية والأمن"
+      },
+      {
+        "nameEn": "Surveillance Cables & Accessories",
+        "nameAr": "كابلات وملحقات المراقبة"
+      },
+      {
+        "nameEn": "Other",
+        "nameAr": "أخرى"
+      }
+    ]
+  },
+  {
+    "index": 10,
+    "nameEn": "Building Materials, Tiles & Marble",
+    "nameAr": "مواد البناء والبلاط والرخام",
+    "subcategories": [
+      {
+        "nameEn": "Ceramic Tiles",
+        "nameAr": "بلاط السيراميك"
+      },
+      {
+        "nameEn": "Porcelain Tiles",
+        "nameAr": "بلاط البورسلان"
+      },
+      {
+        "nameEn": "Floor Tiles",
+        "nameAr": "بلاط الأرضيات"
+      },
+      {
+        "nameEn": "Wall Tiles",
+        "nameAr": "بلاط الجدران"
+      },
+      {
+        "nameEn": "Bathroom Tiles",
+        "nameAr": "بلاط الحمامات"
+      },
+      {
+        "nameEn": "Kitchen Tiles",
+        "nameAr": "بلاط المطابخ"
+      },
+      {
+        "nameEn": "Outdoor Tiles",
+        "nameAr": "بلاط خارجي"
+      },
+      {
+        "nameEn": "Decorative Tiles",
+        "nameAr": "البلاط الديكوري"
+      },
+      {
+        "nameEn": "Tile Adhesives & Grout",
+        "nameAr": "لواصق وروبة البلاط"
+      },
+      {
+        "nameEn": "Tile Installation Accessories",
+        "nameAr": "مستلزمات تركيب البلاط"
+      },
+      {
+        "nameEn": "Natural Marble",
+        "nameAr": "الرخام الطبيعي"
+      },
+      {
+        "nameEn": "Artificial Marble",
+        "nameAr": "الرخام الصناعي"
+      },
+      {
+        "nameEn": "Granite",
+        "nameAr": "الجرانيت"
+      },
+      {
+        "nameEn": "Marble & Granite Slabs",
+        "nameAr": "ألواح الرخام والجرانيت"
+      },
+      {
+        "nameEn": "Marble Tiles",
+        "nameAr": "بلاط الرخام"
+      },
+      {
+        "nameEn": "Countertops",
+        "nameAr": "أسطح المطابخ والكاونترات"
+      },
+      {
+        "nameEn": "Marble Stairs & Wall Cladding",
+        "nameAr": "درج وكسوة الرخام"
+      },
+      {
+        "nameEn": "Marble Cutting & Installation Supplies",
+        "nameAr": "مستلزمات قص وتركيب الرخام"
+      },
+      {
+        "nameEn": "Marble Care & Polishing",
+        "nameAr": "العناية بالرخام وتلميعه"
+      },
+      {
+        "nameEn": "Wooden Doors",
+        "nameAr": "الأبواب الخشبية"
+      },
+      {
+        "nameEn": "Iron Doors",
+        "nameAr": "الأبواب الحديدية"
+      },
+      {
+        "nameEn": "Aluminum Doors",
+        "nameAr": "الأبواب الألمنيوم"
+      },
+      {
+        "nameEn": "PVC Doors",
+        "nameAr": "أبواب PVC"
+      },
+      {
+        "nameEn": "Aluminum Windows",
+        "nameAr": "نوافذ الألمنيوم"
+      },
+      {
+        "nameEn": "Glass Doors",
+        "nameAr": "الأبواب الزجاجية"
+      },
+      {
+        "nameEn": "Tempered Glass",
+        "nameAr": "الزجاج المقسى"
+      },
+      {
+        "nameEn": "Mirrors",
+        "nameAr": "المرايا"
+      },
+      {
+        "nameEn": "Aluminum Profiles",
+        "nameAr": "قطاعات الألمنيوم"
+      },
+      {
+        "nameEn": "Door Handles & Locks",
+        "nameAr": "مقابض وأقفال الأبواب"
+      },
+      {
+        "nameEn": "Hinges & Door Accessories",
+        "nameAr": "المفصلات وإكسسوارات الأبواب"
+      },
+      {
+        "nameEn": "Sanitary Ware",
+        "nameAr": "الأدوات الصحية"
+      },
+      {
+        "nameEn": "Toilets & Basins",
+        "nameAr": "المراحيض والمغاسل"
+      },
+      {
+        "nameEn": "Bathtubs",
+        "nameAr": "أحواض الاستحمام"
+      },
+      {
+        "nameEn": "Faucets & Mixers",
+        "nameAr": "الحنفيات والخلاطات"
+      },
+      {
+        "nameEn": "Showers",
+        "nameAr": "الدش ومستلزماته"
+      },
+      {
+        "nameEn": "Bathroom Cabinets & Fittings",
+        "nameAr": "خزائن وتجهيزات الحمامات"
+      },
+      {
+        "nameEn": "Cement & Building Supplies",
+        "nameAr": "الإسمنت ومستلزمات البناء"
+      },
+      {
+        "nameEn": "Electrical Building Supplies",
+        "nameAr": "مستلزمات الكهرباء للبناء"
+      },
+      {
+        "nameEn": "Plumbing Supplies",
+        "nameAr": "مستلزمات السباكة"
+      },
+      {
+        "nameEn": "Paints & Coatings",
+        "nameAr": "الدهانات والطلاءات"
+      },
+      {
+        "nameEn": "Waterproofing Materials",
+        "nameAr": "مواد العزل المائي"
+      },
+      {
+        "nameEn": "Insulation Materials",
+        "nameAr": "مواد العزل الحراري والصوتي"
+      },
+      {
+        "nameEn": "Finishing Materials",
+        "nameAr": "مواد التشطيب"
+      },
+      {
+        "nameEn": "Other",
+        "nameAr": "أخرى"
+      }
+    ]
+  },
+  {
+    "index": 11,
+    "nameEn": "Tools & Hardware",
+    "nameAr": "الأدوات والمعدات",
+    "subcategories": [
+      {
+        "nameEn": "Hand Tools",
+        "nameAr": "الأدوات اليدوية"
+      },
+      {
+        "nameEn": "Power Tools",
+        "nameAr": "الأدوات الكهربائية"
+      },
+      {
+        "nameEn": "Workshop Tools",
+        "nameAr": "أدوات الورش"
+      },
+      {
+        "nameEn": "Industrial Tools",
+        "nameAr": "الأدوات الصناعية"
+      },
+      {
+        "nameEn": "Measuring Tools",
+        "nameAr": "أدوات القياس"
+      },
+      {
+        "nameEn": "Locks & Security Hardware",
+        "nameAr": "الأقفال ومستلزمات الأمان"
+      },
+      {
+        "nameEn": "Fasteners & Fixings",
+        "nameAr": "البراغي والمثبتات"
+      },
+      {
+        "nameEn": "Safety Equipment",
+        "nameAr": "معدات السلامة"
+      },
+      {
+        "nameEn": "Tool Storage",
+        "nameAr": "تخزين وتنظيم الأدوات"
+      },
+      {
+        "nameEn": "Other",
+        "nameAr": "أخرى"
+      }
+    ]
+  },
+  {
+    "index": 12,
+    "nameEn": "Sports & Outdoors",
+    "nameAr": "الرياضة والأنشطة الخارجية",
+    "subcategories": [
+      {
+        "nameEn": "Fitness & Gym Equipment",
+        "nameAr": "معدات اللياقة والنوادي"
+      },
+      {
+        "nameEn": "Football Equipment",
+        "nameAr": "معدات كرة القدم"
+      },
+      {
+        "nameEn": "Team Sports Equipment",
+        "nameAr": "معدات الرياضات الجماعية"
+      },
+      {
+        "nameEn": "Sportswear",
+        "nameAr": "الملابس الرياضية"
+      },
+      {
+        "nameEn": "Sports Shoes",
+        "nameAr": "الأحذية الرياضية"
+      },
+      {
+        "nameEn": "Bicycles",
+        "nameAr": "الدراجات الهوائية"
+      },
+      {
+        "nameEn": "Camping Equipment",
+        "nameAr": "معدات التخييم"
+      },
+      {
+        "nameEn": "Hiking Equipment",
+        "nameAr": "معدات الرحلات والمشي الجبلي"
+      },
+      {
+        "nameEn": "Outdoor Accessories",
+        "nameAr": "مستلزمات الأنشطة الخارجية"
+      },
+      {
+        "nameEn": "Other",
+        "nameAr": "أخرى"
+      }
+    ]
+  },
+  {
+    "index": 13,
+    "nameEn": "Baby, Kids & Toys",
+    "nameAr": "الأطفال والألعاب",
+    "subcategories": [
+      {
+        "nameEn": "Baby Clothing",
+        "nameAr": "ملابس الأطفال الرضع"
+      },
+      {
+        "nameEn": "Baby Feeding Products",
+        "nameAr": "منتجات تغذية الرضع"
+      },
+      {
+        "nameEn": "Diapers",
+        "nameAr": "الحفاضات"
+      },
+      {
+        "nameEn": "Baby Care Products",
+        "nameAr": "منتجات العناية بالرضع"
+      },
+      {
+        "nameEn": "Strollers",
+        "nameAr": "عربات الأطفال"
+      },
+      {
+        "nameEn": "Baby Car Seats",
+        "nameAr": "مقاعد الأطفال للسيارات"
+      },
+      {
+        "nameEn": "Educational Toys",
+        "nameAr": "الألعاب التعليمية"
+      },
+      {
+        "nameEn": "Dolls & Action Figures",
+        "nameAr": "الدمى والشخصيات"
+      },
+      {
+        "nameEn": "Outdoor Toys",
+        "nameAr": "الألعاب الخارجية"
+      },
+      {
+        "nameEn": "Baby Furniture",
+        "nameAr": "أثاث الأطفال"
+      },
+      {
+        "nameEn": "Other",
+        "nameAr": "أخرى"
+      }
+    ]
+  },
+  {
+    "index": 14,
+    "nameEn": "Books, Stationery & Office",
+    "nameAr": "الكتب والقرطاسية والمكاتب",
+    "subcategories": [
+      {
+        "nameEn": "Books & Novels",
+        "nameAr": "الكتب والروايات"
+      },
+      {
+        "nameEn": "School Supplies",
+        "nameAr": "المستلزمات المدرسية"
+      },
+      {
+        "nameEn": "Notebooks & Paper",
+        "nameAr": "الدفاتر والورق"
+      },
+      {
+        "nameEn": "Pens & Writing Supplies",
+        "nameAr": "الأقلام وأدوات الكتابة"
+      },
+      {
+        "nameEn": "Office Supplies",
+        "nameAr": "مستلزمات المكاتب"
+      },
+      {
+        "nameEn": "Printers & Scanners",
+        "nameAr": "الطابعات والماسحات"
+      },
+      {
+        "nameEn": "Office Technology",
+        "nameAr": "تقنيات وأجهزة المكاتب"
+      },
+      {
+        "nameEn": "Arts & Crafts Supplies",
+        "nameAr": "مستلزمات الفنون والأشغال اليدوية"
+      },
+      {
+        "nameEn": "Other",
+        "nameAr": "أخرى"
+      }
+    ]
+  },
+  {
+    "index": 15,
+    "nameEn": "Fabrics & Textiles",
+    "nameAr": "الأقمشة والمنسوجات",
+    "subcategories": [
+      {
+        "nameEn": "Clothing Fabrics",
+        "nameAr": "أقمشة الملابس"
+      },
+      {
+        "nameEn": "Upholstery Fabrics",
+        "nameAr": "أقمشة التنجيد"
+      },
+      {
+        "nameEn": "Curtain Fabrics",
+        "nameAr": "أقمشة الستائر"
+      },
+      {
+        "nameEn": "Sewing Accessories",
+        "nameAr": "مستلزمات الخياطة"
+      },
+      {
+        "nameEn": "Blankets",
+        "nameAr": "البطانيات"
+      },
+      {
+        "nameEn": "Quilts & Comforters",
+        "nameAr": "اللحف والألحفة"
+      },
+      {
+        "nameEn": "Towels",
+        "nameAr": "المناشف"
+      },
+      {
+        "nameEn": "Home Textiles",
+        "nameAr": "المنسوجات المنزلية"
+      },
+      {
+        "nameEn": "Other",
+        "nameAr": "أخرى"
+      }
+    ]
+  },
+  {
+    "index": 16,
+    "nameEn": "Business, Commercial & Industrial",
+    "nameAr": "الأعمال والمعدات التجارية والصناعية",
+    "subcategories": [
+      {
+        "nameEn": "Commercial Equipment",
+        "nameAr": "المعدات التجارية"
+      },
+      {
+        "nameEn": "Industrial Machinery",
+        "nameAr": "الآلات الصناعية"
+      },
+      {
+        "nameEn": "Restaurant Equipment",
+        "nameAr": "معدات المطاعم"
+      },
+      {
+        "nameEn": "Bakery Equipment",
+        "nameAr": "معدات المخابز"
+      },
+      {
+        "nameEn": "Workshop Equipment",
+        "nameAr": "معدات الورش"
+      },
+      {
+        "nameEn": "Commercial Refrigerators",
+        "nameAr": "ثلاجات العرض والتبريد التجارية"
+      },
+      {
+        "nameEn": "Coffee Machines",
+        "nameAr": "آلات القهوة"
+      },
+      {
+        "nameEn": "Shop Display Equipment",
+        "nameAr": "معدات عرض المتاجر"
+      },
+      {
+        "nameEn": "Packaging Equipment & Supplies",
+        "nameAr": "معدات ومستلزمات التغليف"
+      },
+      {
+        "nameEn": "Wholesale Business Supplies",
+        "nameAr": "مستلزمات الأعمال بالجملة"
+      },
+      {
+        "nameEn": "Other",
+        "nameAr": "أخرى"
+      }
+    ]
+  },
+  {
+    "index": 17,
+    "nameEn": "Garden & Agriculture",
+    "nameAr": "الحدائق والزراعة",
+    "subcategories": [
+      {
+        "nameEn": "Plants & Seeds",
+        "nameAr": "النباتات والبذور"
+      },
+      {
+        "nameEn": "Gardening Tools",
+        "nameAr": "أدوات البستنة"
+      },
+      {
+        "nameEn": "Irrigation Equipment",
+        "nameAr": "معدات الري"
+      },
+      {
+        "nameEn": "Fertilizers & Soil",
+        "nameAr": "الأسمدة والتربة"
+      },
+      {
+        "nameEn": "Agricultural Equipment",
+        "nameAr": "المعدات الزراعية"
+      },
+      {
+        "nameEn": "Poultry Supplies",
+        "nameAr": "مستلزمات الدواجن"
+      },
+      {
+        "nameEn": "Livestock Supplies",
+        "nameAr": "مستلزمات المواشي"
+      },
+      {
+        "nameEn": "Other",
+        "nameAr": "أخرى"
+      }
+    ]
+  },
+  {
+    "index": 18,
+    "nameEn": "Gifts, Crafts & Traditional Products",
+    "nameAr": "الهدايا والحرف والمنتجات التقليدية",
+    "subcategories": [
+      {
+        "nameEn": "Gift Items",
+        "nameAr": "الهدايا"
+      },
+      {
+        "nameEn": "Handmade Products",
+        "nameAr": "المنتجات اليدوية"
+      },
+      {
+        "nameEn": "Yemeni Handicrafts",
+        "nameAr": "الحرف اليدوية اليمنية"
+      },
+      {
+        "nameEn": "Traditional Silver Products",
+        "nameAr": "المنتجات الفضية التقليدية"
+      },
+      {
+        "nameEn": "Yemeni Honey",
+        "nameAr": "العسل اليمني"
+      },
+      {
+        "nameEn": "Traditional Products",
+        "nameAr": "المنتجات التقليدية"
+      },
+      {
+        "nameEn": "Souvenirs",
+        "nameAr": "التذكارات"
+      },
+      {
+        "nameEn": "Other",
+        "nameAr": "أخرى"
+      }
+    ]
+  },
+  {
+    "index": 19,
+    "nameEn": "Health & Wellness",
+    "nameAr": "الصحة والعافية",
+    "subcategories": [
+      {
+        "nameEn": "Health Care Products",
+        "nameAr": "منتجات العناية الصحية"
+      },
+      {
+        "nameEn": "Medical Devices & Equipment",
+        "nameAr": "الأجهزة والمعدات الطبية"
+      },
+      {
+        "nameEn": "Blood Pressure Monitors",
+        "nameAr": "أجهزة قياس ضغط الدم"
+      },
+      {
+        "nameEn": "Blood Glucose Monitors",
+        "nameAr": "أجهزة قياس سكر الدم"
+      },
+      {
+        "nameEn": "Thermometers",
+        "nameAr": "موازين الحرارة"
+      },
+      {
+        "nameEn": "Pulse Oximeters",
+        "nameAr": "أجهزة قياس الأكسجين"
+      },
+      {
+        "nameEn": "First Aid Supplies",
+        "nameAr": "مستلزمات الإسعافات الأولية"
+      },
+      {
+        "nameEn": "Medical Consumables",
+        "nameAr": "المستهلكات الطبية"
+      },
+      {
+        "nameEn": "Mobility & Walking Aids",
+        "nameAr": "وسائل المساعدة على الحركة والمشي"
+      },
+      {
+        "nameEn": "Orthopedic Supports & Braces",
+        "nameAr": "الدعامات والمساند الطبية"
+      },
+      {
+        "nameEn": "Wheelchairs & Mobility Equipment",
+        "nameAr": "الكراسي المتحركة ومعدات التنقل"
+      },
+      {
+        "nameEn": "Vision Care Accessories",
+        "nameAr": "مستلزمات العناية بالبصر"
+      },
+      {
+        "nameEn": "Hearing Care Devices & Accessories",
+        "nameAr": "أجهزة ومستلزمات السمع"
+      },
+      {
+        "nameEn": "Dental Care Products",
+        "nameAr": "منتجات العناية بالأسنان"
+      },
+      {
+        "nameEn": "Personal Wellness Equipment",
+        "nameAr": "أجهزة العناية بالصحة والرفاهية"
+      },
+      {
+        "nameEn": "Massage & Relaxation Equipment",
+        "nameAr": "أجهزة التدليك والاسترخاء"
+      },
+      {
+        "nameEn": "Nutrition & Wellness Products",
+        "nameAr": "منتجات التغذية والعافية"
+      },
+      {
+        "nameEn": "Health Monitoring Accessories",
+        "nameAr": "مستلزمات متابعة المؤشرات الصحية"
+      },
+      {
+        "nameEn": "Other",
+        "nameAr": "أخرى"
+      }
+    ]
+  },
+  {
+    "index": 20,
+    "nameEn": "Digital Products & Gift Cards",
+    "nameAr": "المنتجات الرقمية وبطاقات الهدايا",
+    "subcategories": [
+      {
+        "nameEn": "Mobile Recharge",
+        "nameAr": "شحن رصيد الهاتف"
+      },
+      {
+        "nameEn": "Internet Packages",
+        "nameAr": "باقات الإنترنت"
+      },
+      {
+        "nameEn": "Digital Gift Cards",
+        "nameAr": "بطاقات الهدايا الرقمية"
+      },
+      {
+        "nameEn": "Gaming Gift Cards",
+        "nameAr": "بطاقات شحن الألعاب"
+      },
+      {
+        "nameEn": "Digital Subscriptions",
+        "nameAr": "الاشتراكات الرقمية"
+      },
+      {
+        "nameEn": "Software & Digital Licenses",
+        "nameAr": "البرامج والتراخيص الرقمية"
+      },
+      {
+        "nameEn": "Other",
+        "nameAr": "أخرى"
+      }
+    ]
+  }
+]

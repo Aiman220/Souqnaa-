@@ -1,0 +1,728 @@
+<USER_REQUEST>
+SOUQNA — Complete Category & Subcategory Coverage Update
+
+Windsurf implementation command — Inspect the existing architecture first, then implement and verify the complete taxonomy below.
+
+1. Non-negotiable requirements
+
+- Preserve the existing SOUQNA architecture, database records, product listings, category IDs, order history, seller data, and working functionality.
+- This is one unified marketplace.
+- Implement exactly 20 approved main categories.
+- Implement every listed subcategory under its correct main category.
+- Every main category must have exactly one selectable Other / أخرى subcategory.
+- Use the existing backend/database category source as authoritative.
+- Do not create a second category system or duplicate existing categories.
+- Do not hardcode the category catalog separately in Flutter applications.
+- Use stable IDs and parent-child relationships, never translated names as identifiers.
+- Support Arabic RTL and English LTR throughout the customer app, seller app, and admin dashboard.
+- Preserve existing category relationships and migrate records safely.
+- Do not delete legacy categories, products, or historical records.
+- Do not deploy to production or execute production migrations.
+
+2. Complete approved main categories and subcategories
+
+Implement the following taxonomy. Reuse existing matching records rather than creating duplicates. Use the English and Arabic labels as localized display values.
+
+1. Electronics & Technology — الإلكترونيات والتقنية
+
+- Mobile Phones — الهواتف المحمولة
+- Tablets — الأجهزة اللوحية
+- Mobile Phone Accessories — إكسسوارات الهواتف
+- Laptop Computers — أجهزة اللابتوب
+- Desktop Computers — أجهزة الكمبيوتر المكتبية
+- Computer Accessories — إكسسوارات الكمبيوتر
+- Computer Components — مكونات الكمبيوتر
+- RAM — ذاكرة الوصول العشوائي
+- USB Flash Drives — وحدات تخزين USB
+- Hard Disk Drives (HDD) — الأقراص الصلبة
+- Solid State Drives (SSD) — أقراص SSD
+- Memory Cards — بطاقات الذاكرة
+- Electronic Spare Parts — قطع غيار الإلكترونيات
+- Mobile Phone Spare Parts — قطع غيار الهواتف
+- Computer Spare Parts — قطع غيار الكمبيوتر
+- Networking Equipment — معدات الشبكات
+- Internet Routers — أجهزة الراوتر
+- Internet Modems — أجهزة المودم
+- Network Accessories — إكسسوارات الشبكات
+- Televisions — أجهزة التلفزيون
+- Monitors & Displays — الشاشات
+- Audio Equipment — الأجهزة الصوتية
+- Headphones & Speakers — سماعات الرأس ومكبرات الصوت
+- Cameras & Photography — الكاميرات والتصوير
+- Gaming Consoles & Accessories — أجهزة الألعاب وملحقاتها
+- Smart Home Devices — أجهزة المنزل الذكي
+- Electronic Components & Accessories — المكونات والإكسسوارات الإلكترونية
+- Other — أخرى
+
+2. Fashion, Clothing & Jewelry — الأزياء والملابس والمجوهرات
+
+- Men's Clothing — ملابس رجالية
+- Women's Clothing — ملابس نسائية
+- Children's Clothing — ملابس الأطفال
+- Men's Shoes — أحذية رجالية
+- Women's Shoes — أحذية نسائية
+- Children's Shoes — أحذية الأطفال
+- Bags & Wallets — الحقائب والمحافظ
+- Watches — الساعات
+- Gold Jewelry — مجوهرات الذهب
+- Silver Jewelry — مجوهرات الفضة
+- Diamond Jewelry — مجوهرات الألماس
+- Rings — الخواتم
+- Necklaces — القلائد
+- Bracelets — الأساور
+- Earrings — الأقراط
+- Jewelry Sets — أطقم المجوهرات
+- Yemeni Traditional Jewelry — المجوهرات اليمنية التقليدية
+- Jewelry Boxes & Accessories — علب وإكسسوارات المجوهرات
+- Fashion Accessories — إكسسوارات الأزياء
+- Yemeni Traditional Clothing — الملابس اليمنية التقليدية
+- Jambiyas — الجنابي
+- Jambiya Belts & Accessories — أحزمة الجنابي ومستلزماتها
+- Yemeni Traditional Belts — الأحزمة اليمنية التقليدية
+- Shawls — الشيلان
+- Traditional Headwear (Al-Osob) — العُصُب وأغطية الرأس التقليدية
+- Other — أخرى
+
+3. Beauty & Personal Care — الجمال والعناية الشخصية
+
+- Skincare — العناية بالبشرة
+- Makeup & Cosmetics — المكياج ومستحضرات التجميل
+- Hair Care Products — منتجات العناية بالشعر
+- Hair Styling Tools — أدوات تصفيف الشعر
+- Perfumes & Fragrances — العطور
+- Men's Grooming — العناية الشخصية للرجال
+- Bath & Body Products — منتجات الاستحمام والعناية بالجسم
+- Personal Hygiene — النظافة الشخصية
+- Beauty Accessories — إكسسوارات التجميل
+- Other — أخرى
+
+4. Home & Furniture — المنزل والأثاث
+
+- Living Room Furniture — أثاث غرف المعيشة
+- Bedroom Furniture — أثاث غرف النوم
+- Dining Room Furniture — أثاث غرف الطعام
+- Office Furniture — أثاث المكاتب
+- Home Decoration — ديكورات المنزل
+- Home Lighting — إضاءة المنزل
+- Curtains & Blinds — الستائر
+- Carpets & Rugs — السجاد والموكيت
+- Bedding & Mattresses — المفروشات والمراتب
+- Bathroom Accessories — إكسسوارات الحمامات
+- Home Storage & Organization — التخزين والتنظيم المنزلي
+- Plastic Storage Cabinets — الخزنات والدواليب البلاستيكية
+- Plastic Drawers & Organizers — الأدراج والمنظمات البلاستيكية
+- Shelves & Racks — الأرفف وحوامل التخزين
+- Home Accessories — مستلزمات وإكسسوارات المنزل
+- Other — أخرى
+
+5. Home Appliances — الأجهزة المنزلية
+
+- Refrigerators & Freezers — الثلاجات والمجمدات
+- Washing Machines — الغسالات
+- Dryers — المجففات
+- Air Conditioners — مكيفات الهواء
+- Fans & Exhaust Fans — المراوح وشفاطات الهواء
+- Heaters — أجهزة التدفئة
+- Kitchen Appliances — أجهزة المطبخ
+- Ovens & Cookers — الأفران والطباخات
+- Microwaves — أفران الميكروويف
+- Blenders & Juicers — الخلاطات والعصارات
+- Water Dispensers — مبردات وموزعات المياه
+- Vacuum Cleaners — المكانس الكهربائية
+- Small Home Appliances — الأجهزة المنزلية الصغيرة
+- Home Appliance Spare Parts — قطع غيار الأجهزة المنزلية
+- Other — أخرى
+
+6. Automotive & Motorcycles — السيارات والدراجات النارية
+
+- Cars — السيارات
+- Motorcycles — الدراجات النارية
+- Electric Motorcycles — الدراجات النارية الكهربائية
+- Car Spare Parts — قطع غيار السيارات
+- Motorcycle Spare Parts — قطع غيار الدراجات النارية
+- Electric Motorcycle Spare Parts — قطع غيار الدراجات النارية الكهربائية
+- Motorcycle Accessories — إكسسوارات الدراجات النارية
+- Electric Motorcycle Accessories — إكسسوارات الدراجات النارية الكهربائية
+- Motorcycle Batteries & Charging Accessories — بطاريات الدراجات النارية ومستلزمات الشحن
+- Tires & Wheels — الإطارات والعجلات
+- Car Batteries — بطاريات السيارات
+- Motorcycle Engines & Components — محركات ومكونات الدراجات النارية
+- Oils & Automotive Fluids — الزيوت والسوائل
+- Car Electronics — إلكترونيات السيارات
+- Car Accessories — إكسسوارات السيارات
+- Vehicle Care & Cleaning — العناية بالمركبات والتنظيف
+- Helmets & Safety Equipment — الخوذ ومعدات السلامة
+- Car Engines — محركات السيارات
+- Other — أخرى
+
+7. Solar Energy & Power Equipment — الطاقة الشمسية ومعدات الطاقة
+
+Solar energy equipment — معدات الطاقة الشمسية
+
+- Solar Panels — الألواح الشمسية
+- Solar Batteries — بطاريات الطاقة الشمسية
+- Solar Inverters — محولات الطاقة الشمسية
+- Solar Charge Controllers — منظمات الشحن
+- Solar Cables & Connectors — كابلات وموصلات الطاقة الشمسية
+- Solar Mounting Systems — هياكل تثبيت الألواح
+- Solar Protection Equipment — معدات الحماية الشمسية
+- Complete Solar Systems — أنظمة الطاقة الشمسية المتكاملة
+- Solar Installation Equipment & Accessories — معدات ومستلزمات تركيب الطاقة الشمسية
+
+Generators and backup power — المولدات والطاقة الاحتياطية
+
+- Electric Generators — المولدات الكهربائية
+- Diesel Generators — مولدات الديزل
+- Generator Spare Parts — قطع غيار المولدات
+- UPS Systems — أنظمة الطاقة غير المنقطعة
+- Backup Power Systems — أنظمة الطاقة الاحتياطية
+
+Electrical power equipment — معدات الطاقة الكهربائية
+
+- Voltage Stabilizers — مثبتات ومنظمات الجهد
+
+- Transformers — المحولات الكهربائية
+
+- Electrical Motors — المحركات الكهربائية
+
+- Power Distribution Equipment — معدات توزيع الطاقة
+
+- Electrical Protection Equipment — معدات الحماية الكهربائية
+
+- Circuit Breakers — قواطع الكهرباء
+
+- Electrical Panels & Distribution Boards — لوحات الكهرباء والتوزيع
+
+- Power Cables & Connectors — كابلات وموصلات الطاقة
+
+- Power Supplies & Adapters — مزودات الطاقة والمحولات
+
+- Batteries & Energy Storage Systems — البطاريات وأنظمة تخزين الطاقة
+
+- Energy Monitoring Devices — أجهزة مراقبة الطاقة
+
+- Power Accessories & Spare Parts — إكسسوارات وقطع غيار معدات الطاقة
+
+- Other — أخرى
+
+8. Water Systems & Equipment — أنظمة ومعدات المياه
+
+- Water Pumps — مضخات المياه
+- Water Tanks — خزانات المياه
+- Water Filters — فلاتر المياه
+- Water Purification Systems — أنظمة تنقية المياه
+- Water Pipes & Fittings — أنابيب ووصلات المياه
+- Water Level Controllers — أجهزة التحكم بمستوى المياه
+- Water Pressure Systems — أنظمة ضغط المياه
+- Pump Spare Parts — قطع غيار المضخات
+- Water System Accessories — إكسسوارات أنظمة المياه
+- Other — أخرى
+
+9. Security & Surveillance — أجهزة المراقبة والحماية
+
+- CCTV Cameras — كاميرات المراقبة
+- DVR & NVR Recorders — أجهزة التسجيل DVR وNVR
+- Complete Surveillance Systems — أنظمة المراقبة المتكاملة
+- Alarm Systems — أنظمة الإنذار
+- Access Control Systems — أنظمة التحكم بالدخول
+- Fingerprint Devices — أجهزة البصمة
+- Motion Sensors — حساسات الحركة
+- Smart Locks — الأقفال الذكية
+- Security Equipment — معدات الحماية والأمن
+- Surveillance Cables & Accessories — كابلات وملحقات المراقبة
+- Other — أخرى
+
+10. Building Materials, Tiles & Marble — مواد البناء والبلاط والرخام
+
+Tiles — البلاط
+
+- Ceramic Tiles — بلاط السيراميك
+- Porcelain Tiles — بلاط البورسلان
+- Floor Tiles — بلاط الأرضيات
+- Wall Tiles — بلاط الجدران
+- Bathroom Tiles — بلاط الحمامات
+- Kitchen Tiles — بلاط المطابخ
+- Outdoor Tiles — بلاط خارجي
+- Decorative Tiles — البلاط الديكوري
+- Tile Adhesives & Grout — لواصق وروبة البلاط
+- Tile Installation Accessories — مستلزمات تركيب البلاط
+
+Marble & granite — الرخام والجرانيت
+
+- Natural Marble — الرخام الطبيعي
+- Artificial Marble — الرخام الصناعي
+- Granite — الجرانيت
+- Marble & Granite Slabs — ألواح الرخام والجرانيت
+- Marble Tiles — بلاط الرخام
+- Countertops — أسطح المطابخ والكاونترات
+- Marble Stairs & Wall Cladding — درج وكسوة الرخام
+- Marble Cutting & Installation Supplies — مستلزمات قص وتركيب الرخام
+- Marble Care & Polishing — العناية بالرخام وتلميعه
+
+Doors, windows & glass — الأبواب والنوافذ والزجاج
+
+- Wooden Doors — الأبواب الخشبية
+- Iron Doors — الأبواب الحديدية
+- Aluminum Doors — الأبواب الألمنيوم
+- PVC Doors — أبواب PVC
+- Aluminum Windows — نوافذ الألمنيوم
+- Glass Doors — الأبواب الزجاجية
+- Tempered Glass — الزجاج المقسى
+- Mirrors — المرايا
+- Aluminum Profiles — قطاعات الألمنيوم
+- Door Handles & Locks — مقابض وأقفال الأبواب
+- Hinges & Door Accessories — المفصلات وإكسسوارات الأبواب
+
+Sanitary ware — الأدوات الصحية
+
+- Sanitary Ware — الأدوات الصحية
+- Toilets & Basins — المراحيض والمغاسل
+- Bathtubs — أحواض الاستحمام
+- Faucets & Mixers — الحنفيات والخلاطات
+- Showers — الدش ومستلزماته
+- Bathroom Cabinets & Fittings — خزائن وتجهيزات الحمامات
+
+Other building materials — مواد البناء الأخرى
+
+- Cement & Building Supplies — الإسمنت ومستلزمات البناء
+
+- Electrical Building Supplies — مستلزمات الكهرباء للبناء
+
+- Plumbing Supplies — مستلزمات السباكة
+
+- Paints & Coatings — الدهانات والطلاءات
+
+- Waterproofing Materials — مواد العزل المائي
+
+- Insulation Materials — مواد العزل الحراري والصوتي
+
+- Finishing Materials — مواد التشطيب
+
+- Other — أخرى
+
+11. Tools & Hardware — الأدوات والمعدات
+
+- Hand Tools — الأدوات اليدوية
+- Power Tools — الأدوات الكهربائية
+- Workshop Tools — أدوات الورش
+- Industrial Tools — الأدوات الصناعية
+- Measuring Tools — أدوات القياس
+- Locks & Security Hardware — الأقفال ومستلزمات الأمان
+- Fasteners & Fixings — البراغي والمثبتات
+- Safety Equipment — معدات السلامة
+- Tool Storage — تخزين وتنظيم الأدوات
+- Other — أخرى
+
+12. Sports & Outdoors — الرياضة والأنشطة الخارجية
+
+- Fitness & Gym Equipment — معدات اللياقة والنوادي
+- Football Equipment — معدات كرة القدم
+- Team Sports Equipment — معدات الرياضات الجماعية
+- Sportswear — الملابس الرياضية
+- Sports Shoes — الأحذية الرياضية
+- Bicycles — الدراجات الهوائية
+- Camping Equipment — معدات التخييم
+- Hiking Equipment — معدات الرحلات والمشي الجبلي
+- Outdoor Accessories — مستلزمات الأنشطة الخارجية
+- Other — أخرى
+
+13. Baby, Kids & Toys — الأطفال والألعاب
+
+- Baby Clothing — ملابس الأطفال الرضع
+- Baby Feeding Products — منتجات تغذية الرضع
+- Diapers — الحفاضات
+- Baby Care Products — منتجات العناية بالرضع
+- Strollers — عربات الأطفال
+- Baby Car Seats — مقاعد الأطفال للسيارات
+- Educational Toys — الألعاب التعليمية
+- Dolls & Action Figures — الدمى والشخصيات
+- Outdoor Toys — الألعاب الخارجية
+- Baby Furniture — أثاث الأطفال
+- Other — أخرى
+
+14. Books, Stationery & Office — الكتب والقرطاسية والمكاتب
+
+- Books & Novels — الكتب والروايات
+- School Supplies — المستلزمات المدرسية
+- Notebooks & Paper — الدفاتر والورق
+- Pens & Writing Supplies — الأقلام وأدوات الكتابة
+- Office Supplies — مستلزمات المكاتب
+- Printers & Scanners — الطابعات والماسحات
+- Office Technology — تقنيات وأجهزة المكاتب
+- Arts & Crafts Supplies — مستلزمات الفنون والأشغال اليدوية
+- Other — أخرى
+
+15. Fabrics & Textiles — الأقمشة والمنسوجات
+
+- Clothing Fabrics — أقمشة الملابس
+- Upholstery Fabrics — أقمشة التنجيد
+- Curtain Fabrics — أقمشة الستائر
+- Sewing Accessories — مستلزمات الخياطة
+- Blankets — البطانيات
+- Quilts & Comforters — اللحف والألحفة
+- Towels — المناشف
+- Home Textiles — المنسوجات المنزلية
+- Other — أخرى
+
+16. Business, Commercial & Industrial — الأعمال والمعدات التجارية والصناعية
+
+- Commercial Equipment — المعدات التجارية
+- Industrial Machinery — الآلات الصناعية
+- Restaurant Equipment — معدات المطاعم
+- Bakery Equipment — معدات المخابز
+- Workshop Equipment — معدات الورش
+- Commercial Refrigerators — ثلاجات العرض والتبريد التجارية
+- Coffee Machines — آلات القهوة
+- Shop Display Equipment — معدات عرض المتاجر
+- Packaging Equipment & Supplies — معدات ومستلزمات التغليف
+- Wholesale Business Supplies — مستلزمات الأعمال بالجملة
+- Other — أخرى
+
+17. Garden & Agriculture — الحدائق والزراعة
+
+- Plants & Seeds — النباتات والبذور
+- Gardening Tools — أدوات البستنة
+- Irrigation Equipment — معدات الري
+- Fertilizers & Soil — الأسمدة والتربة
+- Agricultural Equipment — المعدات الزراعية
+- Poultry Supplies — مستلزمات الدواجن
+- Livestock Supplies — مستلزمات المواشي
+- Other — أخرى
+
+18. Gifts, Crafts & Traditional Products — الهدايا والحرف والمنتجات التقليدية
+
+- Gift Items — الهدايا
+- Handmade Products — المنتجات اليدوية
+- Yemeni Handicrafts — الحرف اليدوية اليمنية
+- Traditional Silver Products — المنتجات الفضية التقليدية
+- Yemeni Honey — العسل اليمني
+- Traditional Products — المنتجات التقليدية
+- Souvenirs — التذكارات
+- Other — أخرى
+
+19. Health & Wellness — الصحة والعافية
+
+- Health Care Products — منتجات العناية الصحية
+- Medical Devices & Equipment — الأجهزة والمعدات الطبية
+- Blood Pressure Monitors — أجهزة قياس ضغط الدم
+- Blood Glucose Monitors — أجهزة قياس سكر الدم
+- Thermometers — موازين الحرارة
+- Pulse Oximeters — أجهزة قياس الأكسجين
+- First Aid Supplies — مستلزمات الإسعافات الأولية
+- Medical Consumables — المستهلكات الطبية
+- Mobility & Walking Aids — وسائل المساعدة على الحركة والمشي
+- Orthopedic Supports & Braces — الدعامات والمساند الطبية
+- Wheelchairs & Mobility Equipment — الكراسي المتحركة ومعدات التنقل
+- Vision Care Accessories — مستلزمات العناية بالبصر
+- Hearing Care Devices & Accessories — أجهزة ومستلزمات السمع
+- Dental Care Products — منتجات العناية بالأسنان
+- Personal Wellness Equipment — أجهزة العناية بالصحة والرفاهية
+- Massage & Relaxation Equipment — أجهزة التدليك والاسترخاء
+- Nutrition & Wellness Products — منتجات التغذية والعافية
+- Health Monitoring Accessories — مستلزمات متابعة المؤشرات الصحية
+- Other — أخرى
+
+Health category compliance:
+
+- Do not permit prescription-drug listings through this category.
+- Do not imply regulatory approval, certification, or clinical effectiveness without verifiable evidence and applicable authorization.
+- Reuse existing seller verification, restricted-product, moderation, and admin approval mechanisms.
+- Flag products requiring regulatory review before publication.
+- Do not introduce a pharmacy, prescription, or healthcare-service system.
+- Do not allow unsupported diagnosis or treatment claims in product descriptions or attributes.
+
+20. Digital Products & Gift Cards — المنتجات الرقمية وبطاقات الهدايا
+
+- Mobile Recharge — شحن رصيد الهاتف
+- Internet Packages — باقات الإنترنت
+- Digital Gift Cards — بطاقات الهدايا الرقمية
+- Gaming Gift Cards — بطاقات شحن الألعاب
+- Digital Subscriptions — الاشتراكات الرقمية
+- Software & Digital Licenses — البرامج والتراخيص الرقمية
+- Other — أخرى
+
+Digital fulfillment must remain separate from physical delivery. Digital-only products must not receive physical delivery fees.
+
+3. Universal Other / أخرى implementation
+
+Every one of the 20 main categories must have exactly one active Other subcategory.
+
+When a seller selects Other:
+
+- Display a required field:
+  - English: Specify product type
+  - Arabic: حدد نوع المنتج
+- Accept Arabic and English text.
+- Trim whitespace and reject empty or whitespace-only values.
+- Enforce reasonable minimum and maximum length limits.
+- Store the submitted value separately from the official subcategory ID.
+- Preserve the selected main category and Other subcategory relationship.
+- Display the entered product type in seller product management and customer product details where appropriate.
+- Include the value in product search and filtering.
+- Make the entry available for admin review.
+- Allow authorized admins to approve, reject, correct, or promote recurring product types into official subcategories through the existing category-management workflow.
+- Preserve the original submitted value and moderation history in the audit trail.
+- Do not automatically create global subcategories from seller input.
+- Prevent duplicate Other subcategories under the same parent.
+- Do not allow sellers to approve their own submissions or change official category definitions.
+
+Selecting Other under Digital Products must not change digital fulfillment or create a physical delivery charge.
+
+4. Database, category IDs, and relationships
+
+Inspect the existing Prisma schema, database models, category services, APIs, and seed scripts before making changes.
+
+Use the existing category architecture. Verify support for:
+
+- Stable category and subcategory IDs.
+- Parent-child relationships.
+- Arabic and English labels.
+- Slugs where already supported.
+- Active/inactive status.
+- Sort order and visibility.
+- Category images and icons.
+- Category-specific attributes and filters.
+- Seller-entered Other product type.
+- Admin moderation status and audit history.
+
+Do not use translated names as identifiers. Do not create duplicate category IDs or unnecessary hierarchy levels.
+
+Preserve existing product references, order snapshots, seller listings, and historical records.
+
+5. Idempotent and safe category seeding
+
+Use the existing backend seed architecture.
+
+- Match existing categories and subcategories using stable identifiers and reliable mappings.
+- Create missing records only.
+- Update missing translations without unnecessarily overwriting valid existing content.
+- Ensure exactly one Other subcategory exists per main category.
+- Prevent duplicate categories, subcategories, and slugs.
+- Preserve all existing product references.
+- Do not silently reassign products.
+- Do not delete legacy records.
+- Include a dry-run or preview report where supported.
+- Report created, updated, skipped, duplicate, and legacy records.
+- Verify that repeated seed execution does not create duplicates.
+
+Do not add Pets & Pet Supplies or Grocery & Food as new selectable categories. Preserve any historical records associated with them.
+
+6. Category-specific product attributes and units
+
+Reuse the existing dynamic product attribute system. Do not create a separate hardcoded product form for every category.
+
+Support relevant attributes, including:
+
+- Electronics: brand, model, condition, storage capacity, RAM, color, compatibility, warranty.
+- Jewelry: material, purity where applicable, weight, gemstone, size, authenticity information where supported.
+- Automotive: vehicle type, brand, model, year, engine capacity, compatibility, condition, part number.
+- Electric motorcycles: battery voltage, capacity, motor power, charging compatibility, spare-part compatibility.
+- Solar: wattage, voltage, current, battery capacity, panel dimensions, inverter capacity, protection rating.
+- General power equipment: power rating, input/output voltage, capacity, frequency, phase, protection rating, dimensions, warranty.
+- Water equipment: capacity, flow rate, pressure, power, connection size.
+- Surveillance: resolution, indoor/outdoor rating, night vision, storage compatibility, connectivity.
+- Tiles and marble: material, dimensions, thickness, finish, color, grade, coverage, unit of sale.
+- Doors and windows: material, height, width, thickness, finish, opening direction.
+- Home appliances: brand, model, power consumption, capacity, dimensions, warranty.
+- Textiles: fabric type, width, length, composition, color, size.
+- Blankets and quilts: material, dimensions, filling, thickness, size, weight.
+- Shawls: material, dimensions, fabric type, design, color.
+- Health: product type, brand/model, intended use, measurement range, units, compatibility, dimensions, accessories, warranty, manufacturer details, verified regulatory approvals only.
+- Digital products: fulfillment type, supported platform, validity, delivery method, redemption instructions.
+
+Support appropriate product units:
+
+- Piece — قطعة
+- Box — صندوق
+- Set — طقم
+- Pack — عبوة
+- Kilogram — كيلوغرام
+- Ton — طن
+- Liter — لتر
+- Square meter — متر مربع
+- Linear meter — متر طولي
+- Slab — لوح
+
+Tiles and marble must support appropriate piece, box, square-meter, or slab pricing. Fabrics may support linear-meter pricing. Blankets, quilts, and shawls may use piece-based pricing or other suitable units.
+
+Do not force the same unit onto every product in a category. Use decimal-safe quantity handling and integer/minor-unit or existing decimal-safe monetary calculations. Never use floating-point arithmetic for money.
+
+7. Delivery and fulfillment compatibility
+
+- Physical products continue using the existing server-authoritative delivery engine.
+- Digital products must not incur physical delivery fees.
+- Mixed carts calculate physical delivery only for physical products.
+- Use the existing fulfillment-type field as the authority, not category name alone.
+- Preserve existing seller shipment grouping and checkout behavior.
+- Preserve existing weight, dimensions, packaging, and oversized-item calculations.
+- Do not invent product weights or delivery prices.
+- Do not introduce a second delivery engine.
+
+8. Backend and API implementation
+
+Inspect and extend the existing category controllers, services, repositories, DTOs, validation, search, and product APIs.
+
+Verify support for:
+
+- Fetching all active main categories.
+- Fetching subcategories by parent category.
+- Fetching localized Arabic/English labels.
+- Fetching category-specific attributes and filters.
+- Submitting and editing products using official subcategories.
+- Submitting products under Other with seller-entered product type.
+- Admin review and moderation of Other entries.
+- Category search and product filtering.
+- Active/inactive status and visibility controls.
+- Correct pagination and sorting.
+
+Backend validation must verify:
+
+- Main category exists and is active.
+- Subcategory belongs to the selected main category.
+- Other is permitted for that category.
+- Other text is supplied and valid when required.
+- Seller has permission to create or update the product.
+- Restricted products follow existing moderation rules.
+- Digital and physical fulfillment classifications are valid.
+
+Never trust client-supplied category IDs, attributes, prices, delivery fees, or moderation state without backend validation.
+
+9. Customer application
+
+Extend the existing customer app to use backend-provided categories.
+
+Verify:
+
+- All 20 approved main categories are displayed.
+- All active subcategories are available.
+- Arabic and English localization works.
+- RTL and LTR layouts work correctly.
+- Category images and icons use the existing media architecture.
+- Category navigation, search, sorting, and filters work.
+- Products classified under Other display their seller-entered product type where appropriate.
+- Inactive and unapproved category records are not shown as active choices.
+- Existing product discovery and homepage behavior remain intact.
+
+10. Seller application
+
+Extend existing seller product creation and editing.
+
+Verify:
+
+- Categories and subcategories load from the backend.
+- All 20 main categories and their subcategories are available.
+- Other exists under every main category.
+- Selecting Other displays the required product-type field.
+- Entered values survive navigation between product creation steps.
+- Frontend and backend validation both work.
+- Category-specific attributes load dynamically.
+- Appropriate product units and pricing work.
+- Physical shipping specifications appear only when relevant.
+- Digital fulfillment remains separate from physical shipping.
+- Existing product images, stock, prices, variants, and listings remain intact.
+
+11. Admin dashboard
+
+Extend the existing category-management module. Do not create a duplicate module.
+
+Authorized administrators must be able to:
+
+- Manage all 20 main categories.
+- Create and edit subcategories.
+- Update Arabic and English names and descriptions.
+- Manage category images and icons.
+- Reorder categories and subcategories.
+- Activate and deactivate categories.
+- Configure visibility and featured status.
+- Manage category-specific attributes and filters.
+- Review seller-submitted Other product types.
+- Approve, reject, or reclassify submissions.
+- Promote recurring Other entries into official subcategories safely.
+- View product counts and category usage.
+- Inspect legacy categories and invalid references without deleting historical data.
+
+Use existing RBAC, backend validation, and audit logging. Ensure responsive app, web, and desktop layouts where supported.
+
+12. Search, caching, performance, and security
+
+- Use existing caching infrastructure for category metadata.
+- Avoid repeatedly fetching the full taxonomy.
+- Invalidate category caches when administrators update categories.
+- Optimize category and subcategory lookup.
+- Do not expose inactive or unauthorized categories as selectable options for new products.
+- Prevent invalid parent/subcategory assignments.
+- Prevent mass assignment of category moderation fields.
+- Sanitize seller-entered Other values.
+- Reuse existing authorization, validation, rate limiting, and moderation rules.
+- Support weak and unstable network connections without excessive retries or repeated synchronization messages.
+
+13. Required tests and acceptance criteria
+
+Add or update tests using the existing project test frameworks.
+
+Verify:
+
+1. Exactly 20 approved main categories exist.
+2. Health & Wellness and Digital Products & Gift Cards are included.
+3. Every listed subcategory exists under the correct parent.
+4. Electric motorcycles and their spare parts and accessories are included.
+5. The expanded Solar Energy & Power Equipment catalog is implemented.
+6. Shawls exist under Fashion, Clothing & Jewelry.
+7. Blankets and quilts exist under Fabrics & Textiles.
+8. Every main category has exactly one active Other subcategory.
+9. Selecting Other requires a valid seller-entered product type.
+10. Arabic and English Other values are accepted and saved.
+11. Other values remain linked to the correct parent category.
+12. Admin moderation and reclassification work without losing product data.
+13. Repeated seeding does not create duplicate records.
+14. Existing products and historical records remain intact.
+15. Customer, seller, and admin category workflows work.
+16. Search, filters, localization, and RTL/LTR layouts work.
+17. Digital-only products have zero physical delivery fees.
+18. Mixed carts charge physical delivery only for physical products.
+19. Existing delivery calculations and seller shipment grouping remain intact.
+20. Health & Wellness restricted-product moderation remains enforced.
+21. Existing checkout, inventory, payment, refund, and order workflows pass regression tests.
+
+14. Implementation order
+
+1. Inspect the repository, database schema, category models, seed scripts, APIs, and all three applications.
+2. Produce a mapping of existing categories and subcategories to this approved taxonomy.
+3. Identify missing records, duplicates, invalid relationships, and legacy records.
+4. Prepare backward-compatible database changes only where necessary.
+5. Implement the idempotent seed.
+6. Implement Other / أخرى and seller-entered product types.
+7. Implement backend validation, moderation, and APIs.
+8. Implement category attributes, units, search, and filters.
+9. Update the seller app.
+10. Update the customer app.
+11. Update the admin dashboard.
+12. Verify digital fulfillment and physical delivery compatibility.
+13. Run local migrations and seeds only in the authorized local/staging environment.
+14. Run type checks, linting, automated tests, and regression tests.
+15. Review all changes and report actual results.
+
+Do not perform unrelated redesigns or unnecessary refactoring.
+
+15. Final implementation report
+
+After implementation, report:
+
+- All 20 main categories and their actual subcategory counts.
+- Missing subcategories created or existing ones reused.
+- Confirmation that all 20 main categories have exactly one Other option.
+- Confirmation that shawls, blankets, and quilts are correctly classified.
+- Confirmation that electric motorcycles and expanded power-equipment categories are implemented.
+- How Other entries are validated, stored, searched, and moderated.
+- Existing legacy records requiring review.
+- Database/schema changes and migration files created.
+- Backend, customer, seller, and admin files changed.
+- Tests executed with exact pass/fail results.
+- Remaining issues and affected files.
+- Confirmation that production was not modified.
+
+Do not claim completion based only on code inspection. Verify actual local or staging database/API output and run relevant tests. Report failures honestly. Do not deploy to production or execute production migrations.
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-11-19T17:04:30+03:00.
+</ADDITIONAL_METADATA>

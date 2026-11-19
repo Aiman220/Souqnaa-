@@ -99,6 +99,36 @@ export class NotificationTemplateService {
       deepLinkPattern: 'souqnaa://seller/orders/{{orderId}}',
     },
 
+    // ── Digital Products ────────────────────────────────────────────────────
+    DIGITAL_ORDER_FULFILLED: {
+      titleAr: 'طلبك الرقمي جاهز للاستخدام ⚡',
+      titleEn: 'Your digital order is ready ⚡',
+      bodyAr: 'تم تفعيل وتسليم طلبك الرقمي رقم #{{orderNumber}}. اضغط هنا لعرض الرموز وتحميل ملفاتك الآن.',
+      bodyEn: 'Your digital order #{{orderNumber}} has been delivered. Tap to view your codes and downloads.',
+      deepLinkPattern: 'souqnaa://orders/{{orderId}}',
+    },
+    DIGITAL_CODE_ACCESSED: {
+      titleAr: 'تنبيه أمان: تم استعراض كود التفعيل 🔐',
+      titleEn: 'Security Alert: Activation code revealed 🔐',
+      bodyAr: 'تم استعراض كود التفعيل للطلب رقم #{{orderNumber}}. إذا لم تكن أنت، يرجى مراجعة الدعم فوراً.',
+      bodyEn: 'Activation code for order #{{orderNumber}} was revealed. If this was not you, contact support immediately.',
+      deepLinkPattern: 'souqnaa://orders/{{orderId}}',
+    },
+    SELLER_DIGITAL_ORDER_FULFILLED: {
+      titleAr: 'تم بيع وتسليم طلب رقمي ⚡',
+      titleEn: 'Digital order sold and delivered ⚡',
+      bodyAr: 'تم بيع منتج رقمي في الطلب #{{orderNumber}} وتسليمه للعميل تلقائياً وتم ترحيل الأرباح لمحفظتك.',
+      bodyEn: 'Digital order #{{orderNumber}} was sold, auto-fulfilled, and earnings credited to your wallet.',
+      deepLinkPattern: 'souqnaa://seller/orders/{{orderId}}',
+    },
+    SELLER_DIGITAL_STOCK_EMPTY: {
+      titleAr: '⚠️ تنبيه: نفاد أكواد المنتج الرقمي',
+      titleEn: '⚠️ Alert: Digital product codes exhausted',
+      bodyAr: 'نفدت أكواد المنتج الرقمي للطلب #{{orderNumber}}. يرجى إضافة أكواد جديدة للمخزون أو إتمام التسليم يدوياً.',
+      bodyEn: 'Digital codes are exhausted for order #{{orderNumber}}. Please restock codes or fulfill manually.',
+      deepLinkPattern: 'souqnaa://seller/orders/{{orderId}}',
+    },
+
     // ── Payments ────────────────────────────────────────────────────────────
     PAYMENT_PENDING: {
       titleAr: 'عملية الدفع معلقة ⏳',

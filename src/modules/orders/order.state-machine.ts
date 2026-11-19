@@ -40,6 +40,7 @@ export const ALLOWED_TRANSITIONS: Record<string, string[]> = {
     'PROCESSING',
     'READY_TO_SHIP',
     'SHIPPED',
+    'DELIVERED',
     'CANCELLATION_REQUESTED',
     'CANCELLED_BY_SELLER',
     'CANCELLED_BY_ADMIN',
@@ -47,6 +48,7 @@ export const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   PROCESSING: [
     'READY_TO_SHIP',
     'SHIPPED',
+    'DELIVERED',
     'CANCELLATION_REQUESTED',
     'CANCELLED_BY_SELLER',
     'CANCELLED_BY_ADMIN',
@@ -1027,6 +1029,13 @@ export class OrderStateMachine {
       } catch (err) {
         console.error('[Membership] Failed to evaluate membership on delivery:', err);
       }
+
+      // Customer COD Eligibility Evaluation on Seller Order Delivery
+      try {
+        await CustomerCodEligibilityService.evaluateQualifyingOrder(sellerOrder.orderId);
+      } catch (err) {
+        console.error('[Customer COD] Failed to evaluate COD qualifying order on seller order delivery:', err);
+      }
     }
 
     // 9. SOUQNAA Coins Cancellation Reversal & Coin Refund trigger (§21)
@@ -1039,6 +1048,13 @@ export class OrderStateMachine {
         });
       } catch (err) {
         console.error('[Rewards] Failed to reverse/refund coins on cancellation:', err);
+      }
+
+      // Customer COD Eligibility Invalidation on Order Cancellation
+      try {
+        await CustomerCodEligibilityService.handleOrderCancelled(sellerOrder.orderId, reason);
+      } catch (err) {
+        console.error('[Customer COD] Failed to handle order cancellation for COD on seller order cancellation:', err);
       }
 
       // SOUQNAA Customer Membership & VIP Tiers update on cancellation
@@ -1560,15 +1576,26 @@ export class OrderStateMachine {
       } else if (targetStatusStr === 'DELIVERED' && changedByRole !== 'CUSTOMER') {
         // Order delivered by seller/courier/admin -> Notify customer
         if (order.userId) {
-          notificationDispatcher.dispatch(
-            NotificationEventFactory.orderEvent({
-              eventType: 'ORDER_DELIVERED',
-              recipientId: order.userId,
-              orderId: order.id,
-              orderNumber: order.orderNumber,
-              totalAmount: Number(order.total || 0),
-            })
-          ).catch(() => {});
+          if (order.isDigitalOnly) {
+            notificationDispatcher.dispatch(
+              NotificationEventFactory.digitalOrderFulfilledEvent({
+                recipientId: order.userId,
+                orderId: order.id,
+                orderNumber: order.orderNumber,
+                totalAmount: Number(order.total || 0),
+              })
+            ).catch(() => {});
+          } else {
+            notificationDispatcher.dispatch(
+              NotificationEventFactory.orderEvent({
+                eventType: 'ORDER_DELIVERED',
+                recipientId: order.userId,
+                orderId: order.id,
+                orderNumber: order.orderNumber,
+                totalAmount: Number(order.total || 0),
+              })
+            ).catch(() => {});
+          }
         }
       } else if (targetStatusStr.startsWith('CANCELLED_')) {
         if (changedByRole === 'CUSTOMER') {

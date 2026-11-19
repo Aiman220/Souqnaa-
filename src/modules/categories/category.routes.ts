@@ -38,6 +38,164 @@ router.get('/brands/all', async (req: Request, res: Response, next: NextFunction
   }
 });
 
+// Admin Review & Moderation of Seller-Submitted "Other" Product Types
+router.get('/admin/other-submissions', authenticate, requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const products = await prisma.product.findMany({
+      where: {
+        otherProductType: { not: null },
+      },
+      select: {
+        id: true,
+        nameAr: true,
+        nameEn: true,
+        otherProductType: true,
+        categoryId: true,
+        category: {
+          select: {
+            id: true,
+            nameAr: true,
+            nameEn: true,
+            slug: true,
+            parentId: true,
+            parent: {
+              select: {
+                id: true,
+                nameAr: true,
+                nameEn: true,
+                slug: true,
+              },
+            },
+          },
+        },
+        store: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Group submissions by trimmed otherProductType and parent category for easy promotion
+    const groupedMap = new Map<string, { otherProductType: string; category: any; count: number; products: any[] }>();
+    for (const p of products) {
+      const typeKey = (p.otherProductType || '').trim().toLowerCase();
+      const parentId = p.category?.parentId || p.categoryId;
+      const groupKey = `${parentId}::${typeKey}`;
+
+      if (!groupedMap.has(groupKey)) {
+        groupedMap.set(groupKey, {
+          otherProductType: p.otherProductType || '',
+          category: p.category?.parent || p.category,
+          count: 0,
+          products: [],
+        });
+      }
+      const entry = groupedMap.get(groupKey)!;
+      entry.count++;
+      if (entry.products.length < 5) {
+        entry.products.push({ id: p.id, nameAr: p.nameAr, nameEn: p.nameEn, storeName: p.store?.name });
+      }
+    }
+
+    ResponseUtil.success(res, {
+      totalSubmissions: products.length,
+      groupedSubmissions: Array.from(groupedMap.values()),
+      submissions: products,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Admin promote an "Other" entry into an official subcategory and migrate products
+router.post('/admin/promote-other', authenticate, requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { parentId, otherProductType, nameAr, nameEn, slug, icon } = req.body;
+    if (!parentId || !otherProductType || !nameAr || !nameEn) {
+      throw new AppError('يرجى تقديم جميع البيانات المطلوبة لترقية نوع المنتج', 400);
+    }
+
+    const parent = await prisma.category.findUnique({ where: { id: parentId } });
+    if (!parent) throw new AppError('القسم الرئيسي غير موجود', 404);
+
+    const generatedSlug = slug || nameEn.toLowerCase().replace(/[\s\W-]+/g, '-');
+    const existingSlug = await prisma.category.findUnique({ where: { slug: generatedSlug } });
+    if (existingSlug) throw new AppError('الرابط الفريد (Slug) مستخدم بالفعل', 400);
+
+    const result = await prisma.$transaction(async (tx) => {
+      // 1. Create official subcategory
+      const newSubcategory = await tx.category.create({
+        data: {
+          nameAr,
+          nameEn,
+          slug: generatedSlug,
+          icon: icon || 'category_rounded',
+          parentId,
+          sortOrder: 50,
+          isActive: true,
+        },
+      });
+
+      // 2. Reassign products matching this otherProductType under this parent
+      const updateResult = await tx.product.updateMany({
+        where: {
+          otherProductType: {
+            equals: String(otherProductType).trim(),
+            mode: 'insensitive',
+          },
+          OR: [
+            { categoryId: parentId },
+            { category: { parentId } },
+          ],
+        },
+        data: {
+          categoryId: newSubcategory.id,
+        },
+      });
+
+      return { newSubcategory, migratedProductsCount: updateResult.count };
+    });
+
+    ResponseUtil.created(res, result, 'تم ترقية نوع المنتج إلى قسم فرعي رسمي بنجاح وتحديث المنتجات المرتبطة');
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Admin reclassify products with a specific "Other" type to an existing category
+router.post('/admin/reclassify-other', authenticate, requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { targetCategoryId, otherProductType, parentId } = req.body;
+    if (!targetCategoryId || !otherProductType) {
+      throw new AppError('يرجى تحديد التصنيف المستهدف ونوع المنتج', 400);
+    }
+
+    const target = await prisma.category.findUnique({ where: { id: targetCategoryId } });
+    if (!target) throw new AppError('التصنيف المستهدف غير موجود', 404);
+
+    const updateResult = await prisma.product.updateMany({
+      where: {
+        otherProductType: {
+          equals: String(otherProductType).trim(),
+          mode: 'insensitive',
+        },
+        ...(parentId ? { OR: [{ categoryId: parentId }, { category: { parentId } }] } : {}),
+      },
+      data: {
+        categoryId: target.id,
+      },
+    });
+
+    ResponseUtil.success(res, { migratedProductsCount: updateResult.count }, 'تم إعادة تصنيف المنتجات بنجاح');
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/:id', storefrontLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);

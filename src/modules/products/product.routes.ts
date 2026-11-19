@@ -60,7 +60,12 @@ router.get('/', storefrontLimiter, optionalAuth, async (req: Request, res: Respo
         { nameEn: { contains: String(q), mode: 'insensitive' } },
         { descriptionAr: { contains: String(q), mode: 'insensitive' } },
         { descriptionEn: { contains: String(q), mode: 'insensitive' } },
+        { otherProductType: { contains: String(q), mode: 'insensitive' } },
       ];
+    }
+
+    if (req.query.otherProductType) {
+      where.otherProductType = { contains: String(req.query.otherProductType).trim(), mode: 'insensitive' };
     }
 
     if (categoryId) {
@@ -445,7 +450,36 @@ router.post('/', authenticate, requireSeller, async (req: Request, res: Response
       digitalDeliveryType,
       digitalFileUrl,
       digitalInstructions,
+      otherProductType,
     } = req.body;
+
+    const targetCategory = await prisma.category.findUnique({
+      where: { id: categoryId },
+      include: { parent: true },
+    });
+    if (!targetCategory || !targetCategory.isActive) {
+      throw new AppError('القسم المحدد غير موجود أو غير نشط', 400, 'CATEGORY_INVALID');
+    }
+
+    const isOtherCategory =
+      targetCategory.slug.startsWith('other-') ||
+      targetCategory.nameEn.toLowerCase() === 'other' ||
+      targetCategory.nameAr === 'أخرى';
+
+    let sanitizedOtherProductType: string | null = null;
+    if (isOtherCategory) {
+      const trimmed = otherProductType ? String(otherProductType).trim() : '';
+      if (trimmed.length < 2 || trimmed.length > 100) {
+        throw new AppError(
+          'يرجى تحديد نوع المنتج عند اختيار قسم (أخرى). يجب أن يتراوح طول النص بين حرفين و100 حرف.',
+          400,
+          'OTHER_PRODUCT_TYPE_REQUIRED'
+        );
+      }
+      sanitizedOtherProductType = trimmed;
+    } else if (otherProductType) {
+      sanitizedOtherProductType = String(otherProductType).trim().slice(0, 100) || null;
+    }
 
     const fulfillmentType: FulfillmentType =
       String(rawFulfillmentType).toUpperCase() === 'DIGITAL' ? FulfillmentType.DIGITAL : FulfillmentType.PHYSICAL;
@@ -483,10 +517,32 @@ router.post('/', authenticate, requireSeller, async (req: Request, res: Response
           price: parseFloat(price),
           compareAtPrice: compareAtPrice ? parseFloat(compareAtPrice) : null,
           sku: sku || `SKU-${Date.now()}`,
+          otherProductType: sanitizedOtherProductType,
           fulfillmentType,
           digitalDeliveryType: fulfillmentType === FulfillmentType.DIGITAL ? (digitalDeliveryType || DigitalDeliveryType.CODE) : null,
           digitalFileUrl: fulfillmentType === FulfillmentType.DIGITAL ? (digitalFileUrl || null) : null,
           digitalInstructions: fulfillmentType === FulfillmentType.DIGITAL ? (digitalInstructions || null) : null,
+          // Heavy & Bulky Shipping Specifications
+          weight: req.body.weight ? parseFloat(String(req.body.weight)) : null,
+          lengthCm: req.body.lengthCm ? parseFloat(String(req.body.lengthCm)) : null,
+          widthCm: req.body.widthCm ? parseFloat(String(req.body.widthCm)) : null,
+          heightCm: req.body.heightCm ? parseFloat(String(req.body.heightCm)) : null,
+          packageLengthCm: req.body.packageLengthCm ? parseFloat(String(req.body.packageLengthCm)) : null,
+          packageWidthCm: req.body.packageWidthCm ? parseFloat(String(req.body.packageWidthCm)) : null,
+          packageHeightCm: req.body.packageHeightCm ? parseFloat(String(req.body.packageHeightCm)) : null,
+          packageWeightKg: req.body.packageWeightKg ? parseFloat(String(req.body.packageWeightKg)) : null,
+          palletCount: req.body.palletCount ? parseInt(String(req.body.palletCount), 10) : null,
+          packagingType: req.body.packagingType ? String(req.body.packagingType) : null,
+          isFragile: Boolean(req.body.isFragile),
+          isOversized: Boolean(req.body.isOversized),
+          requiresForklift: Boolean(req.body.requiresForklift),
+          requiresCrane: Boolean(req.body.requiresCrane),
+          requiresSpecialVehicle: Boolean(req.body.requiresSpecialVehicle),
+          specialVehicleType: req.body.specialVehicleType ? String(req.body.specialVehicleType) : null,
+          loadingRequirements: req.body.loadingRequirements ? String(req.body.loadingRequirements) : null,
+          unloadingRequirements: req.body.unloadingRequirements ? String(req.body.unloadingRequirements) : null,
+          sellingUnit: req.body.sellingUnit ? String(req.body.sellingUnit) : null,
+          unitDimensionsJson: req.body.unitDimensionsJson ? (typeof req.body.unitDimensionsJson === 'object' ? JSON.stringify(req.body.unitDimensionsJson) : String(req.body.unitDimensionsJson)) : null,
           images: {
             create: images.map((img: any, idx: number) => ({
               url: typeof img === 'string' ? img : img.url,
@@ -598,9 +654,39 @@ router.put('/:id', authenticate, requireSeller, async (req: Request, res: Respon
       digitalDeliveryType,
       digitalFileUrl,
       digitalInstructions,
+      otherProductType,
     } = req.body;
 
     const updateData: any = {};
+    if (categoryId !== undefined || otherProductType !== undefined) {
+      const catId = categoryId !== undefined ? String(categoryId) : existing.categoryId;
+      const targetCategory = await prisma.category.findUnique({
+        where: { id: catId },
+        include: { parent: true },
+      });
+      if (!targetCategory || !targetCategory.isActive) {
+        throw new AppError('القسم المحدد غير موجود أو غير نشط', 400, 'CATEGORY_INVALID');
+      }
+      const isOtherCategory =
+        targetCategory.slug.startsWith('other-') ||
+        targetCategory.nameEn.toLowerCase() === 'other' ||
+        targetCategory.nameAr === 'أخرى';
+
+      if (isOtherCategory) {
+        const valToTest = otherProductType !== undefined ? otherProductType : existing.otherProductType;
+        const trimmed = valToTest ? String(valToTest).trim() : '';
+        if (trimmed.length < 2 || trimmed.length > 100) {
+          throw new AppError(
+            'يرجى تحديد نوع المنتج عند اختيار قسم (أخرى). يجب أن يتراوح طول النص بين حرفين و100 حرف.',
+            400,
+            'OTHER_PRODUCT_TYPE_REQUIRED'
+          );
+        }
+        updateData.otherProductType = trimmed;
+      } else if (otherProductType !== undefined) {
+        updateData.otherProductType = otherProductType ? String(otherProductType).trim().slice(0, 100) : null;
+      }
+    }
     if (fulfillmentType !== undefined) {
       const targetType = String(fulfillmentType).toUpperCase() === 'DIGITAL' ? FulfillmentType.DIGITAL : FulfillmentType.PHYSICAL;
       if (targetType === FulfillmentType.DIGITAL) {
@@ -632,6 +718,29 @@ router.put('/:id', authenticate, requireSeller, async (req: Request, res: Respon
     if (price !== undefined) updateData.price = parseFloat(String(price));
     if (compareAtPrice !== undefined) updateData.compareAtPrice = compareAtPrice ? parseFloat(String(compareAtPrice)) : null;
     if (weight !== undefined) updateData.weight = weight ? parseFloat(String(weight)) : null;
+    if (req.body.lengthCm !== undefined) updateData.lengthCm = req.body.lengthCm ? parseFloat(String(req.body.lengthCm)) : null;
+    if (req.body.widthCm !== undefined) updateData.widthCm = req.body.widthCm ? parseFloat(String(req.body.widthCm)) : null;
+    if (req.body.heightCm !== undefined) updateData.heightCm = req.body.heightCm ? parseFloat(String(req.body.heightCm)) : null;
+    if (req.body.packageLengthCm !== undefined) updateData.packageLengthCm = req.body.packageLengthCm ? parseFloat(String(req.body.packageLengthCm)) : null;
+    if (req.body.packageWidthCm !== undefined) updateData.packageWidthCm = req.body.packageWidthCm ? parseFloat(String(req.body.packageWidthCm)) : null;
+    if (req.body.packageHeightCm !== undefined) updateData.packageHeightCm = req.body.packageHeightCm ? parseFloat(String(req.body.packageHeightCm)) : null;
+    if (req.body.packageWeightKg !== undefined) updateData.packageWeightKg = req.body.packageWeightKg ? parseFloat(String(req.body.packageWeightKg)) : null;
+    if (req.body.palletCount !== undefined) updateData.palletCount = req.body.palletCount ? parseInt(String(req.body.palletCount), 10) : null;
+    if (req.body.packagingType !== undefined) updateData.packagingType = req.body.packagingType ? String(req.body.packagingType) : null;
+    if (req.body.isFragile !== undefined) updateData.isFragile = Boolean(req.body.isFragile);
+    if (req.body.isOversized !== undefined) updateData.isOversized = Boolean(req.body.isOversized);
+    if (req.body.requiresForklift !== undefined) updateData.requiresForklift = Boolean(req.body.requiresForklift);
+    if (req.body.requiresCrane !== undefined) updateData.requiresCrane = Boolean(req.body.requiresCrane);
+    if (req.body.requiresSpecialVehicle !== undefined) updateData.requiresSpecialVehicle = Boolean(req.body.requiresSpecialVehicle);
+    if (req.body.specialVehicleType !== undefined) updateData.specialVehicleType = req.body.specialVehicleType ? String(req.body.specialVehicleType) : null;
+    if (req.body.loadingRequirements !== undefined) updateData.loadingRequirements = req.body.loadingRequirements ? String(req.body.loadingRequirements) : null;
+    if (req.body.unloadingRequirements !== undefined) updateData.unloadingRequirements = req.body.unloadingRequirements ? String(req.body.unloadingRequirements) : null;
+    if (req.body.sellingUnit !== undefined) updateData.sellingUnit = req.body.sellingUnit ? String(req.body.sellingUnit) : null;
+    if (req.body.unitDimensionsJson !== undefined) {
+      updateData.unitDimensionsJson = req.body.unitDimensionsJson
+        ? (typeof req.body.unitDimensionsJson === 'object' ? JSON.stringify(req.body.unitDimensionsJson) : String(req.body.unitDimensionsJson))
+        : null;
+    }
     if (hasWarranty !== undefined) updateData.hasWarranty = Boolean(hasWarranty);
     if (warrantyPeriod !== undefined) updateData.warrantyPeriod = warrantyPeriod ? String(warrantyPeriod) : null;
     if (warrantyPolicy !== undefined) updateData.warrantyPolicy = warrantyPolicy ? String(warrantyPolicy) : null;

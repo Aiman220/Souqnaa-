@@ -4,10 +4,11 @@ const prisma = new PrismaClient();
 
 async function main() {
   const rootCategories = await prisma.category.findMany({
-    where: { parentId: null },
+    where: { parentId: null, isActive: true },
     orderBy: { sortOrder: 'asc' },
     include: {
       children: {
+        where: { isActive: true },
         orderBy: { sortOrder: 'asc' },
         select: {
           id: true,
@@ -25,10 +26,19 @@ async function main() {
   const rootCount = rootCategories.length;
   const subCount = allCount - rootCount;
 
+  const products = await prisma.product.findMany({
+    select: { id: true, nameAr: true, categoryId: true, category: { select: { slug: true, nameAr: true } } },
+  });
+
   console.log(`\n================ CATALOG AUDIT SUMMARY ================`);
   console.log(`Total Categories in Database: ${allCount}`);
   console.log(`Root Categories: ${rootCount}`);
-  console.log(`Subcategories: ${subCount}\n`);
+  console.log(`Subcategories: ${subCount}`);
+  console.log(`Total Products in Database: ${products.length}`);
+  for (const pr of products) {
+    console.log(`  📦 Product: "${pr.nameAr}" -> Category: [${pr.category?.slug}] ${pr.category?.nameAr}`);
+  }
+  console.log('');
 
   for (const root of rootCategories) {
     const num = root.sortOrder.toString().padStart(2, '0');

@@ -130,6 +130,33 @@ router.post('/calculate', async (req: Request, res: Response, next: NextFunction
   try {
     const { addressId, cityId, cartSubtotal = 0, deliveryMethodCode = 'standard' } = req.body;
 
+    // Digital product delivery fee is strictly zero (§1)
+    if (req.body.isDigitalOnly || req.body.isDigital) {
+      return ResponseUtil.success(res, {
+        deliveryMethod: 'digital',
+        deliveryFee: 0,
+        currency: config.marketplace.currency,
+        isFreeDelivery: true,
+        estimatedHours: { min: 0, max: 0 },
+      });
+    }
+
+    if (req.body.productId) {
+      const prod = await prisma.product.findUnique({
+        where: { id: String(req.body.productId) },
+        select: { fulfillmentType: true },
+      });
+      if (prod?.fulfillmentType === 'DIGITAL') {
+        return ResponseUtil.success(res, {
+          deliveryMethod: 'digital',
+          deliveryFee: 0,
+          currency: config.marketplace.currency,
+          isFreeDelivery: true,
+          estimatedHours: { min: 0, max: 0 },
+        });
+      }
+    }
+
     let targetCityId = cityId;
     if (addressId && !targetCityId) {
       const address = await prisma.address.findUnique({ where: { id: addressId } });
@@ -195,10 +222,47 @@ router.post('/quote', authenticate, async (req: Request, res: Response, next: Ne
       destinationAreaId,
     } = req.body;
 
-    const isDigitalOnly = Boolean(req.body.isDigitalOnly);
+    let isDigitalOnly = Boolean(req.body.isDigitalOnly);
 
     if (!Array.isArray(sellerOrders) || sellerOrders.length === 0) {
       throw new AppError('sellerOrders must be a non-empty array of { sellerId, storeId }', 400);
+    }
+
+    const rawSellerMethodOverrides = (req.body.sellerDeliveryMethods && typeof req.body.sellerDeliveryMethods === 'object')
+      ? req.body.sellerDeliveryMethods
+      : {};
+
+    const userCart = req.user?.userId
+      ? await prisma.cart.findUnique({
+          where: { userId: req.user.userId },
+          include: {
+            items: {
+              include: {
+                product: { include: { category: true, store: true } },
+              },
+            },
+          },
+        })
+      : null;
+
+    // Authoritative Server-Side Digital Classification (§4)
+    if (userCart && userCart.items.length > 0) {
+      const hasPhysicalInCart = userCart.items.some(
+        (it) => it.product?.fulfillmentType !== 'DIGITAL'
+      );
+      if (!hasPhysicalInCart) {
+        isDigitalOnly = true;
+      }
+    }
+
+    if (req.body.productId) {
+      const prod = await prisma.product.findUnique({
+        where: { id: String(req.body.productId) },
+        select: { fulfillmentType: true },
+      });
+      if (prod?.fulfillmentType === 'DIGITAL') {
+        isDigitalOnly = true;
+      }
     }
 
     if (!isDigitalOnly) {
@@ -211,20 +275,84 @@ router.post('/quote', authenticate, async (req: Request, res: Response, next: Ne
       if (!address) throw new AppError('Address not found or does not belong to you', 404);
     }
 
-    const rawSellerMethodOverrides = (req.body.sellerDeliveryMethods && typeof req.body.sellerDeliveryMethods === 'object')
-      ? req.body.sellerDeliveryMethods
-      : {};
-
     const enrichedSellerOrders = sellerOrders.map((so: any) => {
       const customMethod = so.deliveryMethod || rawSellerMethodOverrides[so.sellerId];
       const isSellerExpress = typeof so.isExpress === 'boolean'
         ? so.isExpress
         : (customMethod?.toLowerCase() === 'express' || isExpress);
+
+      let isSellerDigital = Boolean(so.isDigital);
+      let heavyItems = so.heavyItems;
+      if (!heavyItems && userCart) {
+        const storeCartItems = userCart.items.filter(
+          (it) => it.product?.storeId === so.storeId || it.product?.store?.sellerId === so.sellerId
+        );
+        if (storeCartItems.length > 0) {
+          const sellerHasPhysical = storeCartItems.some(
+            (it) => it.product?.fulfillmentType !== 'DIGITAL'
+          );
+          if (!sellerHasPhysical) {
+            isSellerDigital = true;
+          }
+          heavyItems = storeCartItems.map((it) => ({
+            productId: it.product?.id,
+            name: it.product?.nameAr || it.product?.nameEn,
+            quantity: it.quantity || 1,
+            weightKg: it.product?.weight ?? null,
+            lengthCm: it.product?.lengthCm ?? null,
+            widthCm: it.product?.widthCm ?? null,
+            heightCm: it.product?.heightCm ?? null,
+            packageWeightKg: it.product?.packageWeightKg ?? null,
+            packageLengthCm: it.product?.packageLengthCm ?? null,
+            packageWidthCm: it.product?.packageWidthCm ?? null,
+            packageHeightCm: it.product?.packageHeightCm ?? null,
+            sellingUnit: it.product?.sellingUnit ?? null,
+            unitDimensionsJson: it.product?.unitDimensionsJson ?? null,
+            palletCount: it.product?.palletCount ?? null,
+            packagingType: it.product?.packagingType ?? null,
+            isFragile: it.product?.isFragile ?? false,
+            isOversized: it.product?.isOversized ?? false,
+            requiresForklift: it.product?.requiresForklift ?? false,
+            requiresCrane: it.product?.requiresCrane ?? false,
+            requiresSpecialVehicle: it.product?.requiresSpecialVehicle ?? false,
+            specialVehicleType: it.product?.specialVehicleType ?? null,
+            categorySlug: it.product?.category?.slug ?? null,
+            categoryNameAr: it.product?.category?.nameAr ?? null,
+            categoryNameEn: it.product?.category?.nameEn ?? null,
+            isDigital: it.product?.fulfillmentType === 'DIGITAL',
+          }));
+        }
+      }
+
+      if (isDigitalOnly || isSellerDigital) {
+        return {
+          sellerId: so.sellerId,
+          storeId: so.storeId,
+          deliveryMethod: 'digital',
+          isExpress: false,
+          isDigital: true,
+          weightKg: 0,
+          lengthCm: 0,
+          widthCm: 0,
+          heightCm: 0,
+          heavyItems: [],
+        };
+      }
+
       return {
         sellerId: so.sellerId,
         storeId: so.storeId,
         deliveryMethod: customMethod || deliveryMethod,
         isExpress: isSellerExpress,
+        weightKg: so.weightKg,
+        lengthCm: so.lengthCm,
+        widthCm: so.widthCm,
+        heightCm: so.heightCm,
+        isRemoteArea: so.isRemoteArea,
+        isSpecialHandling: so.isSpecialHandling,
+        heavyItems,
+        accessSurcharge: so.accessSurcharge,
+        isDigital: false,
       };
     });
 

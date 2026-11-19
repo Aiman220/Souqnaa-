@@ -211,4 +211,178 @@ router.put('/settings', async (req: Request, res: Response, next: NextFunction) 
   }
 });
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Heavy & Bulky Vehicle Classes Admin Endpoints
+// ──────────────────────────────────────────────────────────────────────────────
+
+/** GET /api/v1/admin/delivery/heavy-vehicles */
+router.get('/heavy-vehicles', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const vehicles = await prisma.heavyVehicleClass.findMany({
+      orderBy: { priority: 'asc' },
+    });
+    ResponseUtil.success(res, vehicles);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** POST /api/v1/admin/delivery/heavy-vehicles */
+router.post('/heavy-vehicles', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const {
+      code,
+      nameAr,
+      nameEn,
+      maxWeightKg,
+      maxVolumeCbm,
+      maxLengthCm,
+      maxWidthCm,
+      maxHeightCm,
+      baseFee,
+      ratePerKm = 0,
+      interGovernorateHireRate = 0,
+      loadingFee = 0,
+      unloadingFee = 0,
+      supportedCargoTypes,
+      requiresCrane = false,
+      requiresForklift = false,
+      isActive = true,
+      priority = 0,
+      notes,
+    } = req.body;
+
+    if (!code || !nameAr || maxWeightKg === undefined || baseFee === undefined) {
+      throw new AppError('code, nameAr, maxWeightKg, and baseFee are required', 400);
+    }
+
+    const vehicle = await prisma.heavyVehicleClass.create({
+      data: {
+        code: String(code).trim().toUpperCase(),
+        nameAr: String(nameAr).trim(),
+        nameEn: String(nameEn || code).trim(),
+        maxWeightKg: parseFloat(String(maxWeightKg)),
+        maxVolumeCbm: parseFloat(String(maxVolumeCbm || 10.0)),
+        maxLengthCm: parseFloat(String(maxLengthCm || 300.0)),
+        maxWidthCm: parseFloat(String(maxWidthCm || 180.0)),
+        maxHeightCm: parseFloat(String(maxHeightCm || 180.0)),
+        baseFee: parseFloat(String(baseFee)),
+        ratePerKm: parseFloat(String(ratePerKm)),
+        interGovernorateHireRate: parseFloat(String(interGovernorateHireRate)),
+        loadingFee: parseFloat(String(loadingFee)),
+        unloadingFee: parseFloat(String(unloadingFee)),
+        supportedCargoTypes: supportedCargoTypes ? String(supportedCargoTypes) : null,
+        requiresCrane: Boolean(requiresCrane),
+        requiresForklift: Boolean(requiresForklift),
+        isActive: Boolean(isActive),
+        priority: parseInt(String(priority || 0), 10),
+        notes: notes ? String(notes) : null,
+      },
+    });
+
+    ResponseUtil.created(res, vehicle, 'تم إضافة فئة مركبة النقل الثقيل بنجاح');
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** PUT /api/v1/admin/delivery/heavy-vehicles/:id */
+router.put('/heavy-vehicles/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params.id);
+    const updateData: any = {};
+
+    const fields = [
+      'nameAr', 'nameEn', 'maxWeightKg', 'maxVolumeCbm', 'maxLengthCm',
+      'maxWidthCm', 'maxHeightCm', 'baseFee', 'ratePerKm',
+      'interGovernorateHireRate', 'loadingFee', 'unloadingFee',
+      'supportedCargoTypes', 'requiresCrane', 'requiresForklift',
+      'isActive', 'priority', 'notes',
+    ];
+
+    for (const f of fields) {
+      if (req.body[f] !== undefined) {
+        if (['maxWeightKg', 'maxVolumeCbm', 'maxLengthCm', 'maxWidthCm', 'maxHeightCm', 'baseFee', 'ratePerKm', 'interGovernorateHireRate', 'loadingFee', 'unloadingFee'].includes(f)) {
+          updateData[f] = parseFloat(String(req.body[f]));
+        } else if (['requiresCrane', 'requiresForklift', 'isActive'].includes(f)) {
+          updateData[f] = Boolean(req.body[f]);
+        } else if (f === 'priority') {
+          updateData[f] = parseInt(String(req.body[f]), 10);
+        } else {
+          updateData[f] = req.body[f];
+        }
+      }
+    }
+
+    const vehicle = await prisma.heavyVehicleClass.update({
+      where: { id },
+      data: updateData,
+    });
+
+    ResponseUtil.success(res, vehicle, 'تم تحديث فئة المركبة بنجاح');
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** DELETE /api/v1/admin/delivery/heavy-vehicles/:id */
+router.delete('/heavy-vehicles/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params.id);
+    await prisma.heavyVehicleClass.delete({ where: { id } });
+    ResponseUtil.success(res, null, 'تم حذف فئة المركبة بنجاح');
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Heavy Delivery Quotes Admin Endpoints (§7 Manual Quote Workflow)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/** GET /api/v1/admin/delivery/heavy-quotes */
+router.get('/heavy-quotes', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { status } = req.query;
+    const quotes = await prisma.heavyDeliveryQuote.findMany({
+      where: status ? { status: String(status) } : undefined,
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    ResponseUtil.success(res, quotes);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** POST /api/v1/admin/delivery/heavy-quotes/:id/offer */
+router.post('/heavy-quotes/:id/offer', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params.id);
+    const { quotedFee, notes, validityHours = 48 } = req.body;
+
+    if (quotedFee === undefined || isNaN(parseFloat(String(quotedFee)))) {
+      throw new AppError('quotedFee is required and must be a number', 400);
+    }
+
+    const validUntil = new Date(Date.now() + validityHours * 3600 * 1000);
+
+    const quote = await prisma.heavyDeliveryQuote.update({
+      where: { id },
+      data: {
+        quotedFee: parseFloat(String(quotedFee)),
+        status: 'OFFERED',
+        notes: notes ? String(notes) : undefined,
+        validUntil,
+        reviewedBy: req.user?.userId || 'ADMIN',
+        reviewedAt: new Date(),
+      },
+    });
+
+    ResponseUtil.success(res, quote, 'تم تقديم عرض سعر الشحن الثقيل للعميل بنجاح');
+  } catch (error) {
+    next(error);
+  }
+});
+
 export const adminDeliveryRoutes = router;

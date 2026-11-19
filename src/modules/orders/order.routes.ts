@@ -599,14 +599,48 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
     const parentDeliveryMethodId = distinctMethodIds.size === 1 ? Array.from(distinctMethodIds)[0] : null;
 
     const sellerOrdersInput = Array.from(sellerGroups.keys()).map((sellerId) => {
-      const storeId = sellerGroups.get(sellerId)?.[0]?.product?.storeId || '';
+      const items = sellerGroups.get(sellerId) || [];
+      const storeId = items[0]?.product?.storeId || '';
       const resolvedMethod = resolvedSellerDeliveryMethods.get(sellerId) || defaultDeliveryMethod;
       const isSellerExpress = resolvedMethod?.code?.toLowerCase() === 'express';
+
+      const heavyItems = items.map((it: any) => ({
+        productId: it.product?.id,
+        name: it.product?.nameAr || it.product?.nameEn,
+        quantity: it.quantity || 1,
+        weightKg: it.product?.weight ?? null,
+        lengthCm: it.product?.lengthCm ?? null,
+        widthCm: it.product?.widthCm ?? null,
+        heightCm: it.product?.heightCm ?? null,
+        packageWeightKg: it.product?.packageWeightKg ?? null,
+        packageLengthCm: it.product?.packageLengthCm ?? null,
+        packageWidthCm: it.product?.packageWidthCm ?? null,
+        packageHeightCm: it.product?.packageHeightCm ?? null,
+        sellingUnit: it.product?.sellingUnit ?? null,
+        unitDimensionsJson: it.product?.unitDimensionsJson ?? null,
+        palletCount: it.product?.palletCount ?? null,
+        packagingType: it.product?.packagingType ?? null,
+        isFragile: it.product?.isFragile ?? false,
+        isOversized: it.product?.isOversized ?? false,
+        requiresForklift: it.product?.requiresForklift ?? false,
+        requiresCrane: it.product?.requiresCrane ?? false,
+        requiresSpecialVehicle: it.product?.requiresSpecialVehicle ?? false,
+        specialVehicleType: it.product?.specialVehicleType ?? null,
+        categorySlug: it.product?.category?.slug ?? null,
+        categoryNameAr: it.product?.category?.nameAr ?? null,
+        categoryNameEn: it.product?.category?.nameEn ?? null,
+        isDigital: isItemDigital(it),
+      }));
+
+      const sellerHasPhysical = items.some((it) => !isItemDigital(it));
+
       return {
         sellerId,
         storeId,
         deliveryMethod: resolvedMethod?.code || (isExpress ? 'express' : 'standard'),
         isExpress: isSellerExpress,
+        isDigital: !sellerHasPhysical,
+        heavyItems,
       };
     });
 
@@ -1646,6 +1680,21 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
       });
 
       if (isWalletPayment) {
+        await tx.paymentTransaction.create({
+          data: {
+            paymentId: createdPayment.id,
+            gateway: 'SOUQNAAPAY',
+            referenceId: createdPayment.transactionId,
+            amount: total,
+            status: PaymentStatus.PAID,
+            rawResponse: JSON.stringify({
+              channel: 'WALLET_DEBIT',
+              paidAt: new Date(),
+              transactionId: createdPayment.transactionId,
+            }),
+          },
+        });
+
         // Add history record for SOUQNApay payment
         await tx.orderStatusHistory.create({
           data: {
@@ -1705,8 +1754,8 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
       return { newOrder: createdOrder, createdSellerOrders: sellerOrdersList };
     });
 
-    // Reserve scheduled slot atomically if scheduled
-    if (finalScheduleType === 'SCHEDULED' && deliveryTimeSlotId && deliveryDate) {
+    // Reserve scheduled slot atomically if scheduled (strictly physical deliveries only)
+    if (!isDigitalOnly && finalScheduleType === 'SCHEDULED' && deliveryTimeSlotId && deliveryDate) {
       await deliverySlotService.reserveSlot(newOrder.id, deliveryTimeSlotId, deliveryDate);
     }
 
@@ -1730,8 +1779,8 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           discountFundedBy: promoCostBearer || undefined,
         });
 
-        // Initialize inter-governorate tracking & initial checkpoint
-        if (sq.isInterGovernorate) {
+        // Initialize inter-governorate tracking & initial checkpoint (physical shipments only)
+        if (sq.isInterGovernorate && !sq.isDigital && !isDigitalOnly) {
           await interGovernorateTrackingService.initializeShipment({
             sellerOrderId: so.id,
             originCityName: sq.zoneName?.split('—')[0]?.trim() || 'صنعاء',
@@ -1770,6 +1819,30 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           });
         } catch (err: any) {
           console.warn('[DigitalFulfillment] auto-fulfill error:', err.message);
+        }
+      }
+
+      // If all items in a digital-only seller order are fulfilled, transition to DELIVERED
+      const createdSellerOrders = await prisma.sellerOrder.findMany({
+        where: { orderId: newOrder.id, isDigitalOnly: true },
+        include: { items: true },
+      });
+      for (const so of createdSellerOrders) {
+        const allItemsFulfilled = so.items.every(
+          (it) => it.fulfillmentType === 'DIGITAL' && it.digitalFulfillmentStatus === 'FULFILLED'
+        );
+        if (allItemsFulfilled && so.items.length > 0) {
+          try {
+            await OrderStateMachine.transitionSellerOrder({
+              sellerOrderId: so.id,
+              targetStatus: SellerOrderStatus.DELIVERED,
+              changedBy: req.user!.userId,
+              changedByRole: 'SYSTEM',
+              note: 'تم إتمام التسليم الرقمي الفوري بنجاح للعميل',
+            });
+          } catch (transErr: any) {
+            console.warn('[DigitalFulfillment] failed to transition sellerOrder to DELIVERED:', transErr.message);
+          }
         }
       }
     }

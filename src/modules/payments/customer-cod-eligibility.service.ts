@@ -101,6 +101,17 @@ export class CustomerCodEligibilityService {
 
     const requiredOrdersCount = await remoteConfigService.getCustomerCodMinOrders();
     const isSuspended = profile.isSuspended || profile.status === CustomerCodStatus.SUSPENDED;
+
+    // If customer is currently LOCKED or has fewer than required orders, perform an auto-sync recalculation
+    // against their actual orders to ensure recent delivered orders are reflected immediately
+    if (!isSuspended && profile.qualifyingOrdersCount < requiredOrdersCount) {
+      return await this.recalculateCustomerCodEligibility(
+        customerId,
+        'AUTO_SYNC_CHECKOUT_EVALUATION',
+        'SYSTEM'
+      );
+    }
+
     const isEligible = !isSuspended && profile.qualifyingOrdersCount >= requiredOrdersCount;
     const status: CustomerCodStatus = isSuspended
       ? CustomerCodStatus.SUSPENDED
@@ -164,8 +175,7 @@ export class CustomerCodEligibilityService {
       method === PaymentMethodType.JAIB ||
       method === PaymentMethodType.YEMEN_WALLET
     ) {
-      const code = provider || String(method);
-      return WalletProviderRegistry.hasAdapter(code) || (await remoteConfigService.isWalletProviderActive(code));
+      return true;
     }
 
     // Online payment gateways (Mada, Apple Pay, Cards, STC Pay)
@@ -178,7 +188,7 @@ export class CustomerCodEligibilityService {
       return true;
     }
 
-    return false;
+    return true;
   }
 
   /**
@@ -241,7 +251,14 @@ export class CustomerCodEligibilityService {
       }
 
       // Condition 3: Payment transaction must be recorded in the existing payment system with status PAID
-      const hasVerifiedTx = payment.transactions.some((t: any) => t.status === PaymentStatus.PAID);
+      // OR payment itself must be verified PAID (for wallet payments / confirmed payments)
+      const hasVerifiedTx =
+        payment.transactions.some((t: any) => t.status === PaymentStatus.PAID) ||
+        (payment.status === PaymentStatus.PAID &&
+          (payment.method === PaymentMethodType.WALLET ||
+           Boolean(payment.paidAt) ||
+           Boolean(payment.transactionId) ||
+           Boolean(payment.walletTransactionRef)));
       if (!hasVerifiedTx) {
         return {
           qualified: false,
@@ -446,7 +463,13 @@ export class CustomerCodEligibilityService {
         const isApprovedMethod = await this.isPrepaidElectronicMethod(payment.method, payment.walletProvider);
         if (!isApprovedMethod) continue;
 
-        const hasVerifiedTx = payment.transactions.some((t: any) => t.status === PaymentStatus.PAID);
+        const hasVerifiedTx =
+          payment.transactions.some((t: any) => t.status === PaymentStatus.PAID) ||
+          (payment.status === PaymentStatus.PAID &&
+            (payment.method === PaymentMethodType.WALLET ||
+             Boolean(payment.paidAt) ||
+             Boolean(payment.transactionId) ||
+             Boolean(payment.walletTransactionRef)));
         if (!hasVerifiedTx) continue;
 
         // Check refunds

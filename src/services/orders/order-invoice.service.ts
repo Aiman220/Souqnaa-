@@ -93,7 +93,9 @@ export class OrderInvoiceService {
       sellerOrders,
       summary: {
         subtotal: order.subtotal || 0,
-        deliveryFee: order.deliveryFee || 0,
+        deliveryFee: sellerFilterId
+          ? (filteredSellerOrders[0]?.deliveryFee || 0)
+          : (order.isDigitalOnly ? 0 : (order.deliveryFee || 0)),
         discountAmount: order.discountAmount || 0,
         taxableAmount: Math.max(0, (order.subtotal || 0) - (order.discountAmount || 0)),
         taxAmount: order.taxAmount || 0,

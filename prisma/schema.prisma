@@ -1041,6 +1041,20 @@ model DeliveryQuoteSnapshot {
   sellerContribution    Float?                   @default(0.0)
   marketplaceSubsidy    Float?                   @default(0.0)
   pricingBreakdownJson  String?
+  // Heavy & Bulky Delivery Extensions
+  deliveryMode          String?                  // STANDARD_PARCEL | HEAVY_LOCAL | HEAVY_INTER_GOVERNORATE | OVERSIZED_SPECIAL | MANUAL_QUOTE
+  vehicleClass          String?                  // PICKUP_1T | LIGHT_TRUCK_3T | MEDIUM_TRUCK_5T | HEAVY_TRUCK_10T | TRAILER_30T | FLATBED | LOWBED
+  vehicleClassNameAr    String?
+  vehicleClassNameEn    String?
+  quoteType             String?                  // AUTOMATIC_QUOTE | MANUAL_QUOTE_REQUIRED
+  quoteReason           String?
+  palletCount           Int?
+  loadingFee            Float?                   @default(0.0)
+  unloadingFee          Float?                   @default(0.0)
+  forkliftFee           Float?                   @default(0.0)
+  craneFee              Float?                   @default(0.0)
+  accessSurcharge       Float?                   @default(0.0)
+  requiresManualQuote   Boolean?                 @default(false)
   calculatedAt          DateTime                 @default(now())
 
   @@index([sellerOrderId])
@@ -1318,6 +1332,67 @@ model InterGovernorateAuditLog {
   @@index([createdAt])
 }
 
+// ── Heavy & Bulky Cargo Delivery Engine Models ─────────────────────────────────
+
+model HeavyVehicleClass {
+  id                         String    @id @default(uuid())
+  code                       String    @unique // PICKUP_1T | LIGHT_TRUCK_3T | MEDIUM_TRUCK_5T | HEAVY_TRUCK_10T | TRAILER_30T | FLATBED | LOWBED
+  nameAr                     String    // e.g. "شاحنة خفيفة 3 طن (دينا)"
+  nameEn                     String    // e.g. "Light Truck 3 Ton"
+  maxWeightKg                Float     // Maximum payload in kg
+  maxVolumeCbm               Float     // Maximum cargo volume in cubic meters
+  maxLengthCm                Float     // Maximum cargo length in cm
+  maxWidthCm                 Float     // Maximum cargo width in cm
+  maxHeightCm                Float     // Maximum cargo height in cm
+  baseFee                    Float     // Local minimum base charge (YER)
+  ratePerKm                  Float     // Local per km charge after base radius (YER/km)
+  interGovernorateHireRate   Float     // Dedicated inter-governorate transport hire rate (YER)
+  loadingFee                 Float     @default(0.0) // Standard labor loading charge
+  unloadingFee               Float     @default(0.0) // Standard labor unloading charge
+  supportedCargoTypes        String?   // Comma-separated: TILES,MARBLE,MACHINERY,GENERATORS,SOLAR,DOORS,APPLIANCES,GENERAL_BULKY
+  requiresCrane              Boolean   @default(false)
+  requiresForklift           Boolean   @default(false)
+  isActive                   Boolean   @default(true)
+  priority                   Int       @default(0)
+  notes                      String?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+
+  @@index([isActive])
+  @@index([priority])
+}
+
+model HeavyDeliveryQuote {
+  id                     String    @id @default(uuid())
+  orderId                String?
+  sellerId               String?
+  customerId             String
+  status                 String    @default("PENDING") // PENDING, OFFERED, ACCEPTED, REJECTED, EXPIRED, CANCELLED
+  reason                 String?   // e.g. EXCEEDS_MAX_CAPACITY | INCOMPLETE_SPECIFICATIONS | OVERSIZED_CRANE_REQUIRED
+  cargoType              String?   // TILES, MARBLE, MACHINERY, GENERATORS, SOLAR, DOORS, APPLIANCES, OTHER
+  originGovernorate      String
+  originCity             String?
+  destinationGovernorate String
+  destinationCity        String?
+  totalWeightKg          Float
+  totalVolumeCbm         Float?
+  palletCount            Int?
+  specialEquipment       String?   // FORKLIFT, CRANE, LOWBED, FLATBED
+  notes                  String?
+  quotedFee              Float?
+  currency               String    @default("YER")
+  validUntil             DateTime?
+  reviewedBy             String?   // Admin User ID who provided the quote
+  reviewedAt             DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  @@index([status])
+  @@index([customerId])
+  @@index([sellerId])
+  @@index([createdAt])
+}
+
 // ==========================================
 // 4. CATALOG (CATEGORIES, BRANDS, PRODUCTS)
 // ==========================================
@@ -1386,6 +1461,26 @@ model Product {
   isActive       Boolean            @default(true)
   isSuspended    Boolean            @default(false)
   weight         Float?
+  // Heavy & Bulky Shipping Specifications
+  lengthCm            Float?
+  widthCm             Float?
+  heightCm            Float?
+  packageLengthCm     Float?
+  packageWidthCm      Float?
+  packageHeightCm     Float?
+  packageWeightKg     Float?
+  palletCount         Int?
+  packagingType       String? // BOX, WOODEN_CRATE, PALLET, SLAB_RACK_A_FRAME, LOOSE, BARREL
+  isFragile           Boolean?              @default(false)
+  isOversized         Boolean?              @default(false)
+  requiresForklift    Boolean?              @default(false)
+  requiresCrane       Boolean?              @default(false)
+  requiresSpecialVehicle Boolean?           @default(false)
+  specialVehicleType  String? // FLATBED, LOWBED, BOOM_CRANE_TRUCK, REFRIGERATED
+  loadingRequirements String?
+  unloadingRequirements String?
+  sellingUnit         String? // PIECE, BOX, SQM, SLAB, TON, SET
+  unitDimensionsJson  String? // JSON metadata: { sqmPerBox, piecesPerBox, slabThicknessMm, slabLengthCm, slabWidthCm, boxesPerPallet }
   hasWarranty    Boolean            @default(false)
   warrantyPeriod String?
   warrantyPolicy String?
@@ -1394,6 +1489,7 @@ model Product {
   digitalDeliveryType DigitalDeliveryType?
   digitalFileUrl      String?
   digitalInstructions String?
+  otherProductType    String?
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
 
@@ -1438,6 +1534,7 @@ model Product {
   @@index([isActive, isFeatured, soldCount(sort: Desc)])
   @@index([isActive, price])
   @@index([isActive, rating(sort: Desc)])
+  @@index([otherProductType])
 }
 
 model ProductVariant {

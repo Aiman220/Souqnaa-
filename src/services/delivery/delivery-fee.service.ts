@@ -12,6 +12,13 @@ import { geoService } from '../geo/geo.service';
 import type { GeoCoordinates } from '../geo/providers/map.provider';
 import { interGovernorateRouteService } from './inter-governorate-route.service';
 import { supportedAreasService } from '../../modules/locations/supported-areas.service';
+import {
+  heavyDeliveryService,
+  type HeavyProductShippingInput,
+  type DeliveryCalculationMode,
+  type QuoteType,
+  type HeavyCargoClassification,
+} from './heavy-delivery.service';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
@@ -33,6 +40,9 @@ export interface DeliveryFeeOptions {
   destinationAreaId?: string;
   isRemoteArea?: boolean;
   isSpecialHandling?: boolean;
+  heavyItems?: HeavyProductShippingInput[];
+  accessSurcharge?: number;
+  isDigital?: boolean;
 }
 
 export interface SellerDeliveryQuote {
@@ -46,7 +56,7 @@ export interface SellerDeliveryQuote {
 
 export interface DeliveryQuoteResult {
   deliveryAvailable: boolean;
-  reason?: string; // OUTSIDE_DELIVERY_AREA | NO_ROUTE_FOUND | PROVIDER_UNAVAILABLE | ROUTE_NOT_SERVICEABLE
+  reason?: string; // OUTSIDE_DELIVERY_AREA | NO_ROUTE_FOUND | PROVIDER_UNAVAILABLE | ROUTE_NOT_SERVICEABLE | MANUAL_QUOTE_REQUIRED
 
   distanceKm: number;
   durationMinutes: number;
@@ -67,6 +77,23 @@ export interface DeliveryQuoteResult {
   pricingVersion: string;
   isExpress: boolean;
   isDigital?: boolean;
+
+  // Heavy & Bulky Delivery Engine Extensions
+  deliveryMode?: DeliveryCalculationMode;
+  quoteType?: QuoteType;
+  quoteReason?: string;
+  requiresManualQuote?: boolean;
+  vehicleClass?: string;
+  vehicleClassNameAr?: string;
+  vehicleClassNameEn?: string;
+  palletCount?: number;
+  loadingFee?: number;
+  unloadingFee?: number;
+  forkliftFee?: number;
+  craneFee?: number;
+  accessSurcharge?: number;
+  cargoClassification?: HeavyCargoClassification;
+  cargoDescriptionAr?: string;
 
   // Inter-Governorate route & pricing details
   isInterGovernorate?: boolean;
@@ -274,6 +301,34 @@ export class DeliveryFeeService {
     customerLat: number, customerLng: number,
     options: DeliveryFeeOptions = {},
   ): Promise<DeliveryQuoteResult> {
+    // Authoritative Digital Product Zero-Fee Enforcement (§1, §33)
+    // Digital products must NEVER incur shipping or delivery fees, regardless of weight, express, or distance.
+    const isDigitalOrder = Boolean(
+      options.isDigital ||
+      (options.heavyItems && options.heavyItems.length > 0 && options.heavyItems.every((it) => it.isDigital))
+    );
+
+    if (isDigitalOrder) {
+      return {
+        deliveryAvailable: true,
+        distanceKm: 0,
+        durationMinutes: 0,
+        zoneId: null,
+        zoneName: 'التسليم الرقمي',
+        baseFee: 0,
+        extraSellerFee: 0,
+        weightFee: 0,
+        slotFee: 0,
+        expressFee: 0,
+        deliveryDiscount: 0,
+        deliveryFee: 0,
+        currency: config.marketplace.currency || 'YER',
+        pricingVersion: 'digital-v1',
+        isExpress: false,
+        isDigital: true,
+      };
+    }
+
     const {
       isExpress = false,
       extraSellerFee = 0,
@@ -351,6 +406,80 @@ export class DeliveryFeeService {
     }
 
     const isDifferentAreas = Boolean(originAreaId && destAreaId && originAreaId !== destAreaId);
+
+    // 1.2 Heavy & Bulky Cargo Logistics Evaluation (§2 - §6)
+    // Filter out any digital items from heavy cargo and weight evaluation
+    const physicalHeavyItems = options.heavyItems && options.heavyItems.length > 0
+      ? options.heavyItems.filter((it) => !it.isDigital)
+      : undefined;
+
+    const itemsToAnalyze: HeavyProductShippingInput[] = physicalHeavyItems && physicalHeavyItems.length > 0
+      ? physicalHeavyItems
+      : [
+          {
+            quantity: 1,
+            weightKg: options.weightKg || 0,
+            lengthCm: options.lengthCm || 0,
+            widthCm: options.widthCm || 0,
+            heightCm: options.heightCm || 0,
+            isSpecialHandling: options.isSpecialHandling,
+          },
+        ];
+
+    const cargo = heavyDeliveryService.analyzeShipmentCargo(itemsToAnalyze);
+
+    if (cargo.isHeavyOrBulky) {
+      const vehicleMatch = await heavyDeliveryService.matchVehicle(cargo);
+      const heavyPricing = heavyDeliveryService.calculateHeavyPricing(cargo, vehicleMatch, {
+        distanceKm,
+        isInterGovernorate: isDifferentAreas,
+        originGovernorate: originAreaId,
+        destinationGovernorate: destAreaId,
+        accessSurcharge: options.accessSurcharge,
+        discountAmount,
+      });
+
+      const heavyResult: DeliveryQuoteResult = {
+        deliveryAvailable: true,
+        reason: heavyPricing.requiresManualQuote ? (heavyPricing.quoteReason || 'MANUAL_QUOTE_REQUIRED') : undefined,
+        distanceKm,
+        durationMinutes: isDifferentAreas ? Math.round((distanceKm / 45) * 60) + 15 : durationMinutes,
+        zoneId: null,
+        zoneName: isDifferentAreas
+          ? `${originAreaId || 'المصدر'} إلى ${destAreaId || 'الوجهة'} (${heavyPricing.vehicleNameAr})`
+          : heavyPricing.vehicleNameAr,
+        baseFee: heavyPricing.baseFee,
+        extraSellerFee: heavyPricing.distanceCharge,
+        weightFee: heavyPricing.specialHandlingFee,
+        slotFee,
+        expressFee: 0,
+        deliveryDiscount: heavyPricing.deliveryDiscount,
+        discountFundedBy,
+        deliveryFee: heavyPricing.finalDeliveryFee,
+        currency,
+        pricingVersion,
+        isExpress: false,
+        isInterGovernorate: isDifferentAreas,
+        deliveryMode: heavyPricing.deliveryMode,
+        quoteType: heavyPricing.quoteType,
+        quoteReason: heavyPricing.quoteReason,
+        requiresManualQuote: heavyPricing.requiresManualQuote,
+        vehicleClass: heavyPricing.vehicleCode,
+        vehicleClassNameAr: heavyPricing.vehicleNameAr,
+        vehicleClassNameEn: heavyPricing.vehicleNameEn,
+        palletCount: heavyPricing.palletCount,
+        loadingFee: heavyPricing.loadingFee,
+        unloadingFee: heavyPricing.unloadingFee,
+        forkliftFee: heavyPricing.forkliftFee,
+        craneFee: heavyPricing.craneFee,
+        accessSurcharge: heavyPricing.accessSurcharge,
+        cargoClassification: cargo.classification,
+        cargoDescriptionAr: cargo.cargoDescriptionAr,
+      };
+
+      setCached(cacheKey, heavyResult);
+      return heavyResult;
+    }
 
     if (isDifferentAreas) {
       const isInterEnabled = await interGovernorateRouteService.isInterGovernorateEnabled();
@@ -519,7 +648,12 @@ export class DeliveryFeeService {
     }
 
     // 5. Weight/size fee (§20 — architecture ready, not complex yet)
-    const weightFee = Math.round(weightKg * weightFeePerKg);
+    let effectiveWeightKg = weightKg;
+    if (options.heavyItems && options.heavyItems.length > 0) {
+      const physicalItems = options.heavyItems.filter((it) => !it.isDigital);
+      effectiveWeightKg = physicalItems.reduce((sum, it) => sum + ((it.weightKg || it.packageWeightKg || 0) * (it.quantity || 1)), 0);
+    }
+    const weightFee = Math.round(effectiveWeightKg * weightFeePerKg);
 
     // 6. Express fee (§19)
     const expressFee = (isExpress && settings.expressEnabled) ? settings.expressFeeFixed : 0;

@@ -46,7 +46,7 @@ async function runSeasonalLauncherEngineTests() {
           {
             defaultIconId: 'seller_default',
             defaultIconUrl: '/uploads/branding/seller_app_icon.png',
-            seasonalIconId: 'seller_seasonal',
+            seasonalIconId: 'seller_sale_1_1',
             seasonalIconUrl: '',
             seasonalEnabled: false,
           },
@@ -58,7 +58,7 @@ async function runSeasonalLauncherEngineTests() {
           {
             defaultIconId: 'seller_default',
             defaultIconUrl: '/uploads/branding/seller_app_icon.png',
-            seasonalIconId: 'seller_seasonal',
+            seasonalIconId: 'seller_sale_1_1',
             seasonalIconUrl: '',
             seasonalEnabled: false,
           },
@@ -102,12 +102,16 @@ async function runSeasonalLauncherEngineTests() {
   assert(APPROVED_CUSTOMER_APP_ICONS.includes('sale_1_1'), 'Customer supports sale_1_1');
   assert(APPROVED_CUSTOMER_APP_ICONS.includes('sale_11_11'), 'Customer supports sale_11_11');
   assert(APPROVED_CUSTOMER_APP_ICONS.includes('sale_12_12'), 'Customer supports sale_12_12');
-  assert(APPROVED_SELLER_APP_ICONS.includes('pro'), 'Seller supports pro');
-  assert(APPROVED_SELLER_APP_ICONS.includes('gold'), 'Seller supports gold');
+  assert(APPROVED_SELLER_APP_ICONS.includes('seller_sale_1_1'), 'Seller supports seller_sale_1_1');
+  assert(APPROVED_SELLER_APP_ICONS.includes('seller_brand_glossy'), 'Seller supports seller_brand_glossy');
+  assert(APPROVED_SELLER_APP_ICONS.includes('brand_glossy'), 'Seller supports brand_glossy');
+  assert(APPROVED_SELLER_APP_ICONS.includes('ramadan'), 'Seller supports ramadan');
+  assert(APPROVED_SELLER_APP_ICONS.includes('winter'), 'Seller supports winter');
 
   // Normalization logic respects app type
   assert.strictEqual(launcherCampaignService.normalizeIconId('sale_11_11', 'CUSTOMER'), 'sale_11_11');
-  assert.strictEqual(launcherCampaignService.normalizeIconId('gold', 'SELLER'), 'gold');
+  assert.strictEqual(launcherCampaignService.normalizeIconId('sale_1_1', 'SELLER'), 'seller_sale_1_1');
+  assert.strictEqual(launcherCampaignService.normalizeIconId('brand_glossy', 'SELLER'), 'seller_brand_glossy');
   console.log('  ✓ PASS: Registries cleanly isolate customer and seller identifiers');
 
   // ═════════════════════════════════════════════════════════════════════════════
@@ -218,7 +222,7 @@ async function runSeasonalLauncherEngineTests() {
     'ANDROID',
     {
       seasonalEnabled: true,
-      seasonalIconId: 'seller_seasonal',
+      seasonalIconId: 'seller_sale_1_1',
       seasonalIconUrl: 'https://souqnaa.ye/uploads/branding/seller_expo.png',
       campaignName: 'معرض التجار السنوي',
       campaignDeepLink: 'souqnaa-seller://campaign/expo',
@@ -233,7 +237,7 @@ async function runSeasonalLauncherEngineTests() {
     appType: 'seller',
     platform: 'android',
   });
-  assert.strictEqual(sellerAndroidResolved.branding.customerAppIcon, 'seller_seasonal');
+  assert.strictEqual(sellerAndroidResolved.branding.customerAppIcon, 'seller_sale_1_1');
   assert.strictEqual(
     sellerAndroidResolved.branding.platforms.android.iconUrl,
     'https://souqnaa.ye/uploads/branding/seller_expo.png'
