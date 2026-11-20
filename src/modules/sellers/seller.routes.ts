@@ -1349,10 +1349,29 @@ router.get('/dashboard', async (req: Request, res: Response, next: NextFunction)
                 id: true,
                 nameAr: true,
                 nameEn: true,
+                fulfillmentType: true,
+                digitalDeliveryType: true,
+                digitalInstructions: true,
                 images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
               },
             },
             variant: { select: { id: true, nameAr: true, nameEn: true, sku: true, price: true, image: true } },
+            digitalFulfillment: {
+              select: {
+                id: true,
+                status: true,
+                deliveryType: true,
+                maskedPayload: true,
+                downloadUrl: true,
+                photoUrl: true,
+                notes: true,
+                firstAccessedAt: true,
+                sellerNotifiedOfAccess: true,
+                downloadExpiresAt: true,
+                failureReason: true,
+                fulfilledAt: true,
+              },
+            },
           },
         },
       },
@@ -1484,6 +1503,7 @@ async function fetchSellerProducts(userId: string) {
       variants: true,
       inventory: true,
       category: true,
+      attributes: true,
     },
     orderBy: { createdAt: 'desc' },
   });
@@ -1503,6 +1523,7 @@ async function fetchSellerProductById(userId: string, productId: string) {
       inventory: true,
       category: true,
       brand: true,
+      attributes: true,
     },
   });
 
@@ -1704,6 +1725,18 @@ async function createSellerProduct(userId: string, body: any) {
       });
     }
 
+    if (Array.isArray(body.attributes) && body.attributes.length > 0) {
+      await tx.productAttribute.createMany({
+        data: body.attributes.map((a: any) => ({
+          productId: created.id,
+          keyAr: (a.keyAr || a.key || '').toString().trim(),
+          keyEn: (a.keyEn || a.key || a.keyAr || '').toString().trim(),
+          valueAr: (a.valueAr || a.value || '').toString().trim(),
+          valueEn: (a.valueEn || a.value || a.valueAr || '').toString().trim(),
+        })),
+      });
+    }
+
     return await tx.product.findUnique({
       where: { id: created.id },
       include: {
@@ -1711,6 +1744,7 @@ async function createSellerProduct(userId: string, body: any) {
         variants: true,
         inventory: true,
         category: true,
+        attributes: true,
       },
     });
   });
@@ -1888,6 +1922,22 @@ async function updateSellerProduct(userId: string, productId: string, body: any)
       }
     }
 
+    // 3.5. Update Attributes if provided
+    if (Array.isArray(body.attributes)) {
+      await tx.productAttribute.deleteMany({ where: { productId } });
+      if (body.attributes.length > 0) {
+        await tx.productAttribute.createMany({
+          data: body.attributes.map((a: any) => ({
+            productId,
+            keyAr: (a.keyAr || a.key || '').toString().trim(),
+            keyEn: (a.keyEn || a.key || a.keyAr || '').toString().trim(),
+            valueAr: (a.valueAr || a.value || '').toString().trim(),
+            valueEn: (a.valueEn || a.value || a.valueAr || '').toString().trim(),
+          })),
+        });
+      }
+    }
+
     // 4. Update Inventory
     const totalVarStock = Array.isArray(variants) && variants.length > 0
       ? variants.reduce((sum: number, v: any) => sum + (parseInt(v.stockQuantity || v.stock || '0', 10) || 0), 0)
@@ -1909,6 +1959,7 @@ async function updateSellerProduct(userId: string, productId: string, body: any)
         inventory: true,
         category: true,
         brand: true,
+        attributes: true,
       },
     });
   });
@@ -2264,10 +2315,24 @@ router.get('/me/orders', async (req: Request, res: Response, next: NextFunction)
                   id: true,
                   nameAr: true,
                   nameEn: true,
+                  fulfillmentType: true,
+                  digitalDeliveryType: true,
                   images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
                 },
               },
               variant: { select: { id: true, nameAr: true, nameEn: true, sku: true, price: true, image: true } },
+              digitalFulfillment: {
+                select: {
+                  id: true,
+                  status: true,
+                  deliveryType: true,
+                  maskedPayload: true,
+                  downloadUrl: true,
+                  photoUrl: true,
+                  notes: true,
+                  fulfilledAt: true,
+                },
+              },
             },
           },
           deliveryMethod: true,
@@ -2299,11 +2364,17 @@ router.get('/me/orders', async (req: Request, res: Response, next: NextFunction)
         });
       }
 
+      const isDigitalOnly = (o.items || []).length > 0 && (o.items || []).every((it: any) => it.fulfillmentType === 'DIGITAL' || it.product?.fulfillmentType === 'DIGITAL');
+      const hasDigital = (o.items || []).some((it: any) => it.fulfillmentType === 'DIGITAL' || it.product?.fulfillmentType === 'DIGITAL');
+
       const delivMethod = o.deliveryMethod || o.order?.deliveryMethod;
       const scheduleType = String(o.order?.deliveryScheduleType || (o as any).deliveryScheduleType || '').toUpperCase();
       let deliveryMethodName = delivMethod?.nameAr || delivMethod?.nameEn || '';
       let deliveryMethodCode = delivMethod?.code || '';
-      if (!deliveryMethodName) {
+      if (isDigitalOnly) {
+        deliveryMethodName = 'تسليم رقمي فوري ⚡';
+        deliveryMethodCode = 'digital';
+      } else if (!deliveryMethodName) {
         if (scheduleType === 'EXPRESS') {
           deliveryMethodName = 'توصيل سريع — إكسبرس';
           deliveryMethodCode = 'express';
@@ -2320,16 +2391,25 @@ router.get('/me/orders', async (req: Request, res: Response, next: NextFunction)
 
       return {
         ...o,
+        isDigitalOnly,
+        hasDigital,
         deliveryMethodName,
         deliveryMethodCode,
-        items: (o.items || []).map((item: any) => ({
-          ...item,
-          variantName: item.variant?.nameAr || item.variant?.nameEn || null,
-          variantNameAr: item.variant?.nameAr || null,
-          variantNameEn: item.variant?.nameEn || null,
-          sku: item.variant?.sku || item.sku || item.product?.sku || null,
-          productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
-        })),
+        items: (o.items || []).map((item: any) => {
+          const isItemDigital = item.fulfillmentType === 'DIGITAL' || item.product?.fulfillmentType === 'DIGITAL';
+          return {
+            ...item,
+            isDigital: isItemDigital,
+            fulfillmentType: item.fulfillmentType || item.product?.fulfillmentType || 'PHYSICAL',
+            digitalDeliveryType: item.digitalDeliveryType || item.product?.digitalDeliveryType || null,
+            digitalFulfillment: item.digitalFulfillment || null,
+            variantName: item.variant?.nameAr || item.variant?.nameEn || null,
+            variantNameAr: item.variant?.nameAr || null,
+            variantNameEn: item.variant?.nameEn || null,
+            sku: item.variant?.sku || item.sku || item.product?.sku || null,
+            productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
+          };
+        }),
         notes: (o as any).notes || o.order?.notes || null,
         returnReason: firstRefund?.reasonText || firstReturn?.reason || (o as any).returnReason || null,
         returnDescription: firstRefund?.description || firstReturn?.description || (o as any).returnDescription || null,
@@ -2394,10 +2474,29 @@ router.get('/me/orders/:id', async (req: Request, res: Response, next: NextFunct
                 id: true,
                 nameAr: true,
                 nameEn: true,
+                fulfillmentType: true,
+                digitalDeliveryType: true,
+                digitalInstructions: true,
                 images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
               },
             },
             variant: { select: { id: true, nameAr: true, nameEn: true, sku: true, price: true, image: true } },
+            digitalFulfillment: {
+              select: {
+                id: true,
+                status: true,
+                deliveryType: true,
+                maskedPayload: true,
+                downloadUrl: true,
+                photoUrl: true,
+                notes: true,
+                firstAccessedAt: true,
+                sellerNotifiedOfAccess: true,
+                downloadExpiresAt: true,
+                failureReason: true,
+                fulfilledAt: true,
+              },
+            },
           },
         },
         deliveryMethod: true,
@@ -2428,11 +2527,17 @@ router.get('/me/orders/:id', async (req: Request, res: Response, next: NextFunct
       });
     }
 
+    const isDigitalOnly = (order.items || []).length > 0 && (order.items || []).every((it: any) => it.fulfillmentType === 'DIGITAL' || it.product?.fulfillmentType === 'DIGITAL');
+    const hasDigital = (order.items || []).some((it: any) => it.fulfillmentType === 'DIGITAL' || it.product?.fulfillmentType === 'DIGITAL');
+
     const delivMethod = order.deliveryMethod || order.order?.deliveryMethod;
     const scheduleType = String(order.order?.deliveryScheduleType || (order as any).deliveryScheduleType || '').toUpperCase();
     let deliveryMethodName = delivMethod?.nameAr || delivMethod?.nameEn || '';
     let deliveryMethodCode = delivMethod?.code || '';
-    if (!deliveryMethodName) {
+    if (isDigitalOnly) {
+      deliveryMethodName = 'تسليم رقمي فوري ⚡';
+      deliveryMethodCode = 'digital';
+    } else if (!deliveryMethodName) {
       if (scheduleType === 'EXPRESS') {
         deliveryMethodName = 'توصيل سريع — إكسبرس';
         deliveryMethodCode = 'express';
@@ -2449,16 +2554,25 @@ router.get('/me/orders/:id', async (req: Request, res: Response, next: NextFunct
 
     const enrichedOrder = {
       ...order,
+      isDigitalOnly,
+      hasDigital,
       deliveryMethodName,
       deliveryMethodCode,
-      items: (order.items || []).map((item: any) => ({
-        ...item,
-        variantName: item.variant?.nameAr || item.variant?.nameEn || null,
-        variantNameAr: item.variant?.nameAr || null,
-        variantNameEn: item.variant?.nameEn || null,
-        sku: item.variant?.sku || item.sku || item.product?.sku || null,
-        productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
-      })),
+      items: (order.items || []).map((item: any) => {
+        const isItemDigital = item.fulfillmentType === 'DIGITAL' || item.product?.fulfillmentType === 'DIGITAL';
+        return {
+          ...item,
+          isDigital: isItemDigital,
+          fulfillmentType: item.fulfillmentType || item.product?.fulfillmentType || 'PHYSICAL',
+          digitalDeliveryType: item.digitalDeliveryType || item.product?.digitalDeliveryType || null,
+          digitalFulfillment: item.digitalFulfillment || null,
+          variantName: item.variant?.nameAr || item.variant?.nameEn || null,
+          variantNameAr: item.variant?.nameAr || null,
+          variantNameEn: item.variant?.nameEn || null,
+          sku: item.variant?.sku || item.sku || item.product?.sku || null,
+          productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
+        };
+      }),
       notes: (order as any).notes || order.order?.notes || null,
       returnReason: firstRefund?.reasonText || firstReturn?.reason || (order as any).returnReason || null,
       returnDescription: firstRefund?.description || firstReturn?.description || (order as any).returnDescription || null,
@@ -2778,6 +2892,10 @@ async function getFullSellerOrder(sellerOrderId: string) {
               deliveryType: true,
               maskedPayload: true,
               downloadUrl: true,
+              photoUrl: true,
+              notes: true,
+              firstAccessedAt: true,
+              sellerNotifiedOfAccess: true,
               downloadExpiresAt: true,
               failureReason: true,
               fulfilledAt: true,
@@ -2935,7 +3053,7 @@ router.post('/me/orders/:id/fulfill-digital', async (req: Request, res: Response
       throw new AppError('لا يمكن تنفيذ التسليم الرقمي قبل تأكيد واعتماد سداد الطلب', 400, 'PAYMENT_VERIFICATION_REQUIRED');
     }
 
-    const { itemId, manualPayload } = req.body;
+    const { itemId, manualPayload, photoUrl, downloadUrl, notes } = req.body;
     const itemsToFulfill = itemId
       ? sellerOrder.items.filter((it) => it.id === itemId)
       : sellerOrder.items.filter((it) => it.digitalFulfillmentStatus !== DigitalFulfillmentStatus.FULFILLED);
@@ -2947,16 +3065,19 @@ router.post('/me/orders/:id/fulfill-digital', async (req: Request, res: Response
 
     const fulfillmentResults = [];
     for (const it of itemsToFulfill) {
-      if (manualPayload && it.id === itemId) {
-        // Manual override for special service, voucher or license key
-        const enc = digitalFulfillmentService.encryptSensitivePayload(manualPayload);
-        const masked = digitalFulfillmentService.maskCode(manualPayload);
+      if ((manualPayload || photoUrl || downloadUrl || notes) && (it.id === itemId || itemsToFulfill.length === 1)) {
+        // Manual override for code, voucher photo, download link, or fulfillment notes
+        const enc = manualPayload ? digitalFulfillmentService.encryptSensitivePayload(manualPayload) : (it.digitalFulfillment?.encryptedPayload || null);
+        const masked = manualPayload ? digitalFulfillmentService.maskCode(manualPayload) : (it.digitalFulfillment?.maskedPayload || null);
         const updatedDf = await prisma.digitalFulfillment.upsert({
           where: { orderItemId: it.id },
           update: {
             status: DigitalFulfillmentStatus.FULFILLED,
-            encryptedPayload: enc,
-            maskedPayload: masked,
+            ...(enc ? { encryptedPayload: enc } : {}),
+            ...(masked ? { maskedPayload: masked } : {}),
+            ...(photoUrl ? { photoUrl } : {}),
+            ...(downloadUrl ? { downloadUrl } : {}),
+            ...(notes ? { notes } : {}),
             failureReason: null,
             fulfilledAt: new Date(),
           },
@@ -2966,11 +3087,14 @@ router.post('/me/orders/:id/fulfill-digital', async (req: Request, res: Response
             sellerOrderId: sellerOrder.id,
             productId: it.productId,
             customerId: sellerOrder.order.userId,
-            deliveryType: it.product.digitalDeliveryType || DigitalDeliveryType.CODE,
+            deliveryType: it.product.digitalDeliveryType || (photoUrl ? DigitalDeliveryType.MANUAL_OR_EXTERNAL_API : DigitalDeliveryType.CODE),
             status: DigitalFulfillmentStatus.FULFILLED,
             idempotencyKey: `seller_ful_${it.id}_${Date.now()}`,
             encryptedPayload: enc,
             maskedPayload: masked,
+            photoUrl: photoUrl || null,
+            downloadUrl: downloadUrl || null,
+            notes: notes || null,
             fulfilledAt: new Date(),
           },
         });

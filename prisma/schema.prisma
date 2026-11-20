@@ -1918,6 +1918,10 @@ model DigitalFulfillment {
   failureReason      String?
   providerRef        String?
   fulfilledAt        DateTime?
+  photoUrl           String?                  @db.Text
+  notes              String?                  @db.Text
+  firstAccessedAt    DateTime?
+  sellerNotifiedOfAccess Boolean              @default(false)
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
 

@@ -10,6 +10,7 @@ import { cartAbandonmentService } from './abandonment/cart-abandonment.service';
 import { FlashSaleService } from '../flash-sales/flash-sale.service';
 import { deliveryServiceabilityService } from '../../services/delivery/delivery-serviceability.service';
 import { RemoteConfigService } from '../remote-config/remote-config.service';
+import { MoneyUtil } from '../../utils/money.util';
 
 const router = Router();
 router.use(authenticate);
@@ -110,8 +111,8 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
         }
       }
 
-      const itemTotal = unitPrice * item.quantity;
-      subtotal += itemTotal;
+      const itemTotal = MoneyUtil.multiply(unitPrice, item.quantity);
+      subtotal = MoneyUtil.add(subtotal, itemTotal);
 
       if (!storeMap[storeId]) {
         storeMap[storeId] = {
@@ -140,7 +141,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
         reservationExpired,
         reservationExpiresAt: isFlashSaleActive ? item.reservationExpiresAt : null,
       });
-      storeMap[storeId].subtotal += itemTotal;
+      storeMap[storeId].subtotal = MoneyUtil.add(storeMap[storeId].subtotal, itemTotal);
     }
 
     const stores = Object.values(storeMap);

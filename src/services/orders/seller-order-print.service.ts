@@ -364,8 +364,51 @@ export class SellerOrderPrintService {
     let deliveryMethodDescriptionAr = '';
     let deliveryPricingNoteAr = '';
 
+    const snapshot: any = (sellerOrder as any).deliveryQuoteSnapshot || (parentOrder as any).deliveryQuoteSnapshot || null;
+    const delivMode = String(snapshot?.deliveryMode || (sellerOrder as any).deliveryMode || (parentOrder as any).deliveryMode || '').toUpperCase().trim();
+    const isHeavyDelivery = Boolean(
+      delivMode === 'HEAVY_LOCAL' ||
+      delivMode === 'HEAVY_INTER_GOVERNORATE' ||
+      delivMode === 'OVERSIZED_SPECIAL' ||
+      delivMode === 'MANUAL_QUOTE' ||
+      methodCode.includes('heavy') ||
+      methodName.includes('ثقيل') ||
+      methodName.includes('Heavy')
+    );
+
+    // 0. Heavy & Bulky Delivery
+    if (isHeavyDelivery) {
+      let vName = snapshot?.vehicleClassNameAr || '';
+      if (!vName) {
+        const vClass = String(snapshot?.vehicleClass || '').toUpperCase().trim();
+        switch (vClass) {
+          case 'PICKUP_1T': vName = 'ونيت نقل خفيف 1 طن'; break;
+          case 'LIGHT_TRUCK_3T': vName = 'دينا خفيفة 3 طن'; break;
+          case 'MEDIUM_TRUCK_5T': vName = 'شاحنة متوسطة 5 طن'; break;
+          case 'HEAVY_TRUCK_10T': vName = 'شاحنة ثقيلة 10 طن'; break;
+          case 'TRAILER_30T': vName = 'تريلا / قاطرة ومقطورة 30 طن'; break;
+          case 'FLATBED': vName = 'سطحة لنقل المعدات'; break;
+          case 'LOWBED': vName = 'لوبد لنقل المعدات الثقيلة'; break;
+          default: vName = snapshot?.vehicleClass || 'شاحنة نقل ثقيل';
+        }
+      }
+      const pallets = Number(snapshot?.palletCount || 0);
+      const reqForklift = Boolean(snapshot?.requiresForklift);
+      const reqCrane = Boolean(snapshot?.requiresCrane);
+
+      deliveryMethodAr = `شحن بضائع ثقيلة (${vName})${pallets > 0 ? ` - ${pallets} طبلية` : ''}`;
+      deliveryMethodEn = `Heavy Cargo Delivery (${snapshot?.vehicleClassNameEn || snapshot?.vehicleClass || 'Heavy Truck'})`;
+      deliveryMethodBadgeAr = 'شحن ثقيل 🏗️🚛';
+
+      const descParts: string[] = [`المركبة: ${vName}`];
+      if (pallets > 0) descParts.push(`الطبالي: ${pallets}`);
+      if (reqForklift) descParts.push('رافعة شوكية');
+      if (reqCrane) descParts.push('ونش بوم');
+      deliveryMethodDescriptionAr = descParts.join(' • ');
+      deliveryPricingNoteAr = snapshot?.requiresManualQuote ? 'تسعير مخصص بعد المعاينة' : 'تسعير تلقائي معتمد';
+    }
     // 1. Inter-Governorate Methods
-    if (isInterGovernorateShipment) {
+    else if (isInterGovernorateShipment) {
       if (
         methodCode === 'inter_governorate_express' ||
         (isExpress && !methodCode.includes('standard') && !methodCode.includes('pickup') && !methodCode.includes('courier')) ||
@@ -1402,6 +1445,7 @@ export class SellerOrderPrintService {
         <div class="meta-row"><span class="lbl">تاريخ ووقت الشراء:</span><span class="val">${d.orderDateFormattedAr}</span></div>
         <div class="meta-row"><span class="lbl">حالة معالجة الطلب:</span><span class="val" style="color:${d.orderStatusColor}; font-weight:800;">${d.orderStatusAr}</span></div>
         <div class="meta-row"><span class="lbl">طريقة التوصيل والشحن:</span><span class="val" style="font-weight:800;">${d.deliveryMethodAr}</span></div>
+        ${d.deliveryMethodDescriptionAr ? `<div class="meta-row"><span class="lbl">مواصفات الشحن والتفريغ:</span><span class="val" style="font-weight:700; color:#0f766e;">${d.deliveryMethodDescriptionAr}</span></div>` : ''}
         ${d.interGovernorateRouteKey ? `<div class="meta-row"><span class="lbl">المسار المعتمد:</span><span class="val" style="font-weight:700; color:#0f766e;">${d.interGovernorateRouteKey}</span></div>` : ''}
         ${d.carrierName ? `<div class="meta-row"><span class="lbl">الناقل اللوجستي:</span><span class="val">${d.carrierName}</span></div>` : ''}
         ${d.trackingNumber ? `<div class="meta-row"><span class="lbl">رقم التتبع:</span><span class="val" dir="ltr" style="font-family:monospace; font-weight:800; color:#ea580c;">${d.trackingNumber}</span></div>` : ''}
@@ -1690,6 +1734,7 @@ export class SellerOrderPrintService {
   <div class="row tight"><span>طريقة الدفع:</span><span class="bold">${d.paymentMethodAr}</span></div>
   <div class="row tight"><span>حالة الدفع:</span><span class="bold">${d.paymentStatusAr}</span></div>
   <div class="row tight"><span>طريقة التوصيل:</span><span class="bold">${d.deliveryMethodAr}</span></div>
+  ${d.deliveryMethodDescriptionAr ? `<div class="row tight"><span>مواصفات الشحن:</span><span class="bold" style="color: #0f766e;">${d.deliveryMethodDescriptionAr}</span></div>` : ''}
   <div class="row tight"><span>العميل:</span><span>${d.customer.name}</span></div>
   <div class="row tight"><span>الهاتف:</span><span dir="ltr">${d.customer.phone}</span></div>
   <div class="row tight"><span>العنوان:</span><span>${d.customer.deliveryAddress.cityName} - ${d.customer.deliveryAddress.neighborhood || d.customer.deliveryAddress.street || ''}</span></div>
@@ -2072,6 +2117,7 @@ export class SellerOrderPrintService {
         <div>اسم العميل المستلم: <strong>${d.customer.name}</strong></div>
         <div>رقم هاتف التواصل: <strong dir="ltr">${d.customer.phone}</strong></div>
         <div style="grid-column: span 2;">طريقة الشحن والتوصيل: <strong style="color: #0284c7;">${d.deliveryMethodAr}</strong></div>
+        ${d.deliveryMethodDescriptionAr ? `<div style="grid-column: span 2;">مواصفات الشحن والتفريغ: <strong style="color: #0f766e;">${d.deliveryMethodDescriptionAr}</strong></div>` : ''}
         <div style="grid-column: span 2;">عنوان التوصيل: <strong>${d.customer.deliveryAddress.formatted}</strong></div>
         ${d.customer.deliveryAddress.plusCode ? `<div style="grid-column: span 2;">رمز الموقع الرقمي: <strong dir="ltr" style="font-family: monospace; color: #0284c7;">${d.customer.deliveryAddress.plusCode}</strong></div>` : ''}
         ${d.deliveryNotes ? `

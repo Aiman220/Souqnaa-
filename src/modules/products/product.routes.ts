@@ -551,12 +551,14 @@ router.post('/', authenticate, requireSeller, async (req: Request, res: Response
             })),
           },
           attributes: {
-            create: attributes.map((attr: any) => ({
-              keyAr: attr.keyAr,
-              keyEn: attr.keyEn,
-              valueAr: attr.valueAr,
-              valueEn: attr.valueEn,
-            })),
+            create: attributes
+              .filter((attr: any) => (attr.keyAr || attr.keyEn || '').trim().length > 0)
+              .map((attr: any) => ({
+                keyAr: String(attr.keyAr || attr.keyEn || '').trim(),
+                keyEn: String(attr.keyEn || attr.keyAr || '').trim(),
+                valueAr: String(attr.valueAr || attr.valueEn || '').trim(),
+                valueEn: String(attr.valueEn || attr.valueAr || '').trim(),
+              })),
           },
           variants: {
             create: variants.map((v: any, idx: number) => ({
@@ -791,6 +793,26 @@ router.put('/:id', authenticate, requireSeller, async (req: Request, res: Respon
               compareAtPrice: v.compareAtPrice ? parseFloat(v.compareAtPrice) : null,
               stockQuantity: parseInt(v.stockQuantity || v.stock || '0', 10) || 0,
               image: v.image || null,
+            })),
+          });
+        }
+      });
+    }
+
+    if (Array.isArray(req.body.attributes)) {
+      await prisma.$transaction(async (tx) => {
+        await tx.productAttribute.deleteMany({ where: { productId: id } });
+        const validAttrs = req.body.attributes.filter(
+          (attr: any) => (attr.keyAr || attr.keyEn || '').trim().length > 0
+        );
+        if (validAttrs.length > 0) {
+          await tx.productAttribute.createMany({
+            data: validAttrs.map((attr: any) => ({
+              productId: id,
+              keyAr: String(attr.keyAr || attr.keyEn || '').trim(),
+              keyEn: String(attr.keyEn || attr.keyAr || '').trim(),
+              valueAr: String(attr.valueAr || attr.valueEn || '').trim(),
+              valueEn: String(attr.valueEn || attr.valueAr || '').trim(),
             })),
           });
         }

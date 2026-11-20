@@ -386,7 +386,7 @@ export class RemoteConfigService {
         badgeText: selAndroid.campaignName || sellerBranding.platforms.android.badgeText,
         seasonalEnabled: selAndroid.seasonalEnabled,
         seasonalIconUrl: selAndroid.seasonalIconUrl || '',
-        seasonalIconId: selAndroid.seasonalIconId || 'seller_seasonal',
+        seasonalIconId: selAndroid.seasonalIconId || 'seller_sale_1_1',
         campaignName: selAndroid.campaignName || '',
         campaignDeepLink: selAndroid.campaignDeepLink || '',
         campaignStartAt: selAndroid.campaignStartAt ? selAndroid.campaignStartAt.toISOString() : null,
@@ -402,7 +402,7 @@ export class RemoteConfigService {
         badgeText: selIos.campaignName || sellerBranding.platforms.ios.badgeText,
         seasonalEnabled: selIos.seasonalEnabled,
         seasonalIconUrl: selIos.seasonalIconUrl || '',
-        seasonalIconId: selIos.seasonalIconId || 'seller_seasonal',
+        seasonalIconId: selIos.seasonalIconId || 'seller_sale_1_1',
         campaignName: selIos.campaignName || '',
         campaignDeepLink: selIos.campaignDeepLink || '',
         campaignStartAt: selIos.campaignStartAt ? selIos.campaignStartAt.toISOString() : null,
@@ -1360,7 +1360,7 @@ export class RemoteConfigService {
 
       const seasonalTarget = updates.seasonalIcon?.iconUrl
         ? launcherCampaignService.normalizeIconId(updates.seasonalIcon.iconUrl, appType, true)
-        : (isCustomer ? 'sale_1_1' : 'seller_seasonal');
+        : (isCustomer ? 'sale_1_1' : 'seller_sale_1_1');
 
       const androidSeasonalTarget = updates.platforms?.android?.seasonalIconUrl
         ? launcherCampaignService.normalizeIconId(updates.platforms.android.seasonalIconUrl, appType, true)
@@ -1436,7 +1436,9 @@ export class RemoteConfigService {
           adminUser
         ),
       ]);
-    } catch (_) {}
+    } catch (err: any) {
+      console.error('[updateBrandingConfig] Synchronize LauncherIconConfig warning:', err?.message || err);
+    }
 
     // 5. Increment global system configuration version
     const versionSetting = await prisma.systemSetting.findUnique({

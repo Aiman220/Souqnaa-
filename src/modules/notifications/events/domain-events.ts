@@ -273,6 +273,34 @@ export class NotificationEventFactory {
     };
   }
 
+  static sellerCustomerAccessedDigitalEvent(params: {
+    recipientId: string;
+    orderId: string;
+    sellerOrderId?: string;
+    orderNumber: string;
+    productName?: string;
+  }): DomainNotificationEvent {
+    return {
+      eventId: randomUUID(),
+      idempotencyKey: `seller_dig_access_${params.orderId}_${params.recipientId}`,
+      eventType: 'SELLER_CUSTOMER_ACCESSED_DIGITAL',
+      category: NotificationCategory.ORDER,
+      priority: NotificationPriority.HIGH,
+      recipientId: params.recipientId,
+      recipientType: AppType.SELLER,
+      entityType: 'sellerOrder',
+      entityId: params.sellerOrderId || params.orderId,
+      data: {
+        orderId: params.orderId,
+        orderNumber: params.orderNumber,
+        productName: params.productName || 'المنتج الرقمي',
+      },
+      bypassQuietHours: false,
+      bypassRateLimit: true,
+      createdAt: new Date(),
+    };
+  }
+
   // ── Payments ──────────────────────────────────────────────────────────────
   static paymentEvent(params: {
     eventType:

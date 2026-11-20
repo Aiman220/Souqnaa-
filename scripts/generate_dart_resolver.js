@@ -42,6 +42,27 @@ slugMap.set('home-kitchen', 'Icons.chair_rounded');
 slugMap.set('tools-hardware-construction', 'Icons.build_rounded');
 slugMap.set('solar-energy-supplies', 'Icons.solar_power_rounded');
 slugMap.set('traditional-attire-heritage', 'Icons.checkroom_rounded');
+slugMap.set('tvs-monitors', 'Icons.tv_rounded');
+slugMap.set('audio-headphones', 'Icons.headphones_rounded');
+slugMap.set('jewelry', 'Icons.diamond_rounded');
+slugMap.set('diapers-baby-care', 'Icons.baby_changing_station_rounded');
+slugMap.set('building-materials', 'Icons.foundation_rounded');
+slugMap.set('electrical-supplies', 'Icons.electrical_services_rounded');
+slugMap.set('tv-monitor-spare-parts', 'Icons.hardware_rounded');
+slugMap.set('hard-drives-hdd-ssd', 'Icons.storage_rounded');
+slugMap.set('engines-batteries', 'Icons.engineering_rounded');
+slugMap.set('football-team-sports', 'Icons.sports_soccer_rounded');
+slugMap.set('door-installation-supplies', 'Icons.door_front_door_rounded');
+slugMap.set('janabiya-sheaths', 'Icons.military_tech_rounded');
+slugMap.set('janabiya-accessories', 'Icons.view_headline_rounded');
+slugMap.set('yemeni-traditional-belts', 'Icons.view_headline_rounded');
+slugMap.set('networking-routers', 'Icons.router_rounded');
+slugMap.set('medical-equipment', 'Icons.monitor_heart_rounded');
+slugMap.set('baby-health', 'Icons.health_and_safety_rounded');
+slugMap.set('yemeni-traditional-attire', 'Icons.checkroom_rounded');
+slugMap.set('folk-costume-supplies', 'Icons.checkroom_rounded');
+slugMap.set('poultry-livestock-supplies', 'Icons.pets_rounded');
+slugMap.set('traditional-products', 'Icons.workspace_premium_rounded');
 
 // Generate Dart file
 const iconEntries = [...iconMap.entries()]

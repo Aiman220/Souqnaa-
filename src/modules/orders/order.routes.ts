@@ -208,10 +208,26 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
                       id: true,
                       nameAr: true,
                       nameEn: true,
+                      fulfillmentType: true,
+                      digitalDeliveryType: true,
+                      digitalInstructions: true,
                       images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
                     },
                   },
                   variant: { select: { id: true, nameAr: true, nameEn: true, sku: true, price: true, image: true } },
+                  digitalFulfillment: {
+                    select: {
+                      id: true,
+                      deliveryType: true,
+                      status: true,
+                      maskedPayload: true,
+                      downloadUrl: true,
+                      photoUrl: true,
+                      notes: true,
+                      downloadExpiresAt: true,
+                      fulfilledAt: true,
+                    },
+                  },
                 },
               },
             },
@@ -1876,6 +1892,9 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
                     deliveryType: true,
                     status: true,
                     maskedPayload: true,
+                    downloadUrl: true,
+                    photoUrl: true,
+                    notes: true,
                     downloadExpiresAt: true,
                     fulfilledAt: true,
                   },
@@ -2836,7 +2855,20 @@ function resolveDeliveryMethodDetails(so: any, parentOrder?: any): {
   deliveryMethodCode: string;
   isExpress: boolean;
   isScheduled: boolean;
+  isDigital?: boolean;
 } {
+  const relevantItems = so?.items || (parentOrder?.sellerOrders ? parentOrder.sellerOrders.flatMap((s: any) => s.items || []) : []);
+  const isDigitalOnly = relevantItems.length > 0 && relevantItems.every((it: any) => it.fulfillmentType === 'DIGITAL' || it.product?.fulfillmentType === 'DIGITAL');
+  if (isDigitalOnly) {
+    return {
+      deliveryMethodName: 'تسليم رقمي فوري ⚡',
+      deliveryMethodCode: 'digital',
+      isExpress: false,
+      isScheduled: false,
+      isDigital: true,
+    };
+  }
+
   const delivMethod = so?.deliveryMethod || parentOrder?.deliveryMethod;
   const rawScheduleType = String(
     so?.deliveryScheduleType ||
@@ -2925,10 +2957,26 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
                       id: true,
                       nameAr: true,
                       nameEn: true,
+                      fulfillmentType: true,
+                      digitalDeliveryType: true,
+                      digitalInstructions: true,
                       images: { select: { url: true }, orderBy: { sortOrder: 'asc' }, take: 1 },
                     },
                   },
                   variant: { select: { id: true, nameAr: true, nameEn: true, sku: true, price: true, image: true } },
+                  digitalFulfillment: {
+                    select: {
+                      id: true,
+                      deliveryType: true,
+                      status: true,
+                      maskedPayload: true,
+                      downloadUrl: true,
+                      photoUrl: true,
+                      notes: true,
+                      downloadExpiresAt: true,
+                      fulfilledAt: true,
+                    },
+                  },
                 },
               },
               deliveryMethod: true,
@@ -3018,14 +3066,21 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
           deliveryMethod: so.deliveryMethod || (order as any).deliveryMethod,
           deliveryMethodName: details.deliveryMethodName,
           deliveryMethodCode: details.deliveryMethodCode,
-          items: (so.items || []).map((item: any) => ({
-            ...item,
-            variantName: item.variant?.nameAr || item.variant?.nameEn || null,
-            variantNameAr: item.variant?.nameAr || null,
-            variantNameEn: item.variant?.nameEn || null,
-            sku: item.variant?.sku || item.sku || item.product?.sku || null,
-            productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
-          })),
+          items: (so.items || []).map((item: any) => {
+            const isItemDigital = item.fulfillmentType === 'DIGITAL' || item.product?.fulfillmentType === 'DIGITAL';
+            return {
+              ...item,
+              isDigital: isItemDigital,
+              fulfillmentType: item.fulfillmentType || item.product?.fulfillmentType || 'PHYSICAL',
+              digitalDeliveryType: item.digitalDeliveryType || item.product?.digitalDeliveryType || null,
+              digitalFulfillment: item.digitalFulfillment || null,
+              variantName: item.variant?.nameAr || item.variant?.nameEn || null,
+              variantNameAr: item.variant?.nameAr || null,
+              variantNameEn: item.variant?.nameEn || null,
+              sku: item.variant?.sku || item.sku || item.product?.sku || null,
+              productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
+            };
+          }),
         };
       });
       const parentDetails = resolveDeliveryMethodDetails(null, order);
@@ -3092,6 +3147,9 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
                     deliveryType: true,
                     status: true,
                     maskedPayload: true,
+                    downloadUrl: true,
+                    photoUrl: true,
+                    notes: true,
                     downloadExpiresAt: true,
                     fulfilledAt: true,
                   },
@@ -3162,14 +3220,21 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
         deliveryMethod: so.deliveryMethod || (order as any).deliveryMethod,
         deliveryMethodName: details.deliveryMethodName,
         deliveryMethodCode: details.deliveryMethodCode,
-        items: (so.items || []).map((item: any) => ({
-          ...item,
-          variantName: item.variant?.nameAr || item.variant?.nameEn || null,
-          variantNameAr: item.variant?.nameAr || null,
-          variantNameEn: item.variant?.nameEn || null,
-          sku: item.variant?.sku || item.sku || item.product?.sku || null,
-          productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
-        })),
+        items: (so.items || []).map((item: any) => {
+          const isItemDigital = item.fulfillmentType === 'DIGITAL' || item.product?.fulfillmentType === 'DIGITAL';
+          return {
+            ...item,
+            isDigital: isItemDigital,
+            fulfillmentType: item.fulfillmentType || item.product?.fulfillmentType || 'PHYSICAL',
+            digitalDeliveryType: item.digitalDeliveryType || item.product?.digitalDeliveryType || null,
+            digitalFulfillment: item.digitalFulfillment || null,
+            variantName: item.variant?.nameAr || item.variant?.nameEn || null,
+            variantNameAr: item.variant?.nameAr || null,
+            variantNameEn: item.variant?.nameEn || null,
+            sku: item.variant?.sku || item.sku || item.product?.sku || null,
+            productImage: item.variant?.image || item.product?.images?.[0]?.url || item.productImage || null,
+          };
+        }),
         disputes: disputes.filter(d => d.sellerId === so.sellerId || !d.sellerId),
       };
     });
@@ -3237,6 +3302,9 @@ router.get('/:id/digital-items', async (req: Request, res: Response, next: NextF
                     deliveryType: true,
                     status: true,
                     maskedPayload: true,
+                    downloadUrl: true,
+                    photoUrl: true,
+                    notes: true,
                     downloadExpiresAt: true,
                     fulfilledAt: true,
                   },

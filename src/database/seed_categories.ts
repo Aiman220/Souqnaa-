@@ -90,7 +90,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "أقراص SSD",
         "nameEn": "Solid State Drives (SSD)",
         "slug": "solid-state-drives",
-        "icon": "speed_rounded"
+        "icon": "memory_rounded"
       },
       {
         "nameAr": "بطاقات الذاكرة",
@@ -102,7 +102,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "قطع غيار الإلكترونيات",
         "nameEn": "Electronic Spare Parts",
         "slug": "electronic-spare-parts",
-        "icon": "precision_manufacturing_rounded"
+        "icon": "hardware_rounded"
       },
       {
         "nameAr": "قطع غيار الهواتف",
@@ -132,7 +132,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "أجهزة المودم",
         "nameEn": "Internet Modems",
         "slug": "internet-modems",
-        "icon": "cell_tower_rounded"
+        "icon": "wifi_rounded"
       },
       {
         "nameAr": "إكسسوارات الشبكات",
@@ -226,19 +226,19 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "أحذية رجالية",
         "nameEn": "Men's Shoes",
         "slug": "mens-shoes",
-        "icon": "hiking_rounded"
+        "icon": "directions_walk_rounded"
       },
       {
         "nameAr": "أحذية نسائية",
         "nameEn": "Women's Shoes",
         "slug": "womens-shoes",
-        "icon": "shopping_bag_rounded"
+        "icon": "style_rounded"
       },
       {
         "nameAr": "أحذية الأطفال",
         "nameEn": "Children's Shoes",
         "slug": "kids-shoes",
-        "icon": "child_friendly_rounded"
+        "icon": "directions_walk_rounded"
       },
       {
         "nameAr": "الحقائب والمحافظ",
@@ -274,25 +274,25 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "الخواتم",
         "nameEn": "Rings",
         "slug": "rings",
-        "icon": "circle_outlined"
+        "icon": "toll_rounded"
       },
       {
         "nameAr": "القلائد",
         "nameEn": "Necklaces",
         "slug": "necklaces",
-        "icon": "link_rounded"
+        "icon": "stream_rounded"
       },
       {
         "nameAr": "الأساور",
         "nameEn": "Bracelets",
         "slug": "bracelets",
-        "icon": "watch_later_rounded"
+        "icon": "donut_large_rounded"
       },
       {
         "nameAr": "الأقراط",
         "nameEn": "Earrings",
         "slug": "earrings",
-        "icon": "flare_rounded"
+        "icon": "stars_rounded"
       },
       {
         "nameAr": "أطقم المجوهرات",
@@ -322,7 +322,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "الملابس اليمنية التقليدية",
         "nameEn": "Yemeni Traditional Clothing",
         "slug": "traditional-yemeni-clothing",
-        "icon": "dry_cleaning_rounded"
+        "icon": "checkroom_rounded"
       },
       {
         "nameAr": "الجنابي",
@@ -334,12 +334,6 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "أحزمة الجنابي ومستلزماتها",
         "nameEn": "Jambiya Belts & Accessories",
         "slug": "janabiya-belts",
-        "icon": "texture_rounded"
-      },
-      {
-        "nameAr": "الأحزمة اليمنية التقليدية",
-        "nameEn": "Yemeni Traditional Belts",
-        "slug": "yemeni-traditional-belts",
         "icon": "view_headline_rounded"
       },
       {
@@ -352,7 +346,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "العُصُب وأغطية الرأس التقليدية",
         "nameEn": "Traditional Headwear (Al-Osob)",
         "slug": "asib-supplies",
-        "icon": "face_retouching_natural_rounded"
+        "icon": "face_rounded"
       },
       {
         "nameAr": "أخرى",
@@ -367,7 +361,7 @@ export const catalogCategories: RootCategoryData[] = [
     "nameEn": "Beauty & Personal Care",
     "slug": "beauty",
     "icon": "spa_rounded",
-    "image": "https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=800&q=80",
+    "image": "https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=800&q=80",
     "sortOrder": 3,
     "subcategories": [
       {
@@ -398,7 +392,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "العطور",
         "nameEn": "Perfumes & Fragrances",
         "slug": "perfumes-fragrances",
-        "icon": "air_rounded"
+        "icon": "water_drop_rounded"
       },
       {
         "nameAr": "العناية الشخصية للرجال",
@@ -437,7 +431,7 @@ export const catalogCategories: RootCategoryData[] = [
     "nameEn": "Home & Furniture",
     "slug": "home-furniture",
     "icon": "chair_rounded",
-    "image": "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=800&q=80",
+    "image": "https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=800&q=80",
     "sortOrder": 4,
     "subcategories": [
       {
@@ -480,7 +474,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "الستائر",
         "nameEn": "Curtains & Blinds",
         "slug": "curtains-carpets",
-        "icon": "texture_rounded"
+        "icon": "curtains_rounded"
       },
       {
         "nameAr": "السجاد والموكيت",
@@ -510,13 +504,13 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "الخزنات والدواليب البلاستيكية",
         "nameEn": "Plastic Storage Cabinets",
         "slug": "plastic-storage-cabinets",
-        "icon": "kitchen_rounded"
+        "icon": "inventory_2_rounded"
       },
       {
         "nameAr": "الأدراج والمنظمات البلاستيكية",
         "nameEn": "Plastic Drawers & Organizers",
         "slug": "plastic-drawers-organizers",
-        "icon": "dns_rounded"
+        "icon": "inbox_rounded"
       },
       {
         "nameAr": "الأرفف وحوامل التخزين",
@@ -562,7 +556,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "المجففات",
         "nameEn": "Dryers",
         "slug": "dryers",
-        "icon": "dry_cleaning_rounded"
+        "icon": "air_rounded"
       },
       {
         "nameAr": "مكيفات الهواء",
@@ -574,7 +568,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "المراوح وشفاطات الهواء",
         "nameEn": "Fans & Exhaust Fans",
         "slug": "fans-heaters",
-        "icon": "wind_power_rounded"
+        "icon": "air_rounded"
       },
       {
         "nameAr": "أجهزة التدفئة",
@@ -622,7 +616,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "الأجهزة المنزلية الصغيرة",
         "nameEn": "Small Home Appliances",
         "slug": "small-home-appliances",
-        "icon": "microwave_rounded"
+        "icon": "devices_other_rounded"
       },
       {
         "nameAr": "قطع غيار الأجهزة المنزلية",
@@ -643,7 +637,7 @@ export const catalogCategories: RootCategoryData[] = [
     "nameEn": "Automotive & Motorcycles",
     "slug": "automotive-motorcycles",
     "icon": "directions_car_rounded",
-    "image": "https://images.unsplash.com/photo-1486006920555-c77dce18193b?w=800&q=80",
+    "image": "https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=800&q=80",
     "sortOrder": 6,
     "subcategories": [
       {
@@ -671,16 +665,10 @@ export const catalogCategories: RootCategoryData[] = [
         "icon": "settings_applications_rounded"
       },
       {
-        "nameAr": "قطع غيار الدراجات النارية",
+        "nameAr": "قطع غيار ومستلزمات الدراجات النارية",
         "nameEn": "Motorcycle Spare Parts",
         "slug": "motorcycle-spare-parts",
-        "icon": "two_wheeler_rounded"
-      },
-      {
-        "nameAr": "قطع غيار الدراجات النارية الكهربائية",
-        "nameEn": "Electric Motorcycle Spare Parts",
-        "slug": "electric-motorcycle-spare-parts",
-        "icon": "battery_charging_full_rounded"
+        "icon": "build_rounded"
       },
       {
         "nameAr": "إكسسوارات الدراجات النارية",
@@ -689,16 +677,10 @@ export const catalogCategories: RootCategoryData[] = [
         "icon": "moped_rounded"
       },
       {
-        "nameAr": "إكسسوارات الدراجات النارية الكهربائية",
-        "nameEn": "Electric Motorcycle Accessories",
-        "slug": "electric-motorcycle-accessories",
-        "icon": "electric_bolt_rounded"
-      },
-      {
         "nameAr": "بطاريات الدراجات النارية ومستلزمات الشحن",
         "nameEn": "Motorcycle Batteries & Charging Accessories",
         "slug": "motorcycle-batteries-charging",
-        "icon": "ev_station_rounded"
+        "icon": "battery_charging_full_rounded"
       },
       {
         "nameAr": "الإطارات والعجلات",
@@ -716,7 +698,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "محركات ومكونات الدراجات النارية",
         "nameEn": "Motorcycle Engines & Components",
         "slug": "motorcycle-engines-components",
-        "icon": "precision_manufacturing_rounded"
+        "icon": "engineering_rounded"
       },
       {
         "nameAr": "الزيوت والسوائل",
@@ -767,7 +749,7 @@ export const catalogCategories: RootCategoryData[] = [
     "nameEn": "Solar Energy & Power Equipment",
     "slug": "solar-energy-power-equipment",
     "icon": "solar_power_rounded",
-    "image": "https://images.unsplash.com/photo-1509391366360-2e959784a276?w=800&q=80",
+    "image": "https://images.unsplash.com/photo-1509391365360-2e959784a276?w=800&q=80",
     "sortOrder": 7,
     "subcategories": [
       {
@@ -777,7 +759,7 @@ export const catalogCategories: RootCategoryData[] = [
         "icon": "solar_power_rounded"
       },
       {
-        "nameAr": "بطاريات الطاقة الشمسية",
+        "nameAr": "بطاريات الطاقة الشمسية وتخزين الطاقة",
         "nameEn": "Solar Batteries",
         "slug": "solar-batteries",
         "icon": "battery_charging_full_rounded"
@@ -822,7 +804,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "معدات ومستلزمات تركيب الطاقة الشمسية",
         "nameEn": "Solar Installation Equipment & Accessories",
         "slug": "solar-installation-accessories",
-        "icon": "settings_input_component_rounded"
+        "icon": "hardware_rounded"
       },
       {
         "nameAr": "المولدات الكهربائية",
@@ -834,7 +816,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "مولدات الديزل",
         "nameEn": "Diesel Generators",
         "slug": "diesel-generators",
-        "icon": "oil_barrel_rounded"
+        "icon": "power_rounded"
       },
       {
         "nameAr": "قطع غيار المولدات",
@@ -879,12 +861,6 @@ export const catalogCategories: RootCategoryData[] = [
         "icon": "alt_route_rounded"
       },
       {
-        "nameAr": "معدات الحماية الكهربائية",
-        "nameEn": "Electrical Protection Equipment",
-        "slug": "electrical-protection-equipment",
-        "icon": "security_rounded"
-      },
-      {
         "nameAr": "قواطع الكهرباء",
         "nameEn": "Circuit Breakers",
         "slug": "circuit-breakers",
@@ -897,22 +873,10 @@ export const catalogCategories: RootCategoryData[] = [
         "icon": "grid_view_rounded"
       },
       {
-        "nameAr": "كابلات وموصلات الطاقة",
-        "nameEn": "Power Cables & Connectors",
-        "slug": "power-cables-connectors",
-        "icon": "cable_rounded"
-      },
-      {
         "nameAr": "مزودات الطاقة والمحولات",
         "nameEn": "Power Supplies & Adapters",
         "slug": "power-supplies-adapters",
         "icon": "power_rounded"
-      },
-      {
-        "nameAr": "البطاريات وأنظمة تخزين الطاقة",
-        "nameEn": "Batteries & Energy Storage Systems",
-        "slug": "batteries-energy-storage",
-        "icon": "battery_unknown_rounded"
       },
       {
         "nameAr": "أجهزة مراقبة الطاقة",
@@ -924,7 +888,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "إكسسوارات وقطع غيار معدات الطاقة",
         "nameEn": "Power Accessories & Spare Parts",
         "slug": "power-accessories-spare-parts",
-        "icon": "settings_input_composite_rounded"
+        "icon": "settings_rounded"
       },
       {
         "nameAr": "أخرى",
@@ -939,7 +903,7 @@ export const catalogCategories: RootCategoryData[] = [
     "nameEn": "Water Systems & Equipment",
     "slug": "water-systems-equipment",
     "icon": "water_drop_rounded",
-    "image": "https://images.unsplash.com/photo-1581244277943-fe4a9c777189?w=800&q=80",
+    "image": "https://images.unsplash.com/photo-1541888946425-d0fbb18086f6?w=800&q=80",
     "sortOrder": 8,
     "subcategories": [
       {
@@ -964,7 +928,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "أنظمة تنقية المياه",
         "nameEn": "Water Purification Systems",
         "slug": "water-purification-systems",
-        "icon": "clean_hands_rounded"
+        "icon": "opacity_rounded"
       },
       {
         "nameAr": "أنابيب ووصلات المياه",
@@ -1085,7 +1049,7 @@ export const catalogCategories: RootCategoryData[] = [
     "nameEn": "Building Materials, Tiles & Marble",
     "slug": "building-materials-tiles-marble",
     "icon": "foundation_rounded",
-    "image": "https://images.unsplash.com/photo-1581783342308-f792dbdd27c5?w=800&q=80",
+    "image": "https://images.unsplash.com/photo-1504307651254-35680f356dfd?w=800&q=80",
     "sortOrder": 10,
     "subcategories": [
       {
@@ -1128,7 +1092,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "بلاط خارجي",
         "nameEn": "Outdoor Tiles",
         "slug": "outdoor-tiles",
-        "icon": "terrain_rounded"
+        "icon": "deck_rounded"
       },
       {
         "nameAr": "البلاط الديكوري",
@@ -1170,13 +1134,13 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "ألواح الرخام والجرانيت",
         "nameEn": "Marble & Granite Slabs",
         "slug": "marble-granite-slabs",
-        "icon": "view_carousel_rounded"
+        "icon": "layers_rounded"
       },
       {
         "nameAr": "بلاط الرخام",
         "nameEn": "Marble Tiles",
         "slug": "marble-tiles",
-        "icon": "crop_free_rounded"
+        "icon": "grid_on_rounded"
       },
       {
         "nameAr": "أسطح المطابخ والكاونترات",
@@ -1200,7 +1164,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "العناية بالرخام وتلميعه",
         "nameEn": "Marble Care & Polishing",
         "slug": "marble-care-polishing",
-        "icon": "cleaning_services_rounded"
+        "icon": "auto_awesome_rounded"
       },
       {
         "nameAr": "الأبواب الخشبية",
@@ -1248,7 +1212,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "المرايا",
         "nameEn": "Mirrors",
         "slug": "mirrors",
-        "icon": "crop_portrait_rounded"
+        "icon": "crop_original_rounded"
       },
       {
         "nameAr": "قطاعات الألمنيوم",
@@ -1290,7 +1254,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "الحنفيات والخلاطات",
         "nameEn": "Faucets & Mixers",
         "slug": "faucets-mixers",
-        "icon": "water_damage_rounded"
+        "icon": "shower_rounded"
       },
       {
         "nameAr": "الدش ومستلزماته",
@@ -1332,7 +1296,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "مواد العزل المائي",
         "nameEn": "Waterproofing Materials",
         "slug": "waterproofing-materials",
-        "icon": "water_damage_rounded"
+        "icon": "layers_rounded"
       },
       {
         "nameAr": "مواد العزل الحراري والصوتي",
@@ -1359,7 +1323,7 @@ export const catalogCategories: RootCategoryData[] = [
     "nameEn": "Tools & Hardware",
     "slug": "tools-hardware",
     "icon": "build_rounded",
-    "image": "https://images.unsplash.com/photo-1508873696983-2df5293cb32b?w=800&q=80",
+    "image": "https://images.unsplash.com/photo-1581783342308-f792dbdd27c5?w=800&q=80",
     "sortOrder": 11,
     "subcategories": [
       {
@@ -1454,13 +1418,13 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "الملابس الرياضية",
         "nameEn": "Sportswear",
         "slug": "sportswear",
-        "icon": "sports_gymnastics_rounded"
+        "icon": "checkroom_rounded"
       },
       {
         "nameAr": "الأحذية الرياضية",
         "nameEn": "Sports Shoes",
         "slug": "sports-shoes",
-        "icon": "run_circle_rounded"
+        "icon": "directions_run_rounded"
       },
       {
         "nameAr": "الدراجات الهوائية",
@@ -1518,7 +1482,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "الحفاضات",
         "nameEn": "Diapers",
         "slug": "diapers",
-        "icon": "sanitizer_rounded"
+        "icon": "baby_changing_station_rounded"
       },
       {
         "nameAr": "منتجات العناية بالرضع",
@@ -1575,7 +1539,7 @@ export const catalogCategories: RootCategoryData[] = [
     "nameEn": "Books, Stationery & Office",
     "slug": "books-stationery-office",
     "icon": "menu_book_rounded",
-    "image": "https://images.unsplash.com/photo-1457369804613-52c61a468e7d?w=800&q=80",
+    "image": "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?w=800&q=80",
     "sortOrder": 14,
     "subcategories": [
       {
@@ -1639,7 +1603,7 @@ export const catalogCategories: RootCategoryData[] = [
     "nameEn": "Fabrics & Textiles",
     "slug": "fabrics-textiles",
     "icon": "texture_rounded",
-    "image": "https://images.unsplash.com/photo-1604014237800-1c9102c219da?w=800&q=80",
+    "image": "https://images.unsplash.com/photo-1528459801416-a9e53bbf4e17?w=800&q=80",
     "sortOrder": 15,
     "subcategories": [
       {
@@ -1815,7 +1779,7 @@ export const catalogCategories: RootCategoryData[] = [
       {
         "nameAr": "مستلزمات الدواجن",
         "nameEn": "Poultry Supplies",
-        "slug": "poultry-livestock-supplies",
+        "slug": "poultry-supplies",
         "icon": "pets_rounded"
       },
       {
@@ -1869,12 +1833,6 @@ export const catalogCategories: RootCategoryData[] = [
         "nameEn": "Yemeni Honey",
         "slug": "yemeni-honey",
         "icon": "hive_rounded"
-      },
-      {
-        "nameAr": "المنتجات التقليدية",
-        "nameEn": "Traditional Products",
-        "slug": "traditional-products",
-        "icon": "museum_rounded"
       },
       {
         "nameAr": "التذكارات",
@@ -1932,7 +1890,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "أجهزة قياس الأكسجين",
         "nameEn": "Pulse Oximeters",
         "slug": "pulse-oximeters",
-        "icon": "fingerprint_rounded"
+        "icon": "monitor_heart_rounded"
       },
       {
         "nameAr": "مستلزمات الإسعافات الأولية",
@@ -1980,7 +1938,7 @@ export const catalogCategories: RootCategoryData[] = [
         "nameAr": "منتجات العناية بالأسنان",
         "nameEn": "Dental Care Products",
         "slug": "dental-care",
-        "icon": "sentiment_very_satisfied_rounded"
+        "icon": "health_and_safety_rounded"
       },
       {
         "nameAr": "أجهزة العناية بالصحة والرفاهية",
@@ -2019,7 +1977,7 @@ export const catalogCategories: RootCategoryData[] = [
     "nameEn": "Digital Products & Gift Cards",
     "slug": "digital-gift-cards",
     "icon": "confirmation_number_rounded",
-    "image": "https://images.unsplash.com/photo-1563013544-824ae1b704d3?w=800&q=80",
+    "image": "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=800&q=80",
     "sortOrder": 20,
     "subcategories": [
       {
@@ -2192,12 +2150,58 @@ export async function seedCategoriesCatalog(prismaClient?: PrismaClient) {
     });
   }
 
+  // 6. Safely migrate & deactivate duplicate subcategories in the database
+  const duplicateLegacySubcategories: { oldSlug: string; targetSlug: string }[] = [
+    { oldSlug: 'tvs-monitors', targetSlug: 'televisions' },
+    { oldSlug: 'audio-headphones', targetSlug: 'headphones-speakers' },
+    { oldSlug: 'jewelry', targetSlug: 'gold-jewelry' },
+    { oldSlug: 'diapers-baby-care', targetSlug: 'baby-care-products' },
+    { oldSlug: 'building-materials', targetSlug: 'cement-building-supplies' },
+    { oldSlug: 'electrical-supplies', targetSlug: 'electrical-building-supplies' },
+    { oldSlug: 'tv-monitor-spare-parts', targetSlug: 'electronic-spare-parts' },
+    { oldSlug: 'hard-drives-hdd-ssd', targetSlug: 'hard-disk-drives' },
+    { oldSlug: 'engines-batteries', targetSlug: 'car-engines' },
+    { oldSlug: 'football-team-sports', targetSlug: 'football-equipment' },
+    { oldSlug: 'door-installation-supplies', targetSlug: 'door-handles-accessories' },
+    { oldSlug: 'janabiya-sheaths', targetSlug: 'janabiya' },
+    { oldSlug: 'janabiya-accessories', targetSlug: 'janabiya-belts' },
+    { oldSlug: 'yemeni-traditional-belts', targetSlug: 'janabiya-belts' },
+    { oldSlug: 'networking-routers', targetSlug: 'internet-routers' },
+    { oldSlug: 'medical-equipment', targetSlug: 'medical-devices-equipment' },
+    { oldSlug: 'baby-health', targetSlug: 'health-care-products' },
+    { oldSlug: 'yemeni-traditional-attire', targetSlug: 'traditional-yemeni-clothing' },
+    { oldSlug: 'folk-costume-supplies', targetSlug: 'traditional-yemeni-clothing' },
+    { oldSlug: 'poultry-livestock-supplies', targetSlug: 'poultry-supplies' },
+    { oldSlug: 'traditional-products', targetSlug: 'yemeni-handicrafts' },
+  ];
+
+  console.log('🧹 Cleaning up duplicate subcategories in database...');
+  for (const { oldSlug, targetSlug } of duplicateLegacySubcategories) {
+    const oldCat = await p.category.findUnique({ where: { slug: oldSlug } });
+    if (oldCat) {
+      const targetCat = seededCategories[targetSlug] || await p.category.findUnique({ where: { slug: targetSlug } });
+      if (targetCat) {
+        // Reassign any products pointing to old category
+        await p.product.updateMany({
+          where: { categoryId: oldCat.id },
+          data: { categoryId: targetCat.id },
+        });
+      }
+      // Deactivate the duplicate subcategory record so it no longer appears in queries
+      await p.category.update({
+        where: { id: oldCat.id },
+        data: { isActive: false },
+      });
+      console.log(`  ✓ Deactivated duplicate subcategory '${oldSlug}' -> mapped to '${targetSlug}'`);
+    }
+  }
+
   const totalSubcategories = catalogCategories.reduce(
     (sum, cat) => sum + cat.subcategories.length,
     0,
   );
   console.log(
-    `✓ Completed catalog seeding: ${catalogCategories.length} root categories and ${totalSubcategories} subcategories (all with universal Other option).`,
+    `✓ Completed catalog seeding: ${catalogCategories.length} root categories and ${totalSubcategories} subcategories (all with universal Other option and suitable icons).`,
   );
   return seededCategories;
 }

@@ -211,7 +211,7 @@ export class LauncherCampaignService {
       defaultIconUrl: isCustomer
         ? '/uploads/branding/souqnaa-app-icon.png'
         : '/uploads/branding/seller_app_icon.png',
-      seasonalIconId: isCustomer ? 'sale_1_1' : 'seller_seasonal',
+      seasonalIconId: isCustomer ? 'sale_1_1' : 'seller_sale_1_1',
       seasonalIconUrl: '',
       seasonalEnabled: false,
       campaignName: '',
@@ -280,8 +280,11 @@ export class LauncherCampaignService {
     const baseIcon = defaultIconId || (applicationType === 'CUSTOMER' ? 'default' : 'seller_default');
     const baseIconUrl = defaultIconUrl || '';
 
-    // If seasonal campaign is not enabled, or seasonal asset is missing/empty, return default icon
-    if (!seasonalEnabled || !seasonalIconUrl || seasonalIconUrl.trim().length === 0) {
+    // If seasonal campaign is not enabled, or seasonal target is missing, return base icon
+    const hasSeasonalIcon =
+      (seasonalIconId && seasonalIconId.trim().length > 0) ||
+      (seasonalIconUrl && seasonalIconUrl.trim().length > 0);
+    if (!seasonalEnabled || !hasSeasonalIcon) {
       return {
         applicationType,
         platform,
@@ -331,13 +334,13 @@ export class LauncherCampaignService {
 
     // Active seasonal campaign window
     const activeSeasonalId =
-      seasonalIconId || (applicationType === 'CUSTOMER' ? 'sale_1_1' : 'seller_seasonal');
+      seasonalIconId || (applicationType === 'CUSTOMER' ? 'sale_1_1' : 'seller_sale_1_1');
 
     return {
       applicationType,
       platform,
       activeIconId: activeSeasonalId,
-      activeIconUrl: seasonalIconUrl,
+      activeIconUrl: (seasonalIconUrl && seasonalIconUrl.trim().length > 0) ? seasonalIconUrl : baseIconUrl,
       isSeasonalActive: true,
       campaignName: campaignName || null,
       deepLinkUrl: campaignDeepLink || null,
@@ -395,7 +398,7 @@ export class LauncherCampaignService {
       if (updates.seasonalIconId && updates.seasonalIconId.trim().length > 0) {
         seasonalIconId = this.validateIconTarget(updates.seasonalIconId, applicationType);
       } else {
-        seasonalIconId = applicationType === 'CUSTOMER' ? 'sale_1_1' : 'seller_seasonal';
+        seasonalIconId = applicationType === 'CUSTOMER' ? 'sale_1_1' : 'seller_sale_1_1';
       }
     }
 

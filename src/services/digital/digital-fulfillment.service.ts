@@ -439,6 +439,8 @@ export class DigitalFulfillmentService {
     decryptedCode?: string;
     downloadUrl?: string;
     downloadExpiresAt?: Date | null;
+    photoUrl?: string;
+    notes?: string | null;
     instructions?: string | null;
   }> {
     const { orderItemId, customerId, ipAddress, userAgent } = params;
@@ -450,6 +452,7 @@ export class DigitalFulfillmentService {
         sellerOrder: {
           include: {
             order: { include: { payment: true } },
+            seller: true,
           },
         },
         digitalFulfillment: true,
@@ -521,6 +524,34 @@ export class DigitalFulfillmentService {
       console.warn('[DigitalFulfillment] Failed to dispatch code access security notification:', notifErr.message);
     }
 
+    // One-Time notification to seller when customer reveals digital code/content (§33)
+    if (!df.sellerNotifiedOfAccess) {
+      try {
+        const sellerUserId = orderItem.sellerOrder?.seller?.userId;
+        if (sellerUserId) {
+          notificationDispatcher.dispatch(
+            NotificationEventFactory.sellerCustomerAccessedDigitalEvent({
+              recipientId: sellerUserId,
+              orderId: order.id,
+              sellerOrderId: orderItem.sellerOrderId,
+              orderNumber: order.orderNumber,
+              productName: orderItem.product.nameAr || orderItem.product.nameEn,
+            })
+          ).catch(() => {});
+        }
+      } catch (sellerNotifErr: any) {
+        console.warn('[DigitalFulfillment] Failed to dispatch seller access notification:', sellerNotifErr.message);
+      }
+
+      await prisma.digitalFulfillment.update({
+        where: { id: df.id },
+        data: {
+          firstAccessedAt: df.firstAccessedAt || new Date(),
+          sellerNotifiedOfAccess: true,
+        },
+      });
+    }
+
     return {
       orderItemId: orderItem.id,
       deliveryType: df.deliveryType,
@@ -528,6 +559,8 @@ export class DigitalFulfillmentService {
       decryptedCode,
       downloadUrl: df.downloadUrl || undefined,
       downloadExpiresAt: df.downloadExpiresAt,
+      photoUrl: df.photoUrl || undefined,
+      notes: df.notes || undefined,
       instructions: orderItem.product.digitalInstructions,
     };
   }

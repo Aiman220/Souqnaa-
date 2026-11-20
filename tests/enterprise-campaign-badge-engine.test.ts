@@ -1,6 +1,7 @@
 import { campaignBadgeService } from '../src/modules/promotions/services/campaign-badge.service';
 import { campaignService } from '../src/modules/promotions/services/campaign.service';
 import { prisma } from '../src/database/prisma';
+import { formatProductForClient } from '../src/utils/product-formatter.util';
 
 async function runEnterpriseCampaignBadgeEngineTests() {
   console.log('================================================================');
@@ -453,6 +454,64 @@ async function runEnterpriseCampaignBadgeEngineTests() {
     assert(
       reEnabledPresentation?.badge.visible === true,
       'Badge visibility is authoritatively determined by server, not client'
+    );
+
+    // ── 9.1. Digital Product Promotional Badge Suppression Enforcement ────────
+    console.log('\n--- 9.1. Digital Product Promotional Badge Suppression Enforcement ---');
+
+    const physicalProd = {
+      id: 'prod_physical_test',
+      categoryId: testCategoryId,
+      sellerId: testSellerId,
+      fulfillmentType: 'PHYSICAL',
+    };
+    const physicalPresentation = campaignBadgeService.resolvePresentationForProduct(physicalProd, catalog, 'ar');
+    assert(
+      physicalPresentation !== null,
+      'Physical product qualifies for campaign promotional badge'
+    );
+
+    const digitalProdFulfillment = {
+      id: 'prod_digital_test_01',
+      categoryId: testCategoryId,
+      sellerId: testSellerId,
+      fulfillmentType: 'DIGITAL',
+    };
+    const digitalPresentation1 = campaignBadgeService.resolvePresentationForProduct(digitalProdFulfillment, catalog, 'ar');
+    assert(
+      digitalPresentation1 === null,
+      'Digital product with fulfillmentType: DIGITAL suppresses campaign promotional badge'
+    );
+
+    const digitalProdFlag = {
+      id: 'prod_digital_test_02',
+      categoryId: testCategoryId,
+      sellerId: testSellerId,
+      isDigital: true,
+    };
+    const digitalPresentation2 = campaignBadgeService.resolvePresentationForProduct(digitalProdFlag, catalog, 'ar');
+    assert(
+      digitalPresentation2 === null,
+      'Digital product with isDigital: true suppresses campaign promotional badge'
+    );
+
+    // Batch feed resolution verification
+    const mixedBatch = [physicalProd, digitalProdFulfillment, digitalProdFlag];
+    const batchMap = await campaignBadgeService.batchResolveCampaignPresentations(mixedBatch, 'ar');
+    assert(
+      batchMap.has(physicalProd.id) && !batchMap.has(digitalProdFulfillment.id) && !batchMap.has(digitalProdFlag.id),
+      'Batch presentation resolver exclusively attaches badges to physical products, excluding digital'
+    );
+
+    // formatProductForClient output validation
+    const formattedDigital = formatProductForClient({
+      id: 'prod_digital_formatted',
+      fulfillmentType: 'DIGITAL',
+      campaignPresentation: { campaignId: 'cmp_dummy' },
+    });
+    assert(
+      formattedDigital.campaignPresentation === null && formattedDigital.campaign === null,
+      'formatProductForClient forces campaignPresentation and campaign to null for digital products'
     );
 
     // ── 10. Clean Up Test Campaigns ───────────────────────────────────────────

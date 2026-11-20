@@ -31,6 +31,7 @@ import { TaxMath } from '../tax/tax.math';
 export const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   PENDING: [
     'CONFIRMED',
+    'DELIVERED',
     'CANCELLED_BY_CUSTOMER',
     'CANCELLED_BY_SELLER',
     'REJECTED_BY_SELLER',
@@ -486,8 +487,8 @@ export class OrderStateMachine {
         // Permanent stock deduction & sold count increment (Idempotent: only if not previously delivered)
         if (!wasDelivered) {
           for (const item of sellerOrder.items) {
-            if (!item.variantId) {
-              await tx.inventory.update({
+            if (!item.variantId && item.fulfillmentType !== 'DIGITAL') {
+              await tx.inventory.updateMany({
                 where: { productId: item.productId },
                 data: {
                   quantity: { decrement: item.quantity },
@@ -1267,8 +1268,8 @@ export class OrderStateMachine {
                 where: { id: item.variantId },
                 data: { stockQuantity: { increment: item.quantity } },
               });
-            } else {
-              await tx.inventory.update({
+            } else if (item.fulfillmentType !== 'DIGITAL') {
+              await tx.inventory.updateMany({
                 where: { productId: item.productId },
                 data: { reserved: { decrement: item.quantity } },
               });
@@ -1309,8 +1310,8 @@ export class OrderStateMachine {
           // IDEMPOTENCY GUARD: Only increment if this child seller order was NOT already DELIVERED
           if (!soWasDelivered) {
             for (const item of so.items) {
-              if (!item.variantId) {
-                await tx.inventory.update({
+              if (!item.variantId && item.fulfillmentType !== 'DIGITAL') {
+                await tx.inventory.updateMany({
                   where: { productId: item.productId },
                   data: {
                     quantity: { decrement: item.quantity },

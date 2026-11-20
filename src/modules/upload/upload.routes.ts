@@ -45,6 +45,7 @@ export const ALLOWED_UPLOAD_FOLDERS = new Set([
   'withdrawals',
   'test-chat',
   'visual-search-temp',
+  'digital-deliveries',
   'videos',
 ]);
 
@@ -84,6 +85,7 @@ const FOLDER_MAX_SIZES: Record<string, number> = {
   'customer-deposits': 25 * 1024 * 1024,
   finance_proofs: 25 * 1024 * 1024,
   withdrawals: 25 * 1024 * 1024,
+  'digital-deliveries': 15 * 1024 * 1024,
   'visual-search-temp': 15 * 1024 * 1024,
 };
 

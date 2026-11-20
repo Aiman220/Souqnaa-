@@ -128,6 +128,13 @@ export class NotificationTemplateService {
       bodyEn: 'Digital codes are exhausted for order #{{orderNumber}}. Please restock codes or fulfill manually.',
       deepLinkPattern: 'souqnaa://seller/orders/{{orderId}}',
     },
+    SELLER_CUSTOMER_ACCESSED_DIGITAL: {
+      titleAr: 'عرض العميل للمحتوى الرقمي ⚡',
+      titleEn: 'Customer viewed digital content ⚡',
+      bodyAr: 'قام العميل باستعراض وتأكيد استلام الرمز/المحتوى الرقمي للطلب #{{orderNumber}}.',
+      bodyEn: 'Customer has viewed and accessed the digital content for order #{{orderNumber}}.',
+      deepLinkPattern: 'souqnaa://seller/orders/{{orderId}}',
+    },
 
     // ── Payments ────────────────────────────────────────────────────────────
     PAYMENT_PENDING: {

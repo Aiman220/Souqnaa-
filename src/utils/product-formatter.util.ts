@@ -150,6 +150,16 @@ export function formatProductForClient(product: any, campaignPresentation?: any)
     digitalInstructions: product.digitalInstructions || null,
     campaignPresentation: presentation,
     campaign: presentation, // Backward-compatible alias matching Section 10 & 57
+    attributes: Array.isArray(product.attributes)
+      ? product.attributes.map((a: any) => ({
+          id: a.id || undefined,
+          productId: a.productId || product.id,
+          keyAr: a.keyAr || '',
+          keyEn: a.keyEn || a.keyAr || '',
+          valueAr: a.valueAr || '',
+          valueEn: a.valueEn || a.valueAr || '',
+        }))
+      : [],
   };
 }
 
