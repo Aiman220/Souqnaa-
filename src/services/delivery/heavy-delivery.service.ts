@@ -211,6 +211,7 @@ export class HeavyDeliveryService {
       const catSlug = (item.categorySlug || '').toLowerCase();
       const catAr = item.categoryNameAr || '';
       const catEn = (item.categoryNameEn || '').toLowerCase();
+      const prodName = (item.name || '').toLowerCase();
       const unit = (item.sellingUnit || 'PIECE').toUpperCase();
 
       let meta: any = {};
@@ -222,7 +223,7 @@ export class HeavyDeliveryService {
         }
       }
 
-      // Detect product category family
+      // Detect product category family via category slug/name OR product title
       const isTilesCategory =
         catSlug.includes('tile') ||
         catSlug.includes('ceramic') ||
@@ -230,7 +231,12 @@ export class HeavyDeliveryService {
         catAr.includes('سيراميك') ||
         catAr.includes('بورسلان') ||
         catAr.includes('بلاط') ||
-        catEn.includes('tile');
+        catEn.includes('tile') ||
+        prodName.includes('سيراميك') ||
+        prodName.includes('بورسلان') ||
+        prodName.includes('بلاط') ||
+        prodName.includes('tile') ||
+        prodName.includes('ceramic');
 
       const isMarbleCategory =
         catSlug.includes('marble') ||
@@ -238,15 +244,23 @@ export class HeavyDeliveryService {
         catAr.includes('رخام') ||
         catAr.includes('جرانيت') ||
         catEn.includes('marble') ||
-        catEn.includes('granite');
+        catEn.includes('granite') ||
+        prodName.includes('رخام') ||
+        prodName.includes('جرانيت') ||
+        prodName.includes('marble') ||
+        prodName.includes('granite');
 
       const isMachineryCategory =
         catSlug.includes('machin') ||
         catSlug.includes('industrial') ||
         catAr.includes('معدات') ||
         catAr.includes('ماكينات') ||
-        catAr.includes('صناعي') ||
-        catEn.includes('machin');
+        catEn.includes('machin') ||
+        prodName.includes('ماكينة') ||
+        prodName.includes('معدة') ||
+        prodName.includes('مخرطة') ||
+        prodName.includes('مكينة') ||
+        prodName.includes('رافعة');
 
       const isSolarOrGenerator =
         catSlug.includes('solar') ||
@@ -254,21 +268,37 @@ export class HeavyDeliveryService {
         catAr.includes('طاقة شمسية') ||
         catAr.includes('مولد') ||
         catAr.includes('إنفرتر') ||
-        catAr.includes('بطاريات');
+        catAr.includes('بطاريات') ||
+        prodName.includes('مولد') ||
+        prodName.includes('generator') ||
+        prodName.includes('طاقة شمسية') ||
+        prodName.includes('انفرتر') ||
+        prodName.includes('إنفرتر') ||
+        prodName.includes('بطارية') ||
+        prodName.includes('solar');
 
       const isDoorCategory =
         catSlug.includes('door') ||
         catSlug.includes('gate') ||
         catAr.includes('أبواب') ||
         catAr.includes('باب') ||
-        catEn.includes('door');
+        catEn.includes('door') ||
+        prodName.includes('باب ') ||
+        prodName.includes('أبواب') ||
+        prodName.includes('بوابة');
 
       const isApplianceCategory =
         catSlug.includes('appliance') ||
         catAr.includes('أجهزة منزلية') ||
         catAr.includes('ثلاجات') ||
         catAr.includes('غسالات') ||
-        catAr.includes('مكيفات');
+        catAr.includes('مكيفات') ||
+        prodName.includes('ثلاجة') ||
+        prodName.includes('غسالة') ||
+        prodName.includes('مكيف') ||
+        prodName.includes('فريزر') ||
+        prodName.includes('فرن') ||
+        prodName.includes('appliance');
 
       // 1. TILES & PORCELAIN CALCULATION
       if (isTilesCategory || unit === 'SQM' || (unit === 'BOX' && isTilesCategory)) {
@@ -349,8 +379,8 @@ export class HeavyDeliveryService {
         requiresForklift = true;
       }
       // 3. MACHINERY & GENERATORS & SOLAR
-      else if (isMachineryCategory || isSolarOrGenerator) {
-        detectedClassification = isMachineryCategory ? 'MACHINERY_INDUSTRIAL' : 'GENERATORS_SOLAR';
+      else if (isSolarOrGenerator || isMachineryCategory) {
+        detectedClassification = isSolarOrGenerator ? 'GENERATORS_SOLAR' : 'MACHINERY_INDUSTRIAL';
 
         const itemWeight = (item.weightKg || item.packageWeightKg || 0) * qty;
         const itemL = item.lengthCm || item.packageLengthCm || 0;

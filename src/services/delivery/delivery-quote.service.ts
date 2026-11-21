@@ -108,6 +108,26 @@ export interface FullQuoteResponse {
   marketplaceSubsidy?: number;
   estimatedHoursMin?: number;
   estimatedHoursMax?: number;
+  // Heavy & Bulky Delivery top-level metadata
+  isHeavyDelivery?: boolean;
+  deliveryMode?: string;
+  quoteType?: string;
+  quoteReason?: string;
+  requiresManualQuote?: boolean;
+  vehicleClass?: string;
+  vehicleClassNameAr?: string;
+  vehicleClassNameEn?: string;
+  palletCount?: number;
+  cargoClassification?: string;
+  cargoDescriptionAr?: string;
+  loadingFee?: number;
+  unloadingFee?: number;
+  forkliftFee?: number;
+  craneFee?: number;
+  accessSurcharge?: number;
+  requiresForklift?: boolean;
+  requiresCrane?: boolean;
+  heavyAvailable?: boolean;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -515,6 +535,11 @@ export class DeliveryQuoteService {
     const firstInterQuote = sellerQuotes.find((q) => q.isInterGovernorate);
     const isInterGov = Boolean(firstInterQuote);
 
+    const heavyQuotes = sellerQuotes.filter((q) => q.deliveryMode && q.deliveryMode !== 'STANDARD_PARCEL');
+    const isHeavyDelivery = heavyQuotes.length > 0;
+    const firstHeavyQuote = heavyQuotes[0];
+    const requiresManualQuote = sellerQuotes.some((q) => q.requiresManualQuote === true || q.deliveryMode === 'MANUAL_QUOTE');
+
     // Isolated method availabilities
     const isStandardMethodAvailable = !anyDistanceUnavailable && isStandardActive;
     const isScheduledMethodAvailable = !anyDistanceUnavailable && isScheduledActive && storesStatusList.every((s) => s.acceptsScheduled !== false);
@@ -548,6 +573,26 @@ export class DeliveryQuoteService {
       policy: multiResult.policy,
       standardAvailable: isStandardMethodAvailable,
       scheduledAvailable: isScheduledMethodAvailable,
+      // Heavy & Bulky Delivery top-level metadata
+      isHeavyDelivery,
+      deliveryMode: firstHeavyQuote?.deliveryMode || 'STANDARD_PARCEL',
+      quoteType: firstHeavyQuote?.quoteType || (isHeavyDelivery ? 'AUTOMATIC_QUOTE' : undefined),
+      quoteReason: firstHeavyQuote?.quoteReason,
+      requiresManualQuote,
+      vehicleClass: firstHeavyQuote?.vehicleClass,
+      vehicleClassNameAr: firstHeavyQuote?.vehicleClassNameAr,
+      vehicleClassNameEn: firstHeavyQuote?.vehicleClassNameEn,
+      palletCount: sellerQuotes.reduce((sum, q) => sum + (q.palletCount || 0), 0),
+      cargoClassification: firstHeavyQuote?.cargoClassification,
+      cargoDescriptionAr: firstHeavyQuote?.cargoDescriptionAr,
+      loadingFee: sellerQuotes.reduce((sum, q) => sum + (q.loadingFee || 0), 0),
+      unloadingFee: sellerQuotes.reduce((sum, q) => sum + (q.unloadingFee || 0), 0),
+      forkliftFee: sellerQuotes.reduce((sum, q) => sum + (q.forkliftFee || 0), 0),
+      craneFee: sellerQuotes.reduce((sum, q) => sum + (q.craneFee || 0), 0),
+      accessSurcharge: sellerQuotes.reduce((sum, q) => sum + (q.accessSurcharge || 0), 0),
+      requiresForklift: sellerQuotes.some((q) => (q.forkliftFee || 0) > 0),
+      requiresCrane: sellerQuotes.some((q) => (q.craneFee || 0) > 0),
+      heavyAvailable: isHeavyDelivery && !anyDistanceUnavailable,
       // Inter-Governorate top-level metadata
       isInterGovernorate: isInterGov,
       routeKey: firstInterQuote?.routeKey,

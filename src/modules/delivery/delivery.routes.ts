@@ -275,6 +275,30 @@ router.post('/quote', authenticate, async (req: Request, res: Response, next: Ne
       if (!address) throw new AppError('Address not found or does not belong to you', 404);
     }
 
+    // Collect explicit product IDs from sellerOrders and buyNowItem
+    const explicitProductIds: string[] = [];
+    for (const so of sellerOrders) {
+      if (Array.isArray(so.items)) {
+        for (const it of so.items) {
+          if (it.productId) explicitProductIds.push(String(it.productId));
+        }
+      }
+    }
+    if (req.body.buyNowItem?.productId) {
+      explicitProductIds.push(String(req.body.buyNowItem.productId));
+    }
+    if (req.body.productId) {
+      explicitProductIds.push(String(req.body.productId));
+    }
+
+    const fetchedProducts = explicitProductIds.length > 0
+      ? await prisma.product.findMany({
+          where: { id: { in: Array.from(new Set(explicitProductIds)) } },
+          include: { category: true, store: true },
+        })
+      : [];
+    const productMap = new Map(fetchedProducts.map((p) => [p.id, p]));
+
     const enrichedSellerOrders = sellerOrders.map((so: any) => {
       const customMethod = so.deliveryMethod || rawSellerMethodOverrides[so.sellerId];
       const isSellerExpress = typeof so.isExpress === 'boolean'
@@ -283,10 +307,83 @@ router.post('/quote', authenticate, async (req: Request, res: Response, next: Ne
 
       let isSellerDigital = Boolean(so.isDigital);
       let heavyItems = so.heavyItems;
+
+      // 1. If explicit items passed in this sellerOrder
+      if (!heavyItems && Array.isArray(so.items) && so.items.length > 0) {
+        heavyItems = so.items.map((it: any) => {
+          const prod = productMap.get(String(it.productId));
+          return {
+            productId: it.productId,
+            name: it.name || prod?.nameAr || prod?.nameEn || 'منتج',
+            quantity: it.quantity || 1,
+            weightKg: prod?.weight ?? it.weightKg ?? null,
+            lengthCm: prod?.lengthCm ?? it.lengthCm ?? null,
+            widthCm: prod?.widthCm ?? it.widthCm ?? null,
+            heightCm: prod?.heightCm ?? it.heightCm ?? null,
+            packageWeightKg: prod?.packageWeightKg ?? it.packageWeightKg ?? null,
+            packageLengthCm: prod?.packageLengthCm ?? null,
+            packageWidthCm: prod?.packageWidthCm ?? null,
+            packageHeightCm: prod?.packageHeightCm ?? null,
+            sellingUnit: prod?.sellingUnit ?? null,
+            unitDimensionsJson: prod?.unitDimensionsJson ?? null,
+            palletCount: prod?.palletCount ?? null,
+            packagingType: prod?.packagingType ?? null,
+            isFragile: prod?.isFragile ?? false,
+            isOversized: prod?.isOversized ?? false,
+            requiresForklift: prod?.requiresForklift ?? false,
+            requiresCrane: prod?.requiresCrane ?? false,
+            requiresSpecialVehicle: prod?.requiresSpecialVehicle ?? false,
+            specialVehicleType: prod?.specialVehicleType ?? null,
+            categorySlug: prod?.category?.slug ?? null,
+            categoryNameAr: prod?.category?.nameAr ?? null,
+            categoryNameEn: prod?.category?.nameEn ?? null,
+            isDigital: prod?.fulfillmentType === 'DIGITAL' || it.fulfillmentType === 'DIGITAL',
+          };
+        });
+      }
+
+      // 2. If Buy Now item
+      if (!heavyItems && req.body.buyNowItem?.productId) {
+        const prod = productMap.get(String(req.body.buyNowItem.productId));
+        if (prod) {
+          heavyItems = [{
+            productId: prod.id,
+            name: prod.nameAr || prod.nameEn,
+            quantity: req.body.buyNowItem.quantity || 1,
+            weightKg: prod.weight ?? null,
+            lengthCm: prod.lengthCm ?? null,
+            widthCm: prod.widthCm ?? null,
+            heightCm: prod.heightCm ?? null,
+            packageWeightKg: prod.packageWeightKg ?? null,
+            packageLengthCm: prod.packageLengthCm ?? null,
+            packageWidthCm: prod.packageWidthCm ?? null,
+            packageHeightCm: prod.packageHeightCm ?? null,
+            sellingUnit: prod.sellingUnit ?? null,
+            unitDimensionsJson: prod.unitDimensionsJson ?? null,
+            palletCount: prod.palletCount ?? null,
+            packagingType: prod.packagingType ?? null,
+            isFragile: prod.isFragile ?? false,
+            isOversized: prod.isOversized ?? false,
+            requiresForklift: prod.requiresForklift ?? false,
+            requiresCrane: prod.requiresCrane ?? false,
+            requiresSpecialVehicle: prod.requiresSpecialVehicle ?? false,
+            specialVehicleType: prod.specialVehicleType ?? null,
+            categorySlug: prod.category?.slug ?? null,
+            categoryNameAr: prod.category?.nameAr ?? null,
+            categoryNameEn: prod.category?.nameEn ?? null,
+            isDigital: prod.fulfillmentType === 'DIGITAL',
+          }];
+        }
+      }
+
+      // 3. Fallback to userCart in DB
       if (!heavyItems && userCart) {
-        const storeCartItems = userCart.items.filter(
-          (it) => it.product?.storeId === so.storeId || it.product?.store?.sellerId === so.sellerId
+        let storeCartItems = userCart.items.filter(
+          (it) => it.product?.storeId === so.storeId || it.product?.store?.sellerId === so.sellerId || (it.product as any)?.sellerId === so.sellerId
         );
+        if (storeCartItems.length === 0 && sellerOrders.length === 1) {
+          storeCartItems = userCart.items;
+        }
         if (storeCartItems.length > 0) {
           const sellerHasPhysical = storeCartItems.some(
             (it) => it.product?.fulfillmentType !== 'DIGITAL'

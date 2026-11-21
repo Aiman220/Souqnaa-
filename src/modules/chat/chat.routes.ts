@@ -205,6 +205,7 @@ async function enrichConversation(conv: any, requestingUserId: string) {
     sellerId: sellerUserId,
     storeId: store?.id || '',
     customerName: customerFullName,
+    customerAvatar: customerMember?.user?.avatar || null,
     sellerStoreName,
     storeLogo: store?.logo || sellerMember?.user?.avatar || null,
     lastMessage: lastMessageSnippet,
