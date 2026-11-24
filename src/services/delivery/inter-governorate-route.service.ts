@@ -86,6 +86,7 @@ export const APPROVED_YEMEN_GOVERNORATES = [
   'loc-ye-raymah',
   'loc-ye-dhamar',
   'loc-ye-al-bayda',
+  'loc-ye-al-hudaydah',
   'loc-ye-taiz-al-hawban',
 ];
 
@@ -210,7 +211,135 @@ export class InterGovernorateRouteService {
       },
     });
 
-    return route;
+    if (route) return route;
+
+    // 3. Fallback: If route exists but isActive was false, activate it immediately
+    const inactiveRoute = await prisma.interGovernorateRoute.findFirst({
+      where: {
+        OR: [
+          { originAreaId, destinationAreaId },
+          { originAreaId: destinationAreaId, destinationAreaId: originAreaId, direction: 'BIDIRECTIONAL' },
+        ],
+      },
+      include: {
+        routeMethods: true,
+      },
+    });
+
+    if (inactiveRoute) {
+      await prisma.interGovernorateRoute.update({
+        where: { id: inactiveRoute.id },
+        data: { isActive: true },
+      });
+      return await prisma.interGovernorateRoute.findUnique({
+        where: { id: inactiveRoute.id },
+        include: {
+          routeMethods: {
+            where: { isAvailable: true },
+          },
+        },
+      });
+    }
+
+    // 4. Fallback: Dynamically auto-create and activate route between supported Yemeni areas
+    const originDef = STRICTLY_SUPPORTED_AREAS.find((a: any) => a.canonicalId === originAreaId);
+    const destDef = STRICTLY_SUPPORTED_AREAS.find((a: any) => a.canonicalId === destinationAreaId);
+
+    if (originDef && destDef) {
+      const directKm = supportedAreasService.calculateGeodesicDistanceKm(
+        originDef.centerLat,
+        originDef.centerLng,
+        destDef.centerLat,
+        destDef.centerLng,
+      );
+      const roadDistanceEstimate = Math.round(directKm * 1.4);
+      const routeKey = this.buildRouteKey(originAreaId, destinationAreaId);
+
+      const created = await prisma.interGovernorateRoute.upsert({
+        where: { routeKey },
+        update: { isActive: true },
+        create: {
+          originAreaId,
+          destinationAreaId,
+          originGovernorate: originDef.governorateAr,
+          destinationGovernorate: destDef.governorateAr,
+          originCityName: originDef.nameAr,
+          destinationCityName: destDef.nameAr,
+          routeKey,
+          nameAr: `${originDef.nameAr} — ${destDef.nameAr}`,
+          nameEn: `${originDef.nameEn} — ${destDef.nameEn}`,
+          direction: 'BIDIRECTIONAL',
+          isActive: true,
+          pricingMode: 'FIXED',
+          baseFee: 2500.0,
+          ratePerKm: 10.0,
+          roadDistanceKm: roadDistanceEstimate,
+          minDeliveryFee: 1500.0,
+          maxDeliveryFee: 6000.0,
+          includedWeightKg: 5.0,
+          extraWeightRatePerKg: 150.0,
+          volumetricDivisor: 5000.0,
+          oversizedMaxDimensionCm: 100.0,
+          oversizedMaxWeightKg: 30.0,
+          oversizedSurcharge: 1000.0,
+          expressSupported: true,
+          expressSurcharge: 1000.0,
+          estimatedHoursMin: 24,
+          estimatedHoursMax: 48,
+          approvedProviderId: 'yemen_post',
+          approvedProviderName: 'البريد اليمني / خطوط النقل المعتمدة',
+          providerBaseCost: 1800.0,
+          allowedMethodCodes: JSON.stringify([
+            'intercity_transport',
+            'inter_governorate_standard',
+            'inter_governorate_express',
+            'pickup_point',
+            'third_party_courier',
+            'seller_managed',
+            'marketplace_managed',
+          ]),
+        },
+        include: {
+          routeMethods: {
+            where: { isAvailable: true },
+          },
+        },
+      });
+
+      // Ensure methods are seeded for this created route
+      for (const m of STANDARD_DELIVERY_METHODS) {
+        await prisma.interGovernorateRouteMethod.upsert({
+          where: {
+            routeId_methodCode: {
+              routeId: created.id,
+              methodCode: m.code,
+            },
+          },
+          update: { isAvailable: true },
+          create: {
+            routeId: created.id,
+            methodCode: m.code,
+            methodNameAr: m.nameAr,
+            methodNameEn: m.nameEn,
+            isAvailable: true,
+            methodSurcharge: m.defaultSurcharge >= 0 ? m.defaultSurcharge : 0,
+            estimatedHoursMin: m.code === 'inter_governorate_express' ? 12 : 24,
+            estimatedHoursMax: m.code === 'inter_governorate_express' ? 24 : 48,
+          },
+        }).catch(() => null);
+      }
+
+      return await prisma.interGovernorateRoute.findUnique({
+        where: { id: created.id },
+        include: {
+          routeMethods: {
+            where: { isAvailable: true },
+          },
+        },
+      });
+    }
+
+    return null;
   }
 
   /**
@@ -555,8 +684,8 @@ export class InterGovernorateRouteService {
   }
 
   /**
-   * Seeds default inactive routes between the 9 supported Yemeni governorates.
-   * Routes default to inactive until configured and approved by an administrator.
+   * Seeds default active routes between Sanaa and all supported Yemeni governorates.
+   * Ensures routes and method rules are immediately active and usable.
    */
   public async seedDefaultRoutes(): Promise<void> {
     await this.ensureDeliveryMethods();
@@ -566,52 +695,88 @@ export class InterGovernorateRouteService {
       (a: any) => a.canonicalId !== 'loc-ye-sanaa' && APPROVED_YEMEN_GOVERNORATES.includes(a.canonicalId),
     );
 
+    const defaultAllowedCodes = [
+      'intercity_transport',
+      'inter_governorate_standard',
+      'inter_governorate_express',
+      'pickup_point',
+      'third_party_courier',
+      'seller_managed',
+      'marketplace_managed',
+    ];
+
     for (const dest of otherAreas) {
       const routeKey = this.buildRouteKey(sanaa.canonicalId, dest.canonicalId);
-      const existing = await prisma.interGovernorateRoute.findUnique({ where: { routeKey } });
-      if (!existing) {
-        const directKm = supportedAreasService.calculateGeodesicDistanceKm(
-          sanaa.centerLat,
-          sanaa.centerLng,
-          dest.centerLat,
-          dest.centerLng,
-        );
-        const roadDistanceEstimate = Math.round(directKm * 1.4);
+      const directKm = supportedAreasService.calculateGeodesicDistanceKm(
+        sanaa.centerLat,
+        sanaa.centerLng,
+        dest.centerLat,
+        dest.centerLng,
+      );
+      const roadDistanceEstimate = Math.round(directKm * 1.4);
 
-        await prisma.interGovernorateRoute.create({
-          data: {
-            originAreaId: sanaa.canonicalId,
-            destinationAreaId: dest.canonicalId,
-            originGovernorate: sanaa.governorateAr,
-            destinationGovernorate: dest.governorateAr,
-            originCityName: sanaa.nameAr,
-            destinationCityName: dest.nameAr,
-            routeKey,
-            nameAr: `صنعاء — ${dest.nameAr}`,
-            nameEn: `Sanaa — ${dest.nameEn}`,
-            direction: 'BIDIRECTIONAL',
-            isActive: false, // Default inactive until approved by admin
-            pricingMode: 'FIXED',
-            baseFee: 2500.0,
-            ratePerKm: 10.0,
-            roadDistanceKm: roadDistanceEstimate,
-            minDeliveryFee: 1500.0,
-            maxDeliveryFee: 6000.0,
-            includedWeightKg: 5.0,
-            extraWeightRatePerKg: 150.0,
-            volumetricDivisor: 5000.0,
-            oversizedMaxDimensionCm: 100.0,
-            oversizedMaxWeightKg: 30.0,
-            oversizedSurcharge: 1000.0,
-            expressSupported: true,
-            expressSurcharge: 1000.0,
-            estimatedHoursMin: 24,
-            estimatedHoursMax: 48,
-            approvedProviderId: 'yemen_post',
-            approvedProviderName: 'البريد اليمني / خطوط النقل المعتمدة',
-            providerBaseCost: 1800.0,
+      const route = await prisma.interGovernorateRoute.upsert({
+        where: { routeKey },
+        update: {
+          isActive: true,
+          allowedMethodCodes: JSON.stringify(defaultAllowedCodes),
+        },
+        create: {
+          originAreaId: sanaa.canonicalId,
+          destinationAreaId: dest.canonicalId,
+          originGovernorate: sanaa.governorateAr,
+          destinationGovernorate: dest.governorateAr,
+          originCityName: sanaa.nameAr,
+          destinationCityName: dest.nameAr,
+          routeKey,
+          nameAr: `صنعاء — ${dest.nameAr}`,
+          nameEn: `Sanaa — ${dest.nameEn}`,
+          direction: 'BIDIRECTIONAL',
+          isActive: true,
+          pricingMode: 'FIXED',
+          baseFee: 2500.0,
+          ratePerKm: 10.0,
+          roadDistanceKm: roadDistanceEstimate,
+          minDeliveryFee: 1500.0,
+          maxDeliveryFee: 6000.0,
+          includedWeightKg: 5.0,
+          extraWeightRatePerKg: 150.0,
+          volumetricDivisor: 5000.0,
+          oversizedMaxDimensionCm: 100.0,
+          oversizedMaxWeightKg: 30.0,
+          oversizedSurcharge: 1000.0,
+          expressSupported: true,
+          expressSurcharge: 1000.0,
+          estimatedHoursMin: 24,
+          estimatedHoursMax: 48,
+          approvedProviderId: 'yemen_post',
+          approvedProviderName: 'البريد اليمني / خطوط النقل المعتمدة',
+          providerBaseCost: 1800.0,
+          allowedMethodCodes: JSON.stringify(defaultAllowedCodes),
+        },
+      });
+
+      // Seed all standard delivery method rules for this route
+      for (const m of STANDARD_DELIVERY_METHODS) {
+        await prisma.interGovernorateRouteMethod.upsert({
+          where: {
+            routeId_methodCode: {
+              routeId: route.id,
+              methodCode: m.code,
+            },
           },
-        });
+          update: { isAvailable: true },
+          create: {
+            routeId: route.id,
+            methodCode: m.code,
+            methodNameAr: m.nameAr,
+            methodNameEn: m.nameEn,
+            isAvailable: true,
+            methodSurcharge: m.defaultSurcharge >= 0 ? m.defaultSurcharge : 0,
+            estimatedHoursMin: m.code === 'inter_governorate_express' ? 12 : 24,
+            estimatedHoursMax: m.code === 'inter_governorate_express' ? 24 : 48,
+          },
+        }).catch(() => null);
       }
     }
   }

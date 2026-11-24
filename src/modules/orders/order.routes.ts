@@ -894,7 +894,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           promotionType: appliedUniversalPromotion.promotionType,
           promotionCode: appliedUniversalPromotion.promotionCode,
           calculation: universalCalculation,
-          cartId: cart.id,
+          cartId: cart?.id || 'direct_purchase',
           idempotencyKey: idempotencyKey ? `usp_${idempotencyKey}` : undefined,
         });
         universalReservationId = res.reservationId;
@@ -916,7 +916,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           isShippingPromotionEligible = true;
           const reservation = await FirstOrderPromotionReservationService.reservePromotion({
             customerId: req.user!.userId,
-            cartId: cart.id,
+            cartId: cart?.id || 'direct_purchase',
             cartSubtotal: subtotal,
             originalShippingAmount: quote.totalDeliveryFee,
             deliveryMethod: deliveryMethodCode || finalScheduleType,
@@ -1429,7 +1429,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
                 where: { id: i.variantId },
                 data: { stockQuantity: { decrement: i.quantity } },
               });
-            } else {
+            } else if (i.fulfillmentType !== 'DIGITAL') {
               await tx.inventory.upsert({
                 where: { productId: i.productId },
                 update: { reserved: { increment: i.quantity } },

@@ -91,7 +91,11 @@ export class InventoryAnalyticsService {
     let deadStockCount = 0;
 
     for (const p of (products as any[])) {
-      const currentStock = p.inventory?.quantity || 0;
+      const currentStock = p.inventory
+        ? Math.max(0, (p.inventory.quantity || 0) - (p.inventory.reserved || 0))
+        : (Array.isArray(p.variants) && p.variants.length > 0
+            ? p.variants.reduce((acc: number, v: any) => acc + (v.stockQuantity || v.stock || 0), 0)
+            : 0);
       const lowThreshold = p.inventory?.lowStockAlert || 5;
       const sales = salesMap.get(p.id) || { units: 0, lastSaleDate: null };
       const unitsSold = sales.units;

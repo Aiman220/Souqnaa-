@@ -1,7 +1,8 @@
 import { redis } from '../../../database/redis';
 import { SocketService } from '../../../services/websocket/socket.service';
+import { invalidateHomeFeedCache } from '../../home/home.routes';
 
-const DEFAULT_BANNER_CACHE_TTL = 300; // 5 minutes
+const DEFAULT_BANNER_CACHE_TTL = 120; // 2 minutes (rapid refresh with L1/L2 Redis caching)
 
 class BannerCacheService {
   buildKey(placementKey: string, locale = 'ar', platform = 'MOBILE', segment = 'ALL'): string {
@@ -39,12 +40,19 @@ class BannerCacheService {
    */
   async invalidatePlacement(placementKey: string): Promise<void> {
     const p = (placementKey || '').toUpperCase();
-    // Common combinations to clear immediately
+
+    // 1. Purge all matching pattern keys from Redis (L1 memory + L2 Redis)
+    const tasks: Promise<any>[] = [
+      redis.delPattern(`banners:${p}:*`),
+      redis.delPattern('banners:HOME_AGGREGATE:*'),
+      invalidateHomeFeedCache(),
+    ];
+
+    // 2. Explicitly wipe common key combinations directly for instant zero-latency clearing
     const locales = ['ar', 'en'];
     const platforms = ['mobile', 'android', 'ios', 'web', 'desktop', 'tablet'];
-    const segments = ['all', 'guests', 'registered_users', 'new_customers'];
+    const segments = ['all', 'guest', 'guests', 'registered', 'registered_users', 'new_customers'];
 
-    const tasks: Promise<any>[] = [];
     for (const l of locales) {
       for (const pl of platforms) {
         for (const s of segments) {
@@ -52,7 +60,7 @@ class BannerCacheService {
         }
       }
     }
-    // Also clear home aggregate cache
+    // Also clear legacy aggregate keys
     tasks.push(redis.del(`banners:HOME_AGGREGATE:ar`));
     tasks.push(redis.del(`banners:HOME_AGGREGATE:en`));
 
@@ -66,6 +74,12 @@ class BannerCacheService {
   }
 
   async invalidateAllBanners(): Promise<void> {
+    // 1. Invalidate all banner patterns across Redis
+    await Promise.allSettled([
+      redis.delPattern('banners:*'),
+      invalidateHomeFeedCache(),
+    ]);
+
     const placements = [
       'HOME_HERO',
       'HOME_SECONDARY',
@@ -76,12 +90,17 @@ class BannerCacheService {
       'STORE_TOP',
       'PRODUCT_TOP',
       'CHECKOUT_PROMOTION',
+      'FEATURED_STORES',
     ];
     await Promise.allSettled(placements.map((p) => this.invalidatePlacement(p)));
 
-    // Broadcast global invalidation
+    // Broadcast global invalidation for both banners and campaigns
     SocketService.get()?.emitGlobal('promotions:banners_updated', {
       placementKey: 'ALL',
+      timestamp: Date.now(),
+    });
+    SocketService.get()?.emitGlobal('promotions:campaigns_updated', {
+      action: 'INVALIDATE_ALL',
       timestamp: Date.now(),
     });
   }

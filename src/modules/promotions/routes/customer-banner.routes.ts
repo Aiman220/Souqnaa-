@@ -38,11 +38,12 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     const placementKey = (req.query.placement as string) || 'HOME_HERO';
     const context = extractClientContext(req);
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+    const bypassCache = req.query.nocache === 'true' || req.headers['cache-control'] === 'no-cache';
 
     const result = await bannerRecommendationService.getEligibleBannersForPlacement(
       placementKey,
       context,
-      { limit }
+      { limit, bypassCache }
     );
 
     ResponseUtil.success(res, result);
@@ -57,11 +58,12 @@ router.get('/placements/:placementKey', async (req: Request, res: Response, next
     const placementKey = String(req.params.placementKey).toUpperCase();
     const context = extractClientContext(req);
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+    const bypassCache = req.query.nocache === 'true' || req.headers['cache-control'] === 'no-cache';
 
     const result = await bannerRecommendationService.getEligibleBannersForPlacement(
       placementKey,
       context,
-      { limit }
+      { limit, bypassCache }
     );
 
     ResponseUtil.success(res, result);
@@ -74,12 +76,13 @@ router.get('/placements/:placementKey', async (req: Request, res: Response, next
 router.get('/home', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const context = extractClientContext(req);
+    const bypassCache = req.query.nocache === 'true' || req.headers['cache-control'] === 'no-cache';
 
     const [hero, secondary, voucherStrip, flashSale] = await Promise.all([
-      bannerRecommendationService.getEligibleBannersForPlacement('HOME_HERO', context, { limit: 10 }),
-      bannerRecommendationService.getEligibleBannersForPlacement('HOME_SECONDARY', context, { limit: 8 }),
-      bannerRecommendationService.getEligibleBannersForPlacement('HOME_VOUCHER', context, { limit: 8 }),
-      bannerRecommendationService.getEligibleBannersForPlacement('HOME_FLASH_SALE', context, { limit: 8 }),
+      bannerRecommendationService.getEligibleBannersForPlacement('HOME_HERO', context, { limit: 10, bypassCache }),
+      bannerRecommendationService.getEligibleBannersForPlacement('HOME_SECONDARY', context, { limit: 8, bypassCache }),
+      bannerRecommendationService.getEligibleBannersForPlacement('HOME_VOUCHER', context, { limit: 8, bypassCache }),
+      bannerRecommendationService.getEligibleBannersForPlacement('HOME_FLASH_SALE', context, { limit: 8, bypassCache }),
     ]);
 
     ResponseUtil.success(res, {

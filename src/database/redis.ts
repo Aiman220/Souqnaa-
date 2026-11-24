@@ -225,13 +225,30 @@ class RedisService {
     // 2. Invalidate matching L2 Redis keys via non-blocking SCAN
     if (this.isConnected && this.client) {
       try {
-        const stream = this.client.scanStream({ match: pattern, count: 100 });
-        stream.on('data', async (keys: string[]) => {
-          if (keys && keys.length > 0) {
-            const pipeline = this.client!.pipeline();
-            keys.forEach((k) => pipeline.del(k));
-            await pipeline.exec().catch(() => {});
-          }
+        await new Promise<void>((resolve) => {
+          const stream = this.client!.scanStream({ match: pattern, count: 100 });
+          const pendingDeletes: Promise<any>[] = [];
+
+          stream.on('data', (keys: string[]) => {
+            if (keys && keys.length > 0) {
+              const pipeline = this.client!.pipeline();
+              keys.forEach((k) => pipeline.del(k));
+              pendingDeletes.push(pipeline.exec().catch(() => null));
+            }
+          });
+
+          stream.on('end', async () => {
+            try {
+              if (pendingDeletes.length > 0) {
+                await Promise.allSettled(pendingDeletes);
+              }
+            } catch (_) {}
+            resolve();
+          });
+
+          stream.on('error', () => {
+            resolve();
+          });
         });
       } catch (_) {}
     }

@@ -43,6 +43,7 @@ import { NotificationCategory, NotificationPriority } from '../notifications/not
 import { interGovernorateTrackingService } from '../../services/delivery/inter-governorate-tracking.service';
 import { WishlistAlertsJob } from '../../services/jobs/wishlist-alerts.job';
 import { StorefrontInvalidatorService } from '../../services/storefront-invalidator.service';
+import { formatProductForClient } from '../../utils/product-formatter.util';
 
 const router = Router();
 router.use(authenticate, requireSeller);
@@ -1475,21 +1476,7 @@ router.get('/analytics', async (req: Request, res: Response, next: NextFunction)
 
 function formatProductWithStock(product: any) {
   if (!product) return null;
-  const variantStock = Array.isArray(product.variants) && product.variants.length > 0
-    ? product.variants.reduce((sum: number, v: any) => sum + (v.stockQuantity || 0), 0)
-    : 0;
-  const stock = product.inventory?.quantity ?? (variantStock > 0 ? variantStock : 0);
-  const rawSold = product.soldCount ?? product.sold_count ?? product.unitsSold ?? product.totalSold;
-  const soldCount = typeof rawSold === 'number'
-    ? rawSold
-    : (typeof rawSold === 'string' ? parseInt(rawSold, 10) || 0 : 0);
-
-  return {
-    ...product,
-    stock,
-    soldCount,
-    sold_count: soldCount,
-  };
+  return formatProductForClient(product);
 }
 
 async function fetchSellerProducts(userId: string) {
@@ -1761,7 +1748,7 @@ async function createSellerProduct(userId: string, body: any) {
     });
   }
 
-  return createdProduct;
+  return formatProductForClient(createdProduct);
 }
 
 async function updateSellerProduct(userId: string, productId: string, body: any) {
@@ -1977,7 +1964,7 @@ async function updateSellerProduct(userId: string, productId: string, body: any)
     });
   }
 
-  return updatedProduct;
+  return formatProductForClient(updatedProduct);
 }
 
 async function deleteSellerProduct(userId: string, productId: string) {

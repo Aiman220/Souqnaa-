@@ -2203,6 +2203,12 @@ export async function seedCategoriesCatalog(prismaClient?: PrismaClient) {
   console.log(
     `✓ Completed catalog seeding: ${catalogCategories.length} root categories and ${totalSubcategories} subcategories (all with universal Other option and suitable icons).`,
   );
+  try {
+    const { redis } = await import('./redis');
+    await redis.delPattern('cache:home:feed*');
+    console.log('  ✓ Invalidated home feed cache in Redis.');
+  } catch (_) {}
+
   return seededCategories;
 }
 

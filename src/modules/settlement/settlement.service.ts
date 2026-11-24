@@ -360,6 +360,7 @@ export class SettlementEngine {
   public static async transitionStatus(input: TransitionSettlementStatusInput) {
     const settlement = await prisma.settlement.findUnique({
       where: { id: input.settlementId },
+      include: { items: true },
     });
     if (!settlement) throw new AppError('التسوية غير موجودة', 404);
 
@@ -392,25 +393,50 @@ export class SettlementEngine {
 
       return await prisma.$transaction(async (tx) => {
         // 1. Allocate Reserve if reserveAmount > 0
+        // SETL-001: Deduplicate against orders that already had reserves allocated upon delivery
         if (settlement.reserveAmount > 0) {
-          const riskProfile = await tx.sellerRiskProfile.findUnique({
-            where: { sellerId: settlement.sellerId },
+          const alreadyReservedCount = await tx.sellerReserveAllocation.count({
+            where: {
+              settlementId: settlement.id,
+              status: 'RESERVED',
+            },
           });
-          const holdingDays = riskProfile?.reserveHoldingDays ?? 30;
-          const riskTier = riskProfile?.riskTier ?? 'NORMAL';
-          const reservePercentage = settlement.netSettlementAmount > 0
-            ? settlement.reserveAmount / settlement.netSettlementAmount
-            : 0.10;
 
-          await SellerReserveService.allocateReserveFromSettlement(tx, {
-            sellerId: settlement.sellerId,
-            settlementId: settlement.id,
-            eligibleSettlementAmount: settlement.netSettlementAmount,
-            reservePercentage,
-            holdingDays,
-            riskTier,
-            currency: settlement.currency,
-          });
+          // Check if individual delivered orders already had delivery reserves allocated
+          const itemOrderNumbers = settlement.items
+            .map((it) => it.orderNumber)
+            .filter((num): num is string => Boolean(num));
+          const alreadyDeliveredReserved = itemOrderNumbers.length > 0
+            ? await tx.sellerReserveAllocation.count({
+                where: {
+                  sellerId: settlement.sellerId,
+                  status: 'RESERVED',
+                  OR: itemOrderNumbers.map((num) => ({ reason: { contains: num } })),
+                },
+              })
+            : 0;
+
+          // Only allocate if individual orders did not already have delivery reserves allocated
+          if (alreadyReservedCount === 0 && alreadyDeliveredReserved === 0) {
+            const riskProfile = await tx.sellerRiskProfile.findUnique({
+              where: { sellerId: settlement.sellerId },
+            });
+            const holdingDays = riskProfile?.reserveHoldingDays ?? 30;
+            const riskTier = riskProfile?.riskTier ?? 'NORMAL';
+            const reservePercentage = settlement.netSettlementAmount > 0
+              ? settlement.reserveAmount / settlement.netSettlementAmount
+              : 0.10;
+
+            await SellerReserveService.allocateReserveFromSettlement(tx, {
+              sellerId: settlement.sellerId,
+              settlementId: settlement.id,
+              eligibleSettlementAmount: settlement.netSettlementAmount,
+              reservePercentage,
+              holdingDays,
+              riskTier,
+              currency: settlement.currency,
+            });
+          }
         }
 
         // 2. Recover confirmed debt if debtRecoveredAmount > 0
@@ -477,7 +503,43 @@ export class SettlementEngine {
         }
 
         // 3. Credit remaining payable settlement to seller available balance
-        if (settlement.payableSettlementAmount > 0) {
+        // SETL-001: Check if payouts for these orders were already disbursed upon delivery
+        // (order.state-machine.ts:567) or collected in cash (COD), preventing double payouts.
+        const itemSellerOrderIds = settlement.items.map((it) => it.sellerOrderId).filter(Boolean) as string[];
+        const deliveredOrdersWithPayout = itemSellerOrderIds.length > 0
+          ? await tx.sellerTransaction.findMany({
+              where: {
+                referenceId: { in: itemSellerOrderIds },
+                type: 'CREDIT',
+              },
+              select: { referenceId: true, amount: true },
+            })
+          : [];
+        const alreadyDisbursedAmount = deliveredOrdersWithPayout.reduce(
+          (sum: number, txRec: { amount: number }) => sum + txRec.amount,
+          0
+        );
+
+        // COD orders: Cash is collected in person by seller, so no platform cash payable
+        const codOrders = itemSellerOrderIds.length > 0
+          ? await tx.sellerOrder.findMany({
+              where: {
+                id: { in: itemSellerOrderIds },
+                order: { payment: { method: 'CASH_ON_DELIVERY' } },
+              },
+              select: { id: true },
+            })
+          : [];
+
+        const isFullyCoveredByDeliveryOrCod =
+          (deliveredOrdersWithPayout.length + codOrders.length) >= itemSellerOrderIds.length &&
+          itemSellerOrderIds.length > 0;
+
+        const effectivePayableAmount = isFullyCoveredByDeliveryOrCod
+          ? Math.max(0, TaxMath.subtract(settlement.payableSettlementAmount, alreadyDisbursedAmount))
+          : settlement.payableSettlementAmount;
+
+        if (effectivePayableAmount > 0) {
           const balance = await tx.sellerBalance.findUnique({
             where: { sellerId: settlement.sellerId },
           });
@@ -485,17 +547,17 @@ export class SettlementEngine {
             await tx.sellerBalance.update({
               where: { id: balance.id },
               data: {
-                availableBalance: { increment: settlement.payableSettlementAmount },
+                availableBalance: { increment: effectivePayableAmount },
               },
             });
 
             await tx.sellerTransaction.create({
               data: {
                 sellerBalanceId: balance.id,
-                amount: settlement.payableSettlementAmount,
+                amount: effectivePayableAmount,
                 type: 'CREDIT',
                 referenceId: settlement.id,
-                description: `إيداع صافي أرباح تسوية مبيعات #${settlement.settlementNumber} (بعد استقطاع الاحتياطي والمديونيات)`,
+                description: `إيداع صافي أرباح تسوية مبيعات #${settlement.settlementNumber} (بعد استقطاع الاحتياطي والمديونيات وما تم صرفه مسبقاً)`,
               },
             });
           }

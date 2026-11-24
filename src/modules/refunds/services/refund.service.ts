@@ -32,6 +32,7 @@ import { CustomerCodEligibilityService } from '../../payments/customer-cod-eligi
 import { RefundFundingWaterfallService } from './refund-funding-waterfall.service';
 import { RefundFraudDetectionService } from './refund-fraud-detector.service';
 import { RemoteConfigService } from '../../remote-config/remote-config.service';
+import { TaxMath } from '../../tax/tax.math';
 
 export interface CreateRefundInput {
   orderId: string;
@@ -1433,12 +1434,47 @@ export class RefundService {
             data: { status: newStatus },
           });
 
-          // Always synchronize the target sellerOrder to REFUNDED upon refund completion
+          // Synchronize target sellerOrder with partial vs full refund accuracy
           if (refund.sellerOrderId) {
-            await tx.sellerOrder.update({
+            const sellerOrder = await tx.sellerOrder.findUnique({
               where: { id: refund.sellerOrderId },
-              data: { status: SellerOrderStatus.REFUNDED },
+              select: { id: true, subtotal: true, deliveryFee: true, sellerPayout: true, status: true },
             });
+
+            if (sellerOrder) {
+              const completedSellerRefunds = await tx.refundRequest.findMany({
+                where: {
+                  sellerOrderId: refund.sellerOrderId,
+                  status: RefundStatus.REFUND_COMPLETED,
+                },
+                select: { approvedAmount: true },
+              });
+              const totalSellerRefunded = completedSellerRefunds.reduce(
+                (sum: number, r: { approvedAmount: number | null }) => sum + (r.approvedAmount || 0),
+                0
+              );
+              const suborderGross = (sellerOrder.subtotal || 0) + (sellerOrder.deliveryFee || 0);
+              const isFullyRefunded = totalSellerRefunded >= (suborderGross - 0.01);
+
+              if (isFullyRefunded) {
+                await tx.sellerOrder.update({
+                  where: { id: refund.sellerOrderId },
+                  data: {
+                    status: SellerOrderStatus.REFUNDED,
+                    sellerPayout: 0,
+                  },
+                });
+              } else {
+                // RFND-001: Partial refund keeps sellerOrder DELIVERED so remaining items remain settleable
+                const updatedPayout = Math.max(0, TaxMath.subtract(sellerOrder.sellerPayout || 0, approvedAmount));
+                await tx.sellerOrder.update({
+                  where: { id: refund.sellerOrderId },
+                  data: {
+                    sellerPayout: updatedPayout,
+                  },
+                });
+              }
+            }
           }
 
           // Check if ALL active seller orders of this order are now refunded or terminal

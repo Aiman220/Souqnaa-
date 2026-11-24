@@ -215,7 +215,9 @@ export class FeatureStoreService {
     const baselineDaily = popularityScore / 7;
     const trendingScore = baselineDaily > 0 ? (trending24hScore / baselineDaily) : trending24hScore;
 
-    const stock = product.inventory?.quantity ?? 0;
+    const stock = product.inventory
+      ? Math.max(0, (product.inventory.quantity || 0) - (product.inventory.reserved || 0))
+      : 0;
     const qualityScore = (bayesianRating / 5.0) * 0.7 + (Math.min(product.soldCount, 100) / 100) * 0.3;
 
     return await prisma.productFeature.upsert({

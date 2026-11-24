@@ -338,10 +338,10 @@ export class CustomerWalletService {
         },
       });
 
-      // 5. Update cached account available balance
+      // 5. Update cached account available balance (WALL-001: atomic increment)
       const updatedAccount = await tx.walletAccount.update({
         where: { id: targetAccount.id },
-        data: { availableBalance: balanceAfter },
+        data: { availableBalance: { increment: amount } },
       });
 
       return {
@@ -430,10 +430,12 @@ export class CustomerWalletService {
         },
       });
 
-      // 3. Update account balance
+      // 3. Update account balance (WALL-001: atomic increment/decrement)
       const updatedAccount = await tx.walletAccount.update({
         where: { id: account.id },
-        data: { availableBalance: balanceAfter },
+        data: {
+          availableBalance: direction === 'CREDIT' ? { increment: amount } : { decrement: amount },
+        },
       });
 
       // 4. Audit Log
@@ -867,10 +869,10 @@ export class CustomerWalletService {
         },
       });
 
-      // 3. Update cached balance
+      // 3. Update cached balance (WALL-001: atomic increment)
       const updatedAccount = await tx.walletAccount.update({
         where: { id: account.id },
-        data: { availableBalance: balanceAfter },
+        data: { availableBalance: { increment: amount } },
       });
 
       // 4. Send centralized domain notification event

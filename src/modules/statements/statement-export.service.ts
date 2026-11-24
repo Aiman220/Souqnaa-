@@ -195,6 +195,9 @@ export class StatementExportService {
         // Special case for rate percentage
         if (key === 'effectiveCommissionRate') {
           lines.push(`${this.escapeCell(labelAr)},${this.escapeCell(`${(val * 100).toFixed(2)}%`)},${this.escapeCell('%')}`);
+        } else if (key.toLowerCase().endsWith('count')) {
+          const unit = key.toLowerCase().includes('refund') ? 'مرتجعات' : (key.toLowerCase().includes('transact') ? 'معاملات' : 'طلبات');
+          lines.push(`${this.escapeCell(labelAr)},${Math.round(val)},${this.escapeCell(unit)}`);
         } else {
           lines.push(`${this.escapeCell(labelAr)},${this.formatNumber(val)},${this.escapeCell(this.formatCurrency(snapshot.currency))}`);
         }

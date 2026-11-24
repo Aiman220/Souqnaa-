@@ -319,14 +319,33 @@ router.post('/deposits', financialLimiter, async (req: Request, res: Response, n
       throw new AppError('صورة سند التحويل أو إشعار الإيداع مطلوبة', 400);
     }
 
+    const cleanProvider = walletProvider.trim().toUpperCase();
+    const cleanRef = transferReference.trim();
+
+    // DEP-001: Prevent submitting duplicate deposit references that are pending or already approved
+    const existingDeposit = await prisma.walletDeposit.findFirst({
+      where: {
+        walletProvider: cleanProvider,
+        transferReference: cleanRef,
+        status: { in: ['PENDING', 'APPROVED'] },
+      },
+    });
+    if (existingDeposit) {
+      throw new AppError(
+        'رقم الحوالة أو المرجع مستخدم مسبقاً في عملية إيداع أخرى قيد المعالجة أو مقبولة',
+        409,
+        'DUPLICATE_TRANSFER_REFERENCE'
+      );
+    }
+
     const deposit = await prisma.walletDeposit.create({
       data: {
         userType: 'CUSTOMER',
         userId,
         amount: parsedAmount,
         currency: 'YER',
-        walletProvider: walletProvider.trim().toUpperCase(),
-        transferReference: transferReference.trim(),
+        walletProvider: cleanProvider,
+        transferReference: cleanRef,
         proofImageUrl: proofImageUrl.trim(),
         senderName: senderName ? String(senderName).trim() : null,
         senderPhone: senderPhone ? String(senderPhone).trim() : null,

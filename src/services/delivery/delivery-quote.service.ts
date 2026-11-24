@@ -231,13 +231,35 @@ export class DeliveryQuoteService {
     } = request;
 
     // 0. Handle digital-only orders (no physical delivery fees, no address/distance checks)
-    const isDigitalOnlyOrder = Boolean(
+    let isDigitalOnlyOrder = Boolean(
       request.isDigitalOnly ||
       (sellerOrders.length > 0 && sellerOrders.every((so) =>
         so.isDigital ||
         (so.heavyItems && so.heavyItems.length > 0 && so.heavyItems.every((it) => it.isDigital))
       ))
     );
+
+    if (!isDigitalOnlyOrder && sellerOrders.length > 0) {
+      const allProductIds: string[] = [];
+      for (const so of sellerOrders) {
+        if (so.heavyItems) {
+          for (const item of so.heavyItems) {
+            if (item.productId) allProductIds.push(item.productId);
+          }
+        }
+      }
+      if (allProductIds.length > 0) {
+        try {
+          const products = await prisma.product.findMany({
+            where: { id: { in: allProductIds } },
+            select: { id: true, fulfillmentType: true, digitalDeliveryType: true },
+          });
+          if (products.length === allProductIds.length && products.every((p) => p.fulfillmentType === 'DIGITAL' || Boolean(p.digitalDeliveryType))) {
+            isDigitalOnlyOrder = true;
+          }
+        } catch (_) {}
+      }
+    }
 
     if (isDigitalOnlyOrder) {
       return {
@@ -328,19 +350,43 @@ export class DeliveryQuoteService {
 
     const customerAreaMatch = supportedAreasService.isAddressSupported(address);
     let destinationAreaId = requestedDestAreaId || customerAreaMatch.area?.canonicalId;
-    let customerLat = address.latitude ?? address.city?.latitude ?? 15.3694;
-    let customerLng = address.longitude ?? address.city?.longitude ?? 44.1910;
 
-    if (requestedDestAreaId) {
-      const explicitArea = STRICTLY_SUPPORTED_AREAS.find((a: any) => a.canonicalId === requestedDestAreaId);
-      if (explicitArea) {
-        destinationAreaId = explicitArea.canonicalId;
-        customerLat = explicitArea.centerLat;
-        customerLng = explicitArea.centerLng;
+    if (!destinationAreaId) {
+      if (address.latitude && address.longitude) {
+        const coordMatch = supportedAreasService.findSupportedAreaByCoordinates(address.latitude, address.longitude, 100.0);
+        if (coordMatch.area) {
+          destinationAreaId = coordMatch.area.canonicalId;
+        }
+      }
+      if (!destinationAreaId) {
+        const cityName = address.city?.nameAr || address.city?.nameEn || (typeof address.city === 'string' ? address.city : '') || '';
+        const street = address.street || '';
+        const combined = `${cityName} ${street}`.trim();
+        if (combined.includes('تعز') || combined.toLowerCase().includes('taiz')) {
+          destinationAreaId = 'loc-ye-taiz-al-hawban';
+        } else {
+          const match = supportedAreasService.matchSupportedArea(combined);
+          if (match.area) {
+            destinationAreaId = match.area.canonicalId;
+          }
+        }
       }
     }
 
-    if (isCityDiscoveryEnabled && !requestedDestAreaId) {
+    let customerLat = address.latitude ?? address.city?.latitude ?? 15.3694;
+    let customerLng = address.longitude ?? address.city?.longitude ?? 44.1910;
+
+    if (destinationAreaId) {
+      const explicitArea = STRICTLY_SUPPORTED_AREAS.find((a: any) => a.canonicalId === destinationAreaId);
+      if (explicitArea) {
+        if (!address.latitude || !address.longitude) {
+          customerLat = explicitArea.centerLat;
+          customerLng = explicitArea.centerLng;
+        }
+      }
+    }
+
+    if (isCityDiscoveryEnabled && !destinationAreaId) {
       const match = supportedAreasService.isAddressSupported(address);
       if (!match.isSupported) {
         return {

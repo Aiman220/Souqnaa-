@@ -5,6 +5,18 @@ import { requireAdmin } from '../../middleware/rbac.middleware';
 import { storefrontLimiter } from '../../middleware/rate-limiter.middleware';
 import { ResponseUtil } from '../../utils/response.util';
 import { AppError } from '../../middleware/error.middleware';
+import { invalidateHomeFeedCache } from '../home/home.routes';
+import { SocketService } from '../../services/websocket/socket.service';
+
+export async function broadcastCategoryUpdate(): Promise<void> {
+  try {
+    await invalidateHomeFeedCache();
+    SocketService.get()?.emitGlobal('categories:updated', { timestamp: new Date().toISOString() });
+    SocketService.get()?.emitGlobal('catalog:updated', { type: 'CATEGORY', timestamp: new Date().toISOString() });
+  } catch (err) {
+    console.warn('[Categories] Error broadcasting category update:', err);
+  }
+}
 
 const router = Router();
 
@@ -160,6 +172,7 @@ router.post('/admin/promote-other', authenticate, requireAdmin, async (req: Requ
       return { newSubcategory, migratedProductsCount: updateResult.count };
     });
 
+    await broadcastCategoryUpdate();
     ResponseUtil.created(res, result, 'تم ترقية نوع المنتج إلى قسم فرعي رسمي بنجاح وتحديث المنتجات المرتبطة');
   } catch (error) {
     next(error);
@@ -190,6 +203,7 @@ router.post('/admin/reclassify-other', authenticate, requireAdmin, async (req: R
       },
     });
 
+    await broadcastCategoryUpdate();
     ResponseUtil.success(res, { migratedProductsCount: updateResult.count }, 'تم إعادة تصنيف المنتجات بنجاح');
   } catch (error) {
     next(error);
@@ -230,6 +244,7 @@ router.post('/', authenticate, requireAdmin, async (req: Request, res: Response,
         sortOrder: sortOrder || 0,
       },
     });
+    await broadcastCategoryUpdate();
     ResponseUtil.created(res, category, 'Category created');
   } catch (error) {
     next(error);
@@ -243,6 +258,7 @@ router.put('/:id', authenticate, requireAdmin, async (req: Request, res: Respons
       where: { id },
       data: req.body,
     });
+    await broadcastCategoryUpdate();
     ResponseUtil.success(res, category, 'Category updated');
   } catch (error) {
     next(error);
@@ -253,6 +269,7 @@ router.delete('/:id', authenticate, requireAdmin, async (req: Request, res: Resp
   try {
     const id = String(req.params.id);
     await prisma.category.delete({ where: { id } });
+    await broadcastCategoryUpdate();
     ResponseUtil.success(res, null, 'Category deleted');
   } catch (error) {
     next(error);

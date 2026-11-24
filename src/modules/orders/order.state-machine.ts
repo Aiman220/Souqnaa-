@@ -349,18 +349,33 @@ export class OrderStateMachine {
 
       // 2. Manage Inventory & Balance based on target status
       if (isCancellationOrRejection) {
-        // Release reserved stock back to available
+        // Release reserved stock back to available safely
         for (const item of sellerOrder.items) {
           if (item.variantId) {
             await tx.productVariant.update({
               where: { id: item.variantId },
               data: { stockQuantity: { increment: item.quantity } },
             });
-          } else {
-            await tx.inventory.update({
-              where: { productId: item.productId },
-              data: { reserved: { decrement: item.quantity } },
-            });
+          } else if (item.fulfillmentType !== 'DIGITAL') {
+            const inv = await tx.inventory.findUnique({ where: { productId: item.productId } });
+            if (inv) {
+              if (currentStatus === 'DELIVERED') {
+                // Already delivered: reserved was already decremented upon delivery. Restock quantity.
+                await tx.inventory.update({
+                  where: { productId: item.productId },
+                  data: {
+                    quantity: { increment: item.quantity },
+                    reserved: Math.max(0, inv.reserved),
+                  },
+                });
+              } else {
+                // Pre-delivery cancellation: release reserved stock safely without going negative
+                await tx.inventory.update({
+                  where: { productId: item.productId },
+                  data: { reserved: Math.max(0, inv.reserved - item.quantity) },
+                });
+              }
+            }
           }
         }
 
@@ -488,13 +503,16 @@ export class OrderStateMachine {
         if (!wasDelivered) {
           for (const item of sellerOrder.items) {
             if (!item.variantId && item.fulfillmentType !== 'DIGITAL') {
-              await tx.inventory.updateMany({
-                where: { productId: item.productId },
-                data: {
-                  quantity: { decrement: item.quantity },
-                  reserved: { decrement: item.quantity },
-                },
-              });
+              const inv = await tx.inventory.findUnique({ where: { productId: item.productId } });
+              if (inv) {
+                await tx.inventory.update({
+                  where: { productId: item.productId },
+                  data: {
+                    quantity: Math.max(0, inv.quantity - item.quantity),
+                    reserved: Math.max(0, inv.reserved - item.quantity),
+                  },
+                });
+              }
             }
             if (item.productId) {
               const updatedProduct = await tx.product.update({
@@ -633,7 +651,35 @@ export class OrderStateMachine {
             }
           }
 
-          const deduction = sellerOrder.sellerPayout || 0;
+          // RFND-004: Revert / Release active reserve allocations held for this returned seller order
+          const activeAllocations = await tx.sellerReserveAllocation.findMany({
+            where: {
+              sellerId: sellerOrder.sellerId,
+              status: 'RESERVED',
+              reason: { contains: sellerOrder.order.orderNumber },
+            },
+          });
+          let cancelledReserveTotal = 0;
+          for (const alloc of activeAllocations) {
+            await tx.sellerReserveAllocation.update({
+              where: { id: alloc.id },
+              data: {
+                status: 'RELEASED',
+                releasedAt: new Date(),
+                reason: `إلغاء حجز الاحتياطي واسترجاعه لاسترجاع الطلب #${sellerOrder.order.orderNumber}`,
+              },
+            });
+            cancelledReserveTotal = TaxMath.add(cancelledReserveTotal, alloc.amount);
+            await tx.sellerRiskProfile.updateMany({
+              where: { sellerId: sellerOrder.sellerId },
+              data: {
+                totalReservedBalance: { decrement: alloc.amount },
+              },
+            });
+          }
+
+          const rawPayout = sellerOrder.sellerPayout || 0;
+          const deduction = Math.max(0, TaxMath.subtract(rawPayout, cancelledReserveTotal));
           if (deduction > 0) {
             const currentAvailable = sellerBalance.availableBalance || 0;
             if (currentAvailable >= deduction) {
@@ -1261,7 +1307,7 @@ export class OrderStateMachine {
             }
           }
 
-          // Release reserved inventory
+          // Release reserved inventory safely
           for (const item of so.items) {
             if (item.variantId) {
               await tx.productVariant.update({
@@ -1269,10 +1315,23 @@ export class OrderStateMachine {
                 data: { stockQuantity: { increment: item.quantity } },
               });
             } else if (item.fulfillmentType !== 'DIGITAL') {
-              await tx.inventory.updateMany({
-                where: { productId: item.productId },
-                data: { reserved: { decrement: item.quantity } },
-              });
+              const inv = await tx.inventory.findUnique({ where: { productId: item.productId } });
+              if (inv) {
+                if (soWasDelivered) {
+                  await tx.inventory.update({
+                    where: { productId: item.productId },
+                    data: {
+                      quantity: { increment: item.quantity },
+                      reserved: Math.max(0, inv.reserved),
+                    },
+                  });
+                } else {
+                  await tx.inventory.update({
+                    where: { productId: item.productId },
+                    data: { reserved: Math.max(0, inv.reserved - item.quantity) },
+                  });
+                }
+              }
             }
           }
 
@@ -1311,13 +1370,16 @@ export class OrderStateMachine {
           if (!soWasDelivered) {
             for (const item of so.items) {
               if (!item.variantId && item.fulfillmentType !== 'DIGITAL') {
-                await tx.inventory.updateMany({
-                  where: { productId: item.productId },
-                  data: {
-                    quantity: { decrement: item.quantity },
-                    reserved: { decrement: item.quantity },
-                  },
-                });
+                const inv = await tx.inventory.findUnique({ where: { productId: item.productId } });
+                if (inv) {
+                  await tx.inventory.update({
+                    where: { productId: item.productId },
+                    data: {
+                      quantity: Math.max(0, inv.quantity - item.quantity),
+                      reserved: Math.max(0, inv.reserved - item.quantity),
+                    },
+                  });
+                }
               }
               if (item.productId) {
                 const updatedProduct = await tx.product.update({

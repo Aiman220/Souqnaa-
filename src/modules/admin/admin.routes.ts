@@ -45,6 +45,7 @@ import { resolveRefundAmount } from './refund-amount.policy';
 import { resolveCustomerDepositApprovalAmount } from './deposit-approval.policy';
 import { recommendationService } from '../recommendations/services/recommendation.service';
 import { CustomerCodEligibilityService } from '../payments/customer-cod-eligibility.service';
+import { broadcastCategoryUpdate } from '../categories/category.routes';
 
 const router = Router();
 router.use(authenticate, requireAdmin);
@@ -1325,7 +1326,9 @@ router.get('/products', async (req: Request, res: Response, next: NextFunction) 
       return {
         ...p,
         imageUrl,
-        stock: p.inventory?.quantity ?? 0,
+        stock: p.inventory ? Math.max(0, p.inventory.quantity - (p.inventory.reserved || 0)) : 0,
+        totalStock: p.inventory?.quantity ?? 0,
+        reservedStock: p.inventory?.reserved ?? 0,
         reportsCount: p._count?.reports ?? 0,
         reviewsCount: p._count?.productReviews ?? p.reviewCount ?? 0,
         ordersCount: p._count?.orderItems ?? 0,
@@ -1395,7 +1398,7 @@ router.get(['/products/reports', '/product-reports'], async (req: Request, res: 
               images: { take: 1, orderBy: { sortOrder: 'asc' }, select: { url: true } },
               store: { select: { id: true, name: true, slug: true } },
               category: { select: { id: true, nameAr: true, nameEn: true } },
-              inventory: { select: { quantity: true } },
+              inventory: { select: { quantity: true, reserved: true } },
               _count: { select: { reports: true } },
             },
           },
@@ -1422,7 +1425,9 @@ router.get(['/products/reports', '/product-reports'], async (req: Request, res: 
           ? {
               ...r.product,
               imageUrl,
-              stock: r.product.inventory?.quantity ?? 0,
+              stock: r.product.inventory ? Math.max(0, r.product.inventory.quantity - (r.product.inventory.reserved || 0)) : 0,
+              totalStock: r.product.inventory?.quantity ?? 0,
+              reservedStock: r.product.inventory?.reserved ?? 0,
               reportsCount: r.product._count?.reports ?? 0,
             }
           : null,
@@ -1548,7 +1553,9 @@ router.get('/products/:id', async (req: Request, res: Response, next: NextFuncti
       ...product,
       images: normalizedImages,
       imageUrl: normalizedImages[0]?.url || null,
-      stock: product.inventory?.quantity ?? 0,
+      stock: product.inventory ? Math.max(0, product.inventory.quantity - (product.inventory.reserved || 0)) : 0,
+      totalStock: product.inventory?.quantity ?? 0,
+      reservedStock: product.inventory?.reserved ?? 0,
       reportsCount: product._count?.reports ?? 0,
       reviewsCount: product._count?.productReviews ?? product.reviewCount ?? 0,
       ordersCount: product._count?.orderItems ?? 0,
@@ -1683,6 +1690,7 @@ router.post('/categories', async (req: Request, res: Response, next: NextFunctio
       },
     });
     await logAdminAction(req.user?.userId, 'CATEGORY_CREATED', 'categories', { categoryId: category.id, nameAr }, req);
+    await broadcastCategoryUpdate();
     ResponseUtil.created(res, category, 'تم إنشاء التصنيف بنجاح');
   } catch (error) {
     next(error);
@@ -1707,6 +1715,7 @@ router.put('/categories/:id', async (req: Request, res: Response, next: NextFunc
       },
     });
     await logAdminAction(req.user?.userId, 'CATEGORY_UPDATED', 'categories', { id, nameAr }, req);
+    await broadcastCategoryUpdate();
     ResponseUtil.success(res, category, 'تم تعديل بيانات التصنيف بنجاح');
   } catch (error) {
     next(error);
@@ -1730,6 +1739,7 @@ router.delete('/categories/:id', async (req: Request, res: Response, next: NextF
 
     await prisma.category.delete({ where: { id } });
     await logAdminAction(req.user?.userId, 'CATEGORY_DELETED', 'categories', { id }, req);
+    await broadcastCategoryUpdate();
     ResponseUtil.success(res, null, 'تم حذف التصنيف بنجاح');
   } catch (error) {
     next(error);
@@ -2419,13 +2429,26 @@ const handleRejectWalletPayment = async (req: Request, res: Response, next: Next
               },
             });
           }
-          if (item.productId) {
-            await tx.inventory.updateMany({
-              where: { productId: item.productId },
-              data: {
-                reserved: { decrement: item.quantity },
-              },
-            });
+          if (item.productId && item.fulfillmentType !== 'DIGITAL') {
+            const inv = await tx.inventory.findUnique({ where: { productId: item.productId } });
+            if (inv) {
+              if (so.status === 'DELIVERED') {
+                await tx.inventory.update({
+                  where: { productId: item.productId },
+                  data: {
+                    quantity: { increment: item.quantity },
+                    reserved: Math.max(0, inv.reserved),
+                  },
+                });
+              } else {
+                await tx.inventory.update({
+                  where: { productId: item.productId },
+                  data: {
+                    reserved: Math.max(0, inv.reserved - item.quantity),
+                  },
+                });
+              }
+            }
           }
         }
 
@@ -4380,18 +4403,24 @@ router.post('/withdrawals/:id/reject', requirePermission('finance:withdrawals'),
     const result = await prisma.$transaction(async (tx) => {
       const existing = await tx.withdrawal.findUnique({ where: { id } });
       if (!existing) throw new AppError('طلب السحب غير موجود', 404);
-      if (existing.status === WithdrawalStatus.COMPLETED) {
-        throw new AppError('لا يمكن رفض طلب تم إكماله مسبقاً', 400);
+      if (existing.status !== WithdrawalStatus.PENDING && existing.status !== WithdrawalStatus.APPROVED) {
+        throw new AppError('لا يمكن رفض هذا الطلب نظراً لحالته الحالية أو تمت معالجته مسبقاً', 400);
       }
 
-      const w = await tx.withdrawal.update({
-        where: { id },
+      const claim = await tx.withdrawal.updateMany({
+        where: { id, status: { in: [WithdrawalStatus.PENDING, WithdrawalStatus.APPROVED] } },
         data: {
           status: WithdrawalStatus.REJECTED,
           adminNote: reason,
           rejectionReason: reason,
         },
       });
+
+      if (claim.count !== 1) {
+        throw new AppError('تمت معالجة طلب السحب مسبقاً أو تم تحديث حالته بالتزامن.', 409, 'WITHDRAWAL_ALREADY_PROCESSED');
+      }
+
+      const w = existing;
 
       // Restore balance to seller: increment availableBalance (pendingBalance was not touched)
       const balance = await tx.sellerBalance.findUnique({ where: { sellerId: w.sellerId } });
@@ -4737,6 +4766,25 @@ router.post('/deposits/:id/approve', requirePermission('finance:payments'), asyn
     if (!deposit) throw new AppError('طلب الإيداع غير موجود', 404);
     if (deposit.status !== 'PENDING') throw new AppError('تم البت في هذا الطلب مسبقاً', 400);
     const updated = await prisma.$transaction(async (tx) => {
+      // DEP-001: Check for duplicate transfer reference already approved across deposits
+      if (deposit.transferReference) {
+        const duplicateApproved = await tx.walletDeposit.findFirst({
+          where: {
+            id: { not: deposit.id },
+            walletProvider: deposit.walletProvider,
+            transferReference: deposit.transferReference,
+            status: 'APPROVED',
+          },
+        });
+        if (duplicateApproved) {
+          throw new AppError(
+            `رقم الحوالة [${deposit.transferReference}] تم استخدامه واعتماده مسبقاً في عملية إيداع أخرى (#${duplicateApproved.id})`,
+            409,
+            'TRANSFER_REFERENCE_ALREADY_APPROVED'
+          );
+        }
+      }
+
       // 1. Seller deposit approval & financial risk debt settlement
       if (deposit.userType === 'SELLER' && deposit.sellerId) {
         const approvedAmount = req.body.approvedAmount !== undefined ? parseFloat(String(req.body.approvedAmount)) : undefined;

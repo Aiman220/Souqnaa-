@@ -316,8 +316,14 @@ export const createApp = (): Application => {
       !isPrivate &&
       publicCacheablePaths.some((p) => req.path.includes(p));
 
-    if (isPublicGet) {
-      res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
+    const bypassCache = req.query.nocache === 'true' || req.headers['cache-control'] === 'no-cache';
+
+    if (isPublicGet && !bypassCache) {
+      if (req.path.includes('/categories')) {
+        res.setHeader('Cache-Control', 'public, max-age=5, stale-while-revalidate=10');
+      } else {
+        res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
+      }
       res.setHeader('Vary', 'Accept, Accept-Encoding, X-App-Platform');
     } else {
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');

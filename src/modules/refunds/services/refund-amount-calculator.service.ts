@@ -358,7 +358,10 @@ export class RefundAmountCalculator {
         (r: any) =>
           r.sellerId === targetSellerId &&
           (r.status === RefundStatus.REFUND_COMPLETED || r.status === RefundStatus.REFUNDED) &&
-          (r.metadata?.includes('shippingRefunded:true') || r.description?.includes('شحن'))
+          (r.metadata?.includes('shippingRefunded:true') ||
+            r.metadata?.includes('"refundShipping":true') ||
+            r.description?.includes('استرجاع رسوم الشحن') ||
+            r.description?.includes('استرجاع قيمة التوصيل'))
       );
       if (!priorShippingRefunded) {
         shippingRefundAmount = shippingFeeCollected;

@@ -42,6 +42,13 @@ export function formatProductForClient(product: any, campaignPresentation?: any)
 
   // Calculate real stock from inventory or variants
   let stock = typeof product.stock === 'number' ? product.stock : null;
+  const totalStock = product.inventory && typeof product.inventory.quantity === 'number'
+    ? product.inventory.quantity
+    : (variants.length > 0 ? variants.reduce((acc: number, v: any) => acc + (v.stock || 0), 0) : 0);
+  const reservedStock = product.inventory && typeof product.inventory.reserved === 'number'
+    ? Math.max(0, product.inventory.reserved)
+    : 0;
+
   if (stock === null) {
     if (product.inventory && typeof product.inventory.quantity === 'number') {
       stock = Math.max(0, product.inventory.quantity - (product.inventory.reserved || 0));
@@ -136,6 +143,9 @@ export function formatProductForClient(product: any, campaignPresentation?: any)
     nameEn: product.nameEn || name,
     currency: (product.currency === 'SAR' || product.currency === '﷼' || !product.currency) ? 'ر.ي' : product.currency,
     stock,
+    totalStock,
+    reservedStock,
+    availableStock: stock,
     rating,
     reviewCount,
     soldCount,

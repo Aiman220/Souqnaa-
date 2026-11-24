@@ -332,7 +332,19 @@ export class SellerReserveService {
         let appliedDebt = 0;
 
         // Check if seller has confirmed collectible debt
-        const openDebts = alloc.seller.outstandings || [];
+        // RESV-002: Query fresh debts inside transaction to avoid stale pre-fetched debt snapshots
+        const openDebts = await tx.sellerOutstanding.findMany({
+          where: {
+            sellerId: alloc.sellerId,
+            status: { in: ['OPEN', 'PARTIALLY_PAID'] },
+          },
+          orderBy: { createdAt: 'asc' },
+        });
+
+        const sellerBalance = await tx.sellerBalance.findUnique({
+          where: { sellerId: alloc.sellerId },
+        });
+
         if (openDebts.length > 0) {
           for (const debt of openDebts) {
             if (remainingReserve <= 0) break;
@@ -365,10 +377,10 @@ export class SellerReserveService {
             });
 
             // Ledger entry
-            if (alloc.seller.balance) {
+            if (sellerBalance) {
               await tx.sellerTransaction.create({
                 data: {
-                  sellerBalanceId: alloc.seller.balance.id,
+                  sellerBalanceId: sellerBalance.id,
                   amount: payable,
                   type: 'OUTSTANDING_PAYMENT',
                   referenceId: alloc.id,
@@ -377,7 +389,7 @@ export class SellerReserveService {
               });
 
               await tx.sellerBalance.update({
-                where: { id: alloc.seller.balance.id },
+                where: { id: sellerBalance.id },
                 data: {
                   outstandingCommission: { decrement: payable },
                 },
@@ -393,9 +405,9 @@ export class SellerReserveService {
         let released = 0;
         if (remainingReserve > 0) {
           released = remainingReserve;
-          if (alloc.seller.balance) {
+          if (sellerBalance) {
             await tx.sellerBalance.update({
-              where: { id: alloc.seller.balance.id },
+              where: { id: sellerBalance.id },
               data: {
                 availableBalance: { increment: released },
               },
@@ -403,7 +415,7 @@ export class SellerReserveService {
 
             await tx.sellerTransaction.create({
               data: {
-                sellerBalanceId: alloc.seller.balance.id,
+                sellerBalanceId: sellerBalance.id,
                 amount: released,
                 type: 'CREDIT',
                 referenceId: alloc.id,

@@ -1,5 +1,6 @@
 import { SellerReserveService } from '../../modules/commission/seller-reserve.service';
 import { SellerReconciliationService } from '../../modules/commission/seller-reconciliation.service';
+import { redisService } from '../../database/redis';
 
 /**
  * SOUQNAA Marketplace — Seller Reserve Lifecycle & Financial Reconciliation Worker
@@ -35,6 +36,20 @@ export class SellerReserveScheduler {
       console.warn('[SellerReserveScheduler] Previous cycle is still running. Skipping to prevent race conditions.');
       return;
     }
+
+    // RESV-003: Distributed lock across multi-instance worker processes
+    let lockToken: string | null = null;
+    try {
+      const lock = await redisService.acquireLock('seller:reserve:job:cycle', 300);
+      if (!lock.acquired) {
+        console.warn('[SellerReserveScheduler] Cycle is already active on another node. Skipping.');
+        return;
+      }
+      lockToken = lock.token;
+    } catch (lockErr) {
+      console.warn('[SellerReserveScheduler] Redis lock error, proceeding with local mutex:', lockErr);
+    }
+
     this.isCycleRunning = true;
     try {
       this.cycleCounter++;
@@ -63,6 +78,11 @@ export class SellerReserveScheduler {
       console.error('[SellerReserveScheduler] Error during scheduled reserve cycle:', err);
     } finally {
       this.isCycleRunning = false;
+      if (lockToken) {
+        try {
+          await redisService.releaseLock('seller:reserve:job:cycle', lockToken);
+        } catch (_) {}
+      }
     }
   }
 }

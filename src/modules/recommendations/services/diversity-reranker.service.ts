@@ -21,7 +21,12 @@ export class DiversityRerankerService {
     const validCandidates = rankedList.filter((c) => {
       const p = c.product;
       if (!p || !p.isActive || p.isSuspended) return false;
-      if ((p.inventory?.quantity ?? 0) <= 0) return false;
+      const availableStock = p.inventory
+        ? Math.max(0, (p.inventory.quantity || 0) - (p.inventory.reserved || 0))
+        : (Array.isArray(p.variants) && p.variants.length > 0
+            ? p.variants.reduce((acc: number, v: any) => acc + (v.stockQuantity || v.stock || 0), 0)
+            : 0);
+      if (availableStock <= 0) return false;
       if (excludedProductIds && excludedProductIds.has(p.id)) return false;
       if (p.store && !p.store.isActive) return false;
       return true;

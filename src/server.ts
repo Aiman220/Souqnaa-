@@ -15,6 +15,7 @@ import { LauncherCampaignScheduler } from './services/jobs/launcher-campaign.job
 import { prisma } from './database/prisma';
 import { redis } from './database/redis';
 import { remoteConfigService } from './modules/remote-config/remote-config.service';
+import { interGovernorateRouteService } from './services/delivery/inter-governorate-route.service';
 
 const startServer = async () => {
   try {
@@ -31,6 +32,11 @@ const startServer = async () => {
     // Initialize Remote Configuration & System Feature Flags (§40)
     remoteConfigService.ensureInitialized().catch((err) => {
       console.warn('[RemoteConfig] Deferred init warning:', err?.message);
+    });
+
+    // Initialize & Seed Active Inter-Governorate Routes and Delivery Methods
+    interGovernorateRouteService.seedDefaultRoutes().catch((err) => {
+      console.warn('[InterGovRoutes] Deferred seed warning:', err?.message);
     });
 
     // Initialize Centralized SOUQNAA Notification Platform Scheduler (§53, §65)

@@ -159,7 +159,7 @@ export class SellerReconciliationService {
       if (seller.balance?.transactions && seller.balance.transactions.length > 0) {
         const ledgerNet = seller.balance.transactions.reduce((sum: number, tx: any) => {
           if (tx.type === 'CREDIT') return sum + Math.abs(tx.amount);
-          if (tx.type === 'REFUND' || tx.type === 'WITHDRAWAL' || tx.type === 'DEBIT') return sum - Math.abs(tx.amount);
+          if (tx.type === 'REFUND' || tx.type === 'WITHDRAWAL' || tx.type === 'DEBIT' || tx.type === 'COMMISSION') return sum - Math.abs(tx.amount);
           return sum;
         }, 0);
 
