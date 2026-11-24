@@ -159,6 +159,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
     const {
       addressId,
       deliveryMethodCode = 'standard',
+      destinationAreaId,
       deliveryScheduleType = 'ASAP',
       deliveryDate,
       deliveryTimeSlotId,
@@ -749,6 +750,8 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
         const physicalQuote = await deliveryQuoteService.createQuote({
           customerAddressId: address!.id,
           sellerOrders: physicalSellerOrdersInput,
+          deliveryMethod: checkoutDeliveryMethodCode,
+          destinationAreaId: destinationAreaId || undefined,
           isExpress,
           deliveryScheduleType: finalScheduleType as any,
           deliveryDate,
