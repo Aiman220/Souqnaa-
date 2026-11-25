@@ -98,6 +98,7 @@ export interface DeliveryQuoteResult {
   mandatorySpecialHandlingFee?: number;
   cargoClassification?: HeavyCargoClassification;
   cargoDescriptionAr?: string;
+  isHeavyDelivery?: boolean;
   hasMixedShipments?: boolean;
   subShipments?: DeliverySubShipment[];
 
@@ -130,6 +131,7 @@ export interface DeliveryQuoteResult {
     nameAr: string;
     nameEn: string;
     surcharge: number;
+    isAvailable?: boolean;
     estimatedHoursMin?: number;
     estimatedHoursMax?: number;
   }>;
@@ -655,6 +657,16 @@ export class DeliveryFeeService {
         mandatorySpecialHandlingFee: heavyPricing.mandatorySpecialHandlingFee,
         cargoClassification: cargo.classification,
         cargoDescriptionAr: cargo.cargoDescriptionAr,
+        isHeavyDelivery: true,
+        allowedDeliveryMethods: [
+          {
+            code: 'heavy_transport',
+            nameAr: heavyPricing.vehicleNameAr,
+            nameEn: heavyPricing.vehicleNameEn,
+            surcharge: 0,
+            isAvailable: !heavyPricing.requiresManualQuote,
+          },
+        ],
         hasMixedShipments: false,
         subShipments: [heavySubShipment],
       };

@@ -55,6 +55,7 @@ export interface QuoteRequest {
   deliveryMethod?: string;
   isExpress?: boolean;
   destinationAreaId?: string;
+  buyNowItem?: { productId?: string; [key: string]: any };
   // Scheduled delivery
   deliveryScheduleType?: 'ASAP' | 'SCHEDULED' | 'EXPRESS';
   deliveryDate?: string;       // YYYY-MM-DD, required when SCHEDULED
@@ -99,6 +100,7 @@ export interface FullQuoteResponse {
     nameAr: string;
     nameEn: string;
     surcharge: number;
+    isAvailable?: boolean;
     estimatedHoursMin?: number;
     estimatedHoursMax?: number;
   }>;
@@ -239,21 +241,20 @@ export class DeliveryQuoteService {
     } = request;
 
     // 0. Handle digital-only orders (no physical delivery fees, no address/distance checks)
+    const getOrderItems = (so: any): any[] => so.items || so.heavyItems || [];
     let isDigitalOnlyOrder = Boolean(
       request.isDigitalOnly ||
       (sellerOrders.length > 0 && sellerOrders.every((so) =>
         so.isDigital ||
-        (so.heavyItems && so.heavyItems.length > 0 && so.heavyItems.every((it) => it.isDigital))
+        (getOrderItems(so).length > 0 && getOrderItems(so).every((it: any) => it.isDigital || it.fulfillmentType === 'DIGITAL' || it.fulfillmentType === 'NO_PHYSICAL_DELIVERY'))
       ))
     );
 
     if (!isDigitalOnlyOrder && sellerOrders.length > 0) {
       const allProductIds: string[] = [];
       for (const so of sellerOrders) {
-        if (so.heavyItems) {
-          for (const item of so.heavyItems) {
-            if (item.productId) allProductIds.push(item.productId);
-          }
+        for (const item of getOrderItems(so)) {
+          if (item.productId) allProductIds.push(item.productId);
         }
       }
       if (allProductIds.length > 0) {
@@ -267,6 +268,18 @@ export class DeliveryQuoteService {
           }
         } catch (_) {}
       }
+    }
+
+    if (!isDigitalOnlyOrder && request.buyNowItem?.productId) {
+      try {
+        const p = await prisma.product.findUnique({
+          where: { id: request.buyNowItem.productId },
+          select: { id: true, fulfillmentType: true, digitalDeliveryType: true },
+        });
+        if (p && (p.fulfillmentType === 'DIGITAL' || Boolean(p.digitalDeliveryType))) {
+          isDigitalOnlyOrder = true;
+        }
+      } catch (_) {}
     }
 
     if (isDigitalOnlyOrder) {
@@ -357,7 +370,7 @@ export class DeliveryQuoteService {
     const isCityDiscoveryEnabled = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery');
 
     const customerAreaMatch = supportedAreasService.isAddressSupported(address);
-    let destinationAreaId = requestedDestAreaId || customerAreaMatch.area?.canonicalId;
+    let destinationAreaId = customerAreaMatch.area?.canonicalId || requestedDestAreaId;
 
     if (!destinationAreaId) {
       if (address.latitude && address.longitude) {
@@ -627,15 +640,18 @@ export class DeliveryQuoteService {
       sellerQuotes.some((sq) => sq.hasMixedShipments);
 
     // Isolated method availabilities
-    const isStandardMethodAvailable = !anyDistanceUnavailable && isStandardActive;
-    const isScheduledMethodAvailable = !anyDistanceUnavailable && isScheduledActive && storesStatusList.every((s) => s.acceptsScheduled !== false);
-    const isExpressMethodAvailable = !anyDistanceUnavailable && isExpressActive && allStoresExpressAvailable;
+    const isPureHeavy = isHeavyDelivery && !hasMixedShipments;
+    const isStandardMethodAvailable = !isPureHeavy && !anyDistanceUnavailable && isStandardActive;
+    const isScheduledMethodAvailable = !isPureHeavy && !anyDistanceUnavailable && isScheduledActive && storesStatusList.every((s) => s.acceptsScheduled !== false);
+    const isExpressMethodAvailable = !isPureHeavy && !anyDistanceUnavailable && isExpressActive && allStoresExpressAvailable;
 
     // Delivery is available overall as long as address is within service radius
-    // and at least one delivery option (or inter-gov route) is available
-    const isAvailable = isInterGov
+    // and at least one delivery option (or inter-gov route or heavy transport) is available
+    const isAvailable = isHeavyDelivery
       ? !anyDistanceUnavailable
-      : (!anyDistanceUnavailable && (isStandardMethodAvailable || isScheduledMethodAvailable || isExpressMethodAvailable));
+      : (isInterGov
+          ? !anyDistanceUnavailable
+          : (!anyDistanceUnavailable && (isStandardMethodAvailable || isScheduledMethodAvailable || isExpressMethodAvailable)));
 
     let unavailableReason: string | undefined;
 
@@ -691,8 +707,18 @@ export class DeliveryQuoteService {
       routeKey: firstInterQuote?.routeKey,
       routeNameAr: firstInterQuote?.zoneName,
       shippingProvider: firstInterQuote?.shippingProviderName || firstInterQuote?.shippingProviderId,
-      allowedDeliveryMethods: firstInterQuote?.allowedDeliveryMethods || [],
-      expressSupported: firstInterQuote?.expressSupported ?? false,
+      allowedDeliveryMethods: isPureHeavy
+        ? [
+            {
+              code: 'heavy_transport',
+              nameAr: firstHeavyQuote?.vehicleClassNameAr || 'نقل ثقيل وبضائع ضخمة',
+              nameEn: firstHeavyQuote?.vehicleClassNameEn || 'Heavy & Bulky Cargo Transport',
+              surcharge: 0,
+              isAvailable: !requiresManualQuote,
+            },
+          ]
+        : (firstInterQuote?.allowedDeliveryMethods || []),
+      expressSupported: isPureHeavy ? false : (firstInterQuote?.expressSupported ?? false),
       expressSurcharge: firstInterQuote?.expressSurcharge ?? 0,
       carrierCost: firstInterQuote?.carrierCost,
       sellerContribution: firstInterQuote?.sellerContribution,

@@ -217,4 +217,36 @@ test('Product-Driven Heavy Delivery Eligibility & Shipment Partitioning Suite', 
     // Total delivery fee is the sum of independent shipments
     assert.strictEqual(quote.deliveryFee, standardSub.deliveryFee + heavySub.deliveryFee);
   });
+
+  await t.test('7. Pure Heavy Cargo strictly restricts delivery methods to heavy_transport', async () => {
+    const sellerLat = 15.3694;
+    const sellerLng = 44.1910;
+    const customerLat = 15.4200;
+    const customerLng = 44.2100;
+
+    const pureHeavyItems = [
+      {
+        productId: 'prod_tiles_50_boxes',
+        name: 'بلاط أرضيات إسباني فاخر',
+        quantity: 50,
+        sellingUnit: 'BOX',
+        packageWeightKg: 28.0, // 1,400 kg
+        categorySlug: 'ceramics',
+      },
+    ];
+
+    const quote = await deliveryFeeService.calculateFee(
+      sellerLat, sellerLng,
+      customerLat, customerLng,
+      {
+        heavyItems: pureHeavyItems,
+      }
+    );
+
+    assert.strictEqual(quote.isHeavyDelivery, true);
+    assert.strictEqual(quote.hasMixedShipments, false);
+    assert.ok(quote.allowedDeliveryMethods);
+    assert.strictEqual(quote.allowedDeliveryMethods.length, 1);
+    assert.strictEqual(quote.allowedDeliveryMethods[0].code, 'heavy_transport');
+  });
 });
