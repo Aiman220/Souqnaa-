@@ -78,12 +78,17 @@ export interface DeliveryEvaluationContext {
   deliveryZone?: string;
   distanceKm?: number;
   originalShippingAmount: number;
+  isHeavyDelivery?: boolean;
+  deliveryMode?: string;
+  mandatorySpecialCharges?: number;
   sellerDeliveries: Array<{
     sellerId: string;
     deliveryFee: number;
     deliveryMethod?: string;
     deliveryZone?: string;
     distanceKm?: number;
+    isHeavyDelivery?: boolean;
+    mandatorySpecialCharges?: number;
   }>;
 }
 

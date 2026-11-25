@@ -287,6 +287,27 @@ export class ShippingPromotionRuleEngine {
     const results: RuleEvaluationResult[] = [];
     const delivery = context.delivery;
 
+    // Heavy & Special Transport Protection (§6 of platform audit instructions):
+    // Never let standard parcel free shipping promotions eliminate heavy/oversized transport fees
+    // unless the promotion's configuration explicitly permits heavy transport.
+    if (delivery.isHeavyDelivery || (delivery.deliveryMode && delivery.deliveryMode !== 'STANDARD_PARCEL')) {
+      const allowsHeavy =
+        (promotion.deliveryEligibilityRules as any)?.allowHeavyTransport === true ||
+        (Array.isArray(promotion.allowedDeliveryMethods) &&
+          promotion.allowedDeliveryMethods.some((m) =>
+            ['heavy_transport', 'heavy_local', 'heavy_inter_governorate', 'oversized_special', 'special_transport'].includes(m.toLowerCase())
+          ));
+
+      if (!allowsHeavy) {
+        results.push({
+          ruleName: 'HEAVY_TRANSPORT_RESTRICTION',
+          passed: false,
+          reasonCode: 'DELIVERY_METHOD_NOT_SUPPORTED',
+          message: 'عروض الشحن المجاني العامة لا تشمل خدمات النقل الثقيل والرافعات ما لم يتم النص على ذلك في إعدادات الحملة',
+        });
+      }
+    }
+
     // Allowed Delivery Methods
     if (
       Array.isArray(promotion.allowedDeliveryMethods) &&

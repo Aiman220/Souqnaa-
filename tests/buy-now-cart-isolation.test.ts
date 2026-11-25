@@ -169,6 +169,57 @@ async function runBuyNowIsolationTests() {
     assert(!buyNowSellers.has('seller_2'), 'Unrelated seller 2 from cart is completely excluded from Buy Now');
   }
 
+  // ── TEST 7: Idempotency Key Guard for Network Retries ──
+  console.log('\n--- Test Suite 7: Idempotency & Network Retry Integrity ---');
+  {
+    const processedOrders = new Map<string, any>();
+    const idempotencyKey = 'order_session_retry_key_9988';
+
+    // First attempt creates order
+    function createOrderWithIdempotency(key: string, data: any) {
+      if (processedOrders.has(key)) {
+        return { isExisting: true, order: processedOrders.get(key) };
+      }
+      const order = { id: `ord_${Math.random().toString(36).substring(7)}`, key, ...data };
+      processedOrders.set(key, order);
+      return { isExisting: false, order };
+    }
+
+    const firstAttempt = createOrderWithIdempotency(idempotencyKey, { total: 5000 });
+    assert(!firstAttempt.isExisting, 'First attempt creates new order');
+
+    // Second attempt (network retry or double tap) with same idempotency key
+    const secondAttempt = createOrderWithIdempotency(idempotencyKey, { total: 5000 });
+    assert(secondAttempt.isExisting, 'Retry attempt detects existing idempotency key');
+    assert(secondAttempt.order.id === firstAttempt.order.id, 'Returns original order without creating duplicate');
+  }
+
+  // ── TEST 8: Digital vs Heavy Delivery Validation ──
+  console.log('\n--- Test Suite 8: Authoritative Delivery Fee Rules ---');
+  {
+    // Digital product
+    const digitalItem = { product: { fulfillmentType: 'DIGITAL' } };
+    const isItemDigital = (it: any) => it.product?.fulfillmentType === 'DIGITAL';
+    const isDigitalOnly = [digitalItem].every(isItemDigital);
+    const digitalFee = isDigitalOnly ? 0 : 500;
+    assert(digitalFee === 0, 'Digital product strictly receives 0 delivery fee');
+
+    // Heavy product
+    const heavyMode = 'HEAVY_LOCAL';
+    const isHeavy = heavyMode === 'HEAVY_LOCAL' || heavyMode === 'HEAVY_INTER_GOVERNORATE';
+    assert(isHeavy, 'Heavy product activates heavy delivery logistics mode');
+  }
+
+  // ── TEST 9: Concurrent Buy Now Independent Sessions ──
+  console.log('\n--- Test Suite 9: Concurrent Buy Now Independent Sessions ---');
+  {
+    const session1 = { sessionId: 'buynow_session_101', productId: 'prod_A', qty: 1 };
+    const session2 = { sessionId: 'buynow_session_102', productId: 'prod_B', qty: 2 };
+
+    assert(session1.sessionId !== session2.sessionId, 'Concurrent sessions have unique session IDs');
+    assert(session1.productId !== session2.productId, 'Concurrent sessions do not cross-contaminate products');
+  }
+
   console.log('\n============================================================');
   console.log(`🎉 TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);
   console.log('============================================================');

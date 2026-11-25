@@ -46,6 +46,7 @@ import { resolveCustomerDepositApprovalAmount } from './deposit-approval.policy'
 import { recommendationService } from '../recommendations/services/recommendation.service';
 import { CustomerCodEligibilityService } from '../payments/customer-cod-eligibility.service';
 import { broadcastCategoryUpdate } from '../categories/category.routes';
+import { parseNonNegativeMoney } from '../../utils/non-negative-money.util';
 
 const router = Router();
 router.use(authenticate, requireAdmin);
@@ -1603,6 +1604,7 @@ router.put('/products/:id', async (req: Request, res: Response, next: NextFuncti
   try {
     const id = String(req.params.id);
     const { nameAr, nameEn, price, stock, categoryId, isActive } = req.body;
+    if (price !== undefined) parseNonNegativeMoney(price, 'Product price');
 
     const [updated] = await Promise.all([
       prisma.product.update({
@@ -1610,7 +1612,7 @@ router.put('/products/:id', async (req: Request, res: Response, next: NextFuncti
         data: {
           ...(nameAr ? { nameAr } : {}),
           ...(nameEn ? { nameEn } : {}),
-          ...(price !== undefined ? { price: Number(price) } : {}),
+          ...(price !== undefined ? { price: parseNonNegativeMoney(price, 'Product price') } : {}),
           ...(categoryId ? { categoryId } : {}),
           ...(isActive !== undefined ? { isActive: Boolean(isActive) } : {}),
         },
@@ -5413,13 +5415,15 @@ router.post('/promotions/flash-sales/:id/products', async (req: Request, res: Re
     const product = await prisma.product.findUnique({ where: { id: productId } });
     if (!product) throw new AppError('المنتج غير موجود', 404);
 
-    const calcPercent = discountPercent !== undefined ? parseFloat(discountPercent) : Math.max(0, Math.round(((product.price - parseFloat(discountPrice)) / product.price) * 100));
+    const parsedDiscountPrice = parseNonNegativeMoney(discountPrice, 'Discount price');
+
+    const calcPercent = discountPercent !== undefined ? parseFloat(discountPercent) : Math.max(0, Math.round(((product.price - parsedDiscountPrice) / product.price) * 100));
 
     const item = await prisma.flashSaleProduct.create({
       data: {
         flashSaleId,
         productId,
-        discountPrice: parseFloat(discountPrice),
+        discountPrice: parsedDiscountPrice,
         discountPercent: calcPercent,
         limitPerUser: limitPerUser ? parseInt(limitPerUser) : 1,
       },

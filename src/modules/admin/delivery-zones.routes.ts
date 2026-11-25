@@ -178,6 +178,9 @@ router.put('/settings', async (req: Request, res: Response, next: NextFunction) 
       maxDeliveryRadiusKm,
       freeDeliveryThreshold,
       currency,
+      schedulingEnabled,
+      deliveryScheduleScope,
+      schedulingAdvanceDays,
     } = req.body;
 
     const validPolicies = ['PER_SELLER', 'MAXIMUM_FEE', 'COMBINED', 'FREE_ABOVE_ORDER_VALUE'];
@@ -196,6 +199,9 @@ router.put('/settings', async (req: Request, res: Response, next: NextFunction) 
         freeDeliveryThreshold: freeDeliveryThreshold === null ? null : parseFloat(String(freeDeliveryThreshold)),
       } : {}),
       ...(currency !== undefined ? { currency: String(currency) } : {}),
+      ...(schedulingEnabled !== undefined ? { schedulingEnabled: Boolean(schedulingEnabled) } : {}),
+      ...(deliveryScheduleScope !== undefined ? { deliveryScheduleScope } : {}),
+      ...(schedulingAdvanceDays !== undefined ? { schedulingAdvanceDays: parseInt(String(schedulingAdvanceDays), 10) } : {}),
     };
 
     let settings;

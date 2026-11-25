@@ -9,7 +9,7 @@ import { supportedAreasService, STRICTLY_SUPPORTED_AREAS } from '../../modules/l
 import { RemoteConfigService } from '../../modules/remote-config/remote-config.service';
 import { config } from '../../config';
 import { deliverySlotService } from './delivery-slot.service';
-import { type HeavyProductShippingInput } from './heavy-delivery.service';
+import { type HeavyProductShippingInput, type DeliverySubShipment } from './heavy-delivery.service';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
@@ -26,6 +26,7 @@ export interface SellerOrderInput {
   heightCm?: number;
   isRemoteArea?: boolean;
   isSpecialHandling?: boolean;
+  extraSellerFee?: number;
   heavyItems?: HeavyProductShippingInput[];
   accessSurcharge?: number;
   isDigital?: boolean;
@@ -128,6 +129,13 @@ export interface FullQuoteResponse {
   requiresForklift?: boolean;
   requiresCrane?: boolean;
   heavyAvailable?: boolean;
+  // Product-Driven Shipment Breakdown (§Mixed Cart Compatibility)
+  hasMixedShipments?: boolean;
+  shipmentCount?: number;
+  shipments?: DeliverySubShipment[];
+  standardShipmentFee?: number;
+  heavyShipmentFee?: number;
+  digitalShipmentFee?: number;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -439,7 +447,7 @@ export class DeliveryQuoteService {
 
     const storesStatusList: StoreAvailabilityStatus[] = [];
 
-    const sellerQuotePromises = sellerOrders.map(async (soInput) => {
+    const sellerQuotePromises = sellerOrders.map(async (soInput, index) => {
       const {
         sellerId,
         storeId,
@@ -451,6 +459,7 @@ export class DeliveryQuoteService {
         heightCm,
         isRemoteArea,
         isSpecialHandling,
+        extraSellerFee,
       } = soInput;
 
       // Authoritative Digital Seller Check (§1, §2):
@@ -519,11 +528,15 @@ export class DeliveryQuoteService {
         effectiveWeightKg = physicalWeight;
       }
 
+      // Slot fee applies once per order when scheduling scope is ORDER (prevent multi-seller duplicate charges)
+      const sellerSlotFee = index === 0 ? slotFee : 0;
+
       const options: DeliveryFeeOptions = {
         isExpress: sellerIsExpress,
         discountAmount,
         discountFundedBy,
-        slotFee, // applied per seller quote
+        slotFee: sellerSlotFee,
+        extraSellerFee: extraSellerFee || 0,
         deliveryMethodCode: itemDeliveryMethod || deliveryMethod || 'intercity_transport',
         originAreaId,
         destinationAreaId,
@@ -586,6 +599,33 @@ export class DeliveryQuoteService {
     const firstHeavyQuote = heavyQuotes[0];
     const requiresManualQuote = sellerQuotes.some((q) => q.requiresManualQuote === true || q.deliveryMode === 'MANUAL_QUOTE');
 
+    // Aggregate sub-shipments across all participating stores for transparent checkout display
+    const allSubShipments: DeliverySubShipment[] = [];
+    for (const sq of sellerQuotes) {
+      if (sq.subShipments && sq.subShipments.length > 0) {
+        for (const sub of sq.subShipments) {
+          allSubShipments.push({
+            ...sub,
+            sellerId: sq.sellerId,
+            storeId: sq.storeId,
+            storeName: sq.storeName,
+          });
+        }
+      }
+    }
+
+    const standardShipmentFee = allSubShipments
+      .filter((s) => s.shipmentType === 'STANDARD')
+      .reduce((sum, s) => sum + s.deliveryFee, 0);
+
+    const heavyShipmentFee = allSubShipments
+      .filter((s) => s.shipmentType === 'HEAVY')
+      .reduce((sum, s) => sum + s.deliveryFee, 0);
+
+    const hasMixedShipments =
+      (standardShipmentFee > 0 && heavyShipmentFee > 0) ||
+      sellerQuotes.some((sq) => sq.hasMixedShipments);
+
     // Isolated method availabilities
     const isStandardMethodAvailable = !anyDistanceUnavailable && isStandardActive;
     const isScheduledMethodAvailable = !anyDistanceUnavailable && isScheduledActive && storesStatusList.every((s) => s.acceptsScheduled !== false);
@@ -639,6 +679,13 @@ export class DeliveryQuoteService {
       requiresForklift: sellerQuotes.some((q) => (q.forkliftFee || 0) > 0),
       requiresCrane: sellerQuotes.some((q) => (q.craneFee || 0) > 0),
       heavyAvailable: isHeavyDelivery && !anyDistanceUnavailable,
+      // Product-Driven Shipment Breakdown (§Mixed Cart Compatibility)
+      hasMixedShipments,
+      shipmentCount: allSubShipments.length,
+      shipments: allSubShipments,
+      standardShipmentFee,
+      heavyShipmentFee,
+      digitalShipmentFee: 0,
       // Inter-Governorate top-level metadata
       isInterGovernorate: isInterGov,
       routeKey: firstInterQuote?.routeKey,
@@ -705,7 +752,7 @@ export class DeliveryQuoteService {
       : quote.deliveryFee;
 
     const effectiveDiscount = scheduleInfo?.promotionalDiscount !== undefined && scheduleInfo.promotionalDiscount > 0
-      ? (quote.deliveryDiscount + scheduleInfo.promotionalDiscount)
+      ? Math.max(scheduleInfo.promotionalDiscount, quote.deliveryDiscount)
       : quote.deliveryDiscount;
 
     const effectiveFundedBy = scheduleInfo?.discountFundedBy || quote.discountFundedBy;
@@ -772,6 +819,7 @@ export class DeliveryQuoteService {
         durationMinutes: quote.durationMinutes,
         zoneName: quote.zoneName,
         baseFee: quote.baseFee,
+        distanceCharge: quote.distanceCharge ?? 0,
         extraSellerFee: quote.extraSellerFee,
         weightFee: quote.weightFee,
         expressFee: quote.expressFee,
@@ -794,6 +842,7 @@ export class DeliveryQuoteService {
         durationMinutes: quote.durationMinutes,
         zoneName: quote.zoneName,
         baseFee: quote.baseFee,
+        distanceCharge: quote.distanceCharge ?? 0,
         extraSellerFee: quote.extraSellerFee,
         weightFee: quote.weightFee,
         expressFee: quote.expressFee,

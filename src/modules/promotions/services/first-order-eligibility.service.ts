@@ -161,7 +161,21 @@ export class FirstOrderFreeShippingEligibilityService {
       );
     }
 
-    // 8. Delivery Method Eligibility Check
+    // 8. Heavy Freight & Delivery Method Eligibility Check
+    if (input.isHeavyDelivery) {
+      const allowsHeavy = config.allowedDeliveryMethods && config.allowedDeliveryMethods.some(
+        (m) => ['heavy_transport', 'heavy_local', 'heavy_inter_governorate', 'oversized_special', 'special_transport'].includes(m.toLowerCase().trim())
+      );
+      if (!allowsHeavy) {
+        return this.buildResult(
+          FirstOrderEligibilityStatus.DELIVERY_METHOD_NOT_SUPPORTED,
+          'عرض أول طلب للشحن المجاني لا يغطي خدمات النقل الثقيل والرافعات ما لم يتم تخصيص ذلك في إعدادات الحملة',
+          'First order free shipping does not cover heavy freight or crane transport unless explicitly configured',
+          config
+        );
+      }
+    }
+
     if (input.deliveryMethod && config.allowedDeliveryMethods && config.allowedDeliveryMethods.length > 0) {
       const normalizedMethod = input.deliveryMethod.toLowerCase().trim();
       const isMethodAllowed = config.allowedDeliveryMethods.some(

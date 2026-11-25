@@ -44,6 +44,7 @@ import { interGovernorateTrackingService } from '../../services/delivery/inter-g
 import { WishlistAlertsJob } from '../../services/jobs/wishlist-alerts.job';
 import { StorefrontInvalidatorService } from '../../services/storefront-invalidator.service';
 import { formatProductForClient } from '../../utils/product-formatter.util';
+import { parseNonNegativeMoney } from '../../utils/non-negative-money.util';
 
 const router = Router();
 router.use(authenticate, requireSeller);
@@ -1599,6 +1600,13 @@ async function createSellerProduct(userId: string, body: any) {
     finalSlug = `${finalSlug}-${Date.now().toString().slice(-4)}`;
   }
 
+  parseNonNegativeMoney(price || 0, 'Product price');
+  if (compareAtPrice) parseNonNegativeMoney(compareAtPrice, 'Compare-at price');
+  for (const variant of Array.isArray(variants) ? variants : []) {
+    if (variant.price !== undefined && variant.price !== '') parseNonNegativeMoney(variant.price, 'Variant price');
+    if (variant.compareAtPrice) parseNonNegativeMoney(variant.compareAtPrice, 'Variant compare-at price');
+  }
+
   let finalSku = (sku || '').toString().trim();
   if (finalSku) {
     const existingProdWithSku = await prisma.product.findUnique({ where: { sku: finalSku } });
@@ -1787,6 +1795,13 @@ async function updateSellerProduct(userId: string, productId: string, body: any)
     digitalFileUrl,
   } = body;
 
+  if (price !== undefined) parseNonNegativeMoney(price, 'Product price');
+  if (compareAtPrice) parseNonNegativeMoney(compareAtPrice, 'Compare-at price');
+  for (const variant of Array.isArray(variants) ? variants : []) {
+    if (variant.price !== undefined && variant.price !== '') parseNonNegativeMoney(variant.price, 'Variant price');
+    if (variant.compareAtPrice) parseNonNegativeMoney(variant.compareAtPrice, 'Variant compare-at price');
+  }
+
   const targetCat = categoryId !== undefined ? categoryId : product.categoryId;
   let updatedFulfillmentType = product.fulfillmentType;
   let updatedDigitalDeliveryType = product.digitalDeliveryType;
@@ -1839,8 +1854,8 @@ async function updateSellerProduct(userId: string, productId: string, body: any)
         otherProductType: trimmedOtherProductType !== undefined ? trimmedOtherProductType : product.otherProductType,
         brandId: brandId !== undefined ? brandId : product.brandId,
         sku: sku ?? product.sku,
-        price: price !== undefined ? parseFloat(price) : product.price,
-        compareAtPrice: compareAtPrice !== undefined ? (compareAtPrice ? parseFloat(compareAtPrice) : null) : product.compareAtPrice,
+        price: price !== undefined ? parseNonNegativeMoney(price, 'Product price') : product.price,
+        compareAtPrice: compareAtPrice !== undefined ? (compareAtPrice ? parseNonNegativeMoney(compareAtPrice, 'Compare-at price') : null) : product.compareAtPrice,
         descriptionAr: descriptionAr !== undefined ? descriptionAr : product.descriptionAr,
         descriptionEn: descriptionEn !== undefined ? descriptionEn : product.descriptionEn,
         weight: weight !== undefined ? (weight ? parseFloat(weight) : null) : product.weight,
@@ -1900,8 +1915,8 @@ async function updateSellerProduct(userId: string, productId: string, body: any)
             nameAr: v.nameAr || `متغير ${index + 1}`,
             nameEn: v.nameEn || v.nameAr || `Variant ${index + 1}`,
             sku: v.sku || `${prod.sku}-V${index + 1}-${Date.now().toString().slice(-4)}`,
-            price: v.price !== undefined && v.price !== '' ? parseFloat(v.price) : prod.price,
-            compareAtPrice: v.compareAtPrice ? parseFloat(v.compareAtPrice) : null,
+            price: v.price !== undefined && v.price !== '' ? parseNonNegativeMoney(v.price, 'Variant price') : prod.price,
+            compareAtPrice: v.compareAtPrice ? parseNonNegativeMoney(v.compareAtPrice, 'Variant compare-at price') : null,
             stockQuantity: parseInt(v.stockQuantity || v.stock || '0', 10) || 0,
             image: v.image || null,
           })),
@@ -4952,8 +4967,8 @@ router.post('/me/products/:id/variants', async (req: Request, res: Response, nex
         nameAr: nameAr || product.nameAr,
         nameEn: nameEn || product.nameEn,
         sku: sku || null,
-        price: price !== undefined ? parseFloat(price) : product.price,
-        compareAtPrice: compareAtPrice ? parseFloat(compareAtPrice) : null,
+        price: price !== undefined ? parseNonNegativeMoney(price, 'Variant price') : product.price,
+        compareAtPrice: compareAtPrice ? parseNonNegativeMoney(compareAtPrice, 'Variant compare-at price') : null,
         stockQuantity: stockQuantity ? parseInt(stockQuantity) : 0,
         image: image || null,
       },
@@ -4988,8 +5003,8 @@ router.patch('/me/products/:id/variants/:variantId', async (req: Request, res: R
         nameAr: nameAr ?? undefined,
         nameEn: nameEn ?? undefined,
         sku: sku ?? undefined,
-        price: price !== undefined ? parseFloat(price) : undefined,
-        compareAtPrice: compareAtPrice !== undefined ? parseFloat(compareAtPrice) : undefined,
+        price: price !== undefined ? parseNonNegativeMoney(price, 'Variant price') : undefined,
+        compareAtPrice: compareAtPrice !== undefined ? parseNonNegativeMoney(compareAtPrice, 'Variant compare-at price') : undefined,
         stockQuantity: stockQuantity !== undefined ? parseInt(stockQuantity) : undefined,
         image: image ?? undefined,
       },
@@ -5313,7 +5328,7 @@ router.post('/me/flash-sales/:flashSaleId/products', async (req: Request, res: R
     const flashSale = await prisma.flashSale.findUnique({ where: { id: flashSaleId } });
     if (!flashSale || !flashSale.isActive) throw new AppError('حملة Flash Sale غير موجودة أو منتهية', 404);
 
-    const parsedDiscountPrice = parseFloat(discountPrice);
+    const parsedDiscountPrice = parseNonNegativeMoney(discountPrice, 'Discount price');
     if (parsedDiscountPrice >= product.price) {
       throw new AppError('سعر البيع في Flash Sale يجب أن يكون أقل من السعر الأصلي', 400);
     }

@@ -643,6 +643,8 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
         requiresCrane: it.product?.requiresCrane ?? false,
         requiresSpecialVehicle: it.product?.requiresSpecialVehicle ?? false,
         specialVehicleType: it.product?.specialVehicleType ?? null,
+        loadingRequirements: it.product?.loadingRequirements ?? null,
+        unloadingRequirements: it.product?.unloadingRequirements ?? null,
         categorySlug: it.product?.category?.slug ?? null,
         categoryNameAr: it.product?.category?.nameAr ?? null,
         categoryNameEn: it.product?.category?.nameEn ?? null,
@@ -766,6 +768,16 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           throw new AppError(explanation, 400, 'OUTSIDE_DELIVERY_AREA');
         }
 
+        // Authoritative Safe Validation & Seller-Confirmation Enforcement (§Product-Driven Heavy Delivery)
+        if (physicalQuote.requiresManualQuote || physicalQuote.deliveryMode === 'MANUAL_QUOTE') {
+          const reasonAr = physicalQuote.quoteReason ||
+            'الشحنة تتضمن بضائع ثقيلة أو مواصفات نقل غير مكتملة تتطلب تسعيراً خاصاً وتأكيداً مسبقاً من البائع قبل إتمام الطلب.';
+          throw new AppError(reasonAr, 400, 'MANUAL_QUOTE_REQUIRED', undefined, {
+            ar: reasonAr,
+            en: 'This order contains heavy freight or incomplete transportation attributes requiring seller quote confirmation before placement.',
+          });
+        }
+
         // Merge digital seller quotes (0 fee) with physical seller quotes
         const mergedQuotes = [...physicalQuote.sellerQuotes];
         for (const sellerId of sellerGroups.keys()) {
@@ -874,6 +886,9 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
             deliveryMethod: deliveryMethodCode || finalScheduleType,
             deliveryZone: quote.sellerQuotes[0]?.zoneName || undefined,
             originalShippingAmount: quote.totalDeliveryFee,
+            isHeavyDelivery: Boolean(quote.isHeavyDelivery),
+            deliveryMode: quote.deliveryMode,
+            mandatorySpecialCharges: (quote.loadingFee || 0) + (quote.unloadingFee || 0) + (quote.forkliftFee || 0) + (quote.craneFee || 0) + (quote.accessSurcharge || 0),
             sellerDeliveries: rawSellerDeliveries,
           },
           sellers: sellerIdsList.map((sId) => ({
@@ -909,6 +924,8 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
           deliveryMethod: deliveryMethodCode || finalScheduleType,
           deliveryZoneId: quote.sellerQuotes[0]?.zoneId || null,
           deliveryZoneName: quote.sellerQuotes[0]?.zoneName || null,
+          isHeavyDelivery: Boolean(quote.isHeavyDelivery),
+          mandatorySpecialCharges: (quote.loadingFee || 0) + (quote.unloadingFee || 0) + (quote.forkliftFee || 0) + (quote.craneFee || 0) + (quote.accessSurcharge || 0),
           sellerIds: sellerIdsList,
           ipAddress: req.ip,
           userAgent: req.headers['user-agent'],
@@ -2917,6 +2934,9 @@ function resolveDeliveryMethodDetails(so: any, parentOrder?: any): {
   } else if (delivMethod?.code === 'pickup') {
     deliveryMethodName = 'استلام من المتجر';
     deliveryMethodCode = 'pickup';
+  } else if (delivMethod?.code === 'heavy_transport' || deliveryMethodCode === 'heavy_transport') {
+    deliveryMethodName = delivMethod?.nameAr || 'نقل ثقيل وبضائع ضخمة (Heavy Freight)';
+    deliveryMethodCode = 'heavy_transport';
   } else {
     deliveryMethodName = 'توصيل قياسي';
     deliveryMethodCode = 'standard';

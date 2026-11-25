@@ -25,6 +25,7 @@ export class ShippingFundingEngine {
     originalShippingAmount: number;
     promotion: ShippingPromotion;
     sellerDeliveries?: Array<{ sellerId: string; deliveryFee: number }>;
+    mandatorySpecialCharges?: number;
   }): ShippingFundingBreakdown {
     const rawShipping = Math.max(0, this.round(params.originalShippingAmount));
     if (rawShipping === 0) {
@@ -45,10 +46,16 @@ export class ShippingFundingEngine {
       targetDiscount = rawShipping;
     }
 
+    // Protect mandatory special charges (crane, forklift, loading, specialized handling labor)
+    const mandatoryCharges = Math.max(0, params.mandatorySpecialCharges || 0);
+    const allowsSpecialDiscount = (promotion.deliveryEligibilityRules as any)?.allowSpecialChargesDiscount === true;
+    const discountableCeiling = allowsSpecialDiscount ? rawShipping : Math.max(0, rawShipping - mandatoryCharges);
+
     // 2. Cap by maximumDiscountAmount if configured
     if (promotion.maximumDiscountAmount !== null && promotion.maximumDiscountAmount !== undefined) {
       targetDiscount = Math.min(targetDiscount, Math.max(0, promotion.maximumDiscountAmount));
     }
+    targetDiscount = Math.min(targetDiscount, discountableCeiling);
 
     // 3. Absolute cap: discount cannot exceed original shipping
     const shippingPromotionDiscount = this.round(Math.min(rawShipping, Math.max(0, targetDiscount)));

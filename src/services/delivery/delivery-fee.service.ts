@@ -18,6 +18,8 @@ import {
   type DeliveryCalculationMode,
   type QuoteType,
   type HeavyCargoClassification,
+  type DeliverySubShipment,
+  type ShipmentPartitionResult,
 } from './heavy-delivery.service';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -87,13 +89,17 @@ export interface DeliveryQuoteResult {
   vehicleClassNameAr?: string;
   vehicleClassNameEn?: string;
   palletCount?: number;
+  tripsCount?: number;
   loadingFee?: number;
   unloadingFee?: number;
   forkliftFee?: number;
   craneFee?: number;
   accessSurcharge?: number;
+  mandatorySpecialHandlingFee?: number;
   cargoClassification?: HeavyCargoClassification;
   cargoDescriptionAr?: string;
+  hasMixedShipments?: boolean;
+  subShipments?: DeliverySubShipment[];
 
   // Inter-Governorate route & pricing details
   isInterGovernorate?: boolean;
@@ -173,8 +179,11 @@ function buildCacheKey(
   slotFee: number = 0,
   methodCode: string = '',
   destAreaId: string = '',
+  extraSellerFee: number = 0,
+  weightKg: number = 0,
+  discountAmount: number = 0,
 ): string {
-  return `${sellerLat.toFixed(4)},${sellerLng.toFixed(4)}|${customerLat.toFixed(4)},${customerLng.toFixed(4)}|express=${isExpress}|slotFee=${slotFee}|m=${methodCode}|dest=${destAreaId}|v=${pricingVersion}`;
+  return `${sellerLat.toFixed(4)},${sellerLng.toFixed(4)}|${customerLat.toFixed(4)},${customerLng.toFixed(4)}|express=${isExpress}|slotFee=${slotFee}|m=${methodCode}|dest=${destAreaId}|extraSellerFee=${extraSellerFee}|w=${weightKg}|disc=${discountAmount}|v=${pricingVersion}`;
 }
 
 function getCached(key: string): DeliveryQuoteResult | null {
@@ -224,7 +233,7 @@ export class DeliveryFeeService {
         const route = await Promise.race([routePromise, timeoutPromise]);
         if (route && route.distanceKm > 0) {
           const res = {
-            distanceKm: route.distanceKm,
+            distanceKm: Math.max(0.3, Math.round(route.distanceKm * 100) / 100),
             durationMinutes: route.durationMinutes,
           };
           _distanceCache.set(distKey, { ...res, expiresAt: Date.now() + DISTANCE_CACHE_TTL_MS });
@@ -350,6 +359,9 @@ export class DeliveryFeeService {
       slotFee,
       options.deliveryMethodCode || '',
       options.destinationAreaId || '',
+      extraSellerFee,
+      weightKg,
+      discountAmount,
     );
 
     // Check cache (§30)
@@ -407,11 +419,143 @@ export class DeliveryFeeService {
 
     const isDifferentAreas = Boolean(originAreaId && destAreaId && originAreaId !== destAreaId);
 
-    // 1.2 Heavy & Bulky Cargo Logistics Evaluation (§2 - §6)
+    // 1.2 Product-Driven Shipment Partitioning & Heavy Cargo Logistics Evaluation (§2 - §6)
     // Filter out any digital items from heavy cargo and weight evaluation
     const physicalHeavyItems = options.heavyItems && options.heavyItems.length > 0
       ? options.heavyItems.filter((it) => !it.isDigital)
       : undefined;
+
+    // Check if shipment has mixed products requiring independent calculation
+    if (physicalHeavyItems && physicalHeavyItems.length > 1) {
+      const partition = heavyDeliveryService.partitionShipment(physicalHeavyItems);
+      if (partition.hasMixedShipments && partition.heavyItems.length > 0 && partition.standardItems.length > 0) {
+        // Mixed Cart Detected: Calculate each shipment independently!
+        // 1. Heavy sub-shipment
+        const heavyCargo = heavyDeliveryService.analyzeShipmentCargo(partition.heavyItems);
+        const vehicleMatch = await heavyDeliveryService.matchVehicle(heavyCargo);
+        const heavyPricing = heavyDeliveryService.calculateHeavyPricing(heavyCargo, vehicleMatch, {
+          distanceKm,
+          isInterGovernorate: isDifferentAreas,
+          originGovernorate: originAreaId,
+          destinationGovernorate: destAreaId,
+          accessSurcharge: options.accessSurcharge,
+          discountAmount: 0,
+        });
+
+        // 2. Standard sub-shipment (call calculateFee for standard items)
+        const standardResult = await this.calculateFee(
+          sellerLat, sellerLng,
+          customerLat, customerLng,
+          {
+            ...options,
+            heavyItems: partition.standardItems,
+            weightKg: partition.standardItems.reduce((s, it) => s + ((it.weightKg || it.packageWeightKg || 0) * (it.quantity || 1)), 0),
+          }
+        );
+
+        const standardSubShipment: DeliverySubShipment = {
+          id: `sub_std_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          shipmentType: 'STANDARD',
+          titleAr: 'شحنة الطرود العادية',
+          titleEn: 'Standard Parcel Shipment',
+          items: partition.standardItems.map((it) => ({
+            productId: it.productId,
+            name: it.name,
+            quantity: it.quantity,
+            weightKg: it.weightKg || undefined,
+            sellingUnit: it.sellingUnit || undefined,
+            isDigital: false,
+          })),
+          totalWeightKg: partition.standardItems.reduce((s, it) => s + ((it.weightKg || it.packageWeightKg || 0) * (it.quantity || 1)), 0),
+          deliveryFee: standardResult.deliveryFee,
+          baseFee: standardResult.baseFee,
+          distanceCharge: standardResult.extraSellerFee,
+          handlingFee: standardResult.weightFee,
+          deliveryMode: standardResult.deliveryMode || 'STANDARD_PARCEL',
+          allowedDeliveryMethods: standardResult.allowedDeliveryMethods || [
+            { code: 'standard', nameAr: 'توصيل عادي', nameEn: 'Standard Delivery', surcharge: 0, isAvailable: true },
+          ],
+        };
+
+        const heavySubShipment: DeliverySubShipment = {
+          id: `sub_hvy_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          shipmentType: 'HEAVY',
+          titleAr: `شحنة النقل الثقيل والخاص (${heavyPricing.vehicleNameAr})`,
+          titleEn: `Heavy & Special Freight (${heavyPricing.vehicleNameEn})`,
+          items: partition.heavyItems.map((it) => ({
+            productId: it.productId,
+            name: it.name,
+            quantity: it.quantity,
+            weightKg: it.weightKg || undefined,
+            sellingUnit: it.sellingUnit || undefined,
+            isDigital: false,
+          })),
+          totalWeightKg: heavyCargo.totalActualWeightKg,
+          deliveryFee: heavyPricing.finalDeliveryFee,
+          baseFee: heavyPricing.baseFee,
+          distanceCharge: heavyPricing.distanceCharge,
+          handlingFee: heavyPricing.loadingFee + heavyPricing.unloadingFee + heavyPricing.forkliftFee + heavyPricing.craneFee + heavyPricing.specialHandlingFee,
+          deliveryMode: heavyPricing.deliveryMode,
+          quoteType: heavyPricing.quoteType,
+          requiresManualQuote: heavyPricing.requiresManualQuote,
+          quoteReason: heavyPricing.quoteReason,
+          vehicleCode: heavyPricing.vehicleCode,
+          vehicleNameAr: heavyPricing.vehicleNameAr,
+          vehicleNameEn: heavyPricing.vehicleNameEn,
+          palletCount: heavyPricing.palletCount,
+          requiresForklift: heavyCargo.requiresForklift,
+          requiresCrane: heavyCargo.requiresCrane,
+          allowedDeliveryMethods: [
+            { code: 'heavy_transport', nameAr: heavyPricing.vehicleNameAr, nameEn: heavyPricing.vehicleNameEn, surcharge: 0, isAvailable: !heavyPricing.requiresManualQuote },
+          ],
+        };
+
+        const totalMixedFee = standardResult.deliveryFee + heavyPricing.finalDeliveryFee;
+
+        const mixedResult: DeliveryQuoteResult = {
+          deliveryAvailable: standardResult.deliveryAvailable && (heavyPricing.requiresManualQuote || heavyPricing.finalDeliveryFee >= 0),
+          reason: heavyPricing.requiresManualQuote ? (heavyPricing.quoteReason || 'MANUAL_QUOTE_REQUIRED') : standardResult.reason,
+          distanceKm,
+          durationMinutes: Math.max(standardResult.durationMinutes, isDifferentAreas ? Math.round((distanceKm / 45) * 60) + 15 : durationMinutes),
+          zoneId: standardResult.zoneId,
+          zoneName: isDifferentAreas
+            ? `${originAreaId || 'المصدر'} إلى ${destAreaId || 'الوجهة'} (${heavyPricing.vehicleNameAr} + شحن قياسي)`
+            : `${standardResult.zoneName || 'توصيل قياسي'} + ${heavyPricing.vehicleNameAr}`,
+          baseFee: standardResult.baseFee + heavyPricing.baseFee,
+          extraSellerFee: standardResult.extraSellerFee + heavyPricing.distanceCharge,
+          weightFee: standardResult.weightFee + heavyPricing.specialHandlingFee,
+          slotFee: standardResult.slotFee,
+          expressFee: standardResult.expressFee,
+          deliveryDiscount: standardResult.deliveryDiscount + heavyPricing.deliveryDiscount,
+          discountFundedBy,
+          deliveryFee: totalMixedFee,
+          currency,
+          pricingVersion,
+          isExpress: false,
+          isInterGovernorate: isDifferentAreas,
+          deliveryMode: heavyPricing.deliveryMode,
+          quoteType: heavyPricing.quoteType,
+          quoteReason: heavyPricing.quoteReason,
+          requiresManualQuote: heavyPricing.requiresManualQuote,
+          vehicleClass: heavyPricing.vehicleCode,
+          vehicleClassNameAr: heavyPricing.vehicleNameAr,
+          vehicleClassNameEn: heavyPricing.vehicleNameEn,
+          palletCount: heavyPricing.palletCount,
+          loadingFee: heavyPricing.loadingFee,
+          unloadingFee: heavyPricing.unloadingFee,
+          forkliftFee: heavyPricing.forkliftFee,
+          craneFee: heavyPricing.craneFee,
+          accessSurcharge: heavyPricing.accessSurcharge,
+          cargoClassification: heavyCargo.classification,
+          cargoDescriptionAr: `${standardSubShipment.titleAr} + ${heavySubShipment.titleAr}`,
+          hasMixedShipments: true,
+          subShipments: [standardSubShipment, heavySubShipment],
+        };
+
+        setCached(cacheKey, mixedResult);
+        return mixedResult;
+      }
+    }
 
     const itemsToAnalyze: HeavyProductShippingInput[] = physicalHeavyItems && physicalHeavyItems.length > 0
       ? physicalHeavyItems
@@ -439,6 +583,39 @@ export class DeliveryFeeService {
         discountAmount,
       });
 
+      const heavySubShipment: DeliverySubShipment = {
+        id: `sub_hvy_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        shipmentType: 'HEAVY',
+        titleAr: `شحنة النقل الثقيل والخاص (${heavyPricing.vehicleNameAr})`,
+        titleEn: `Heavy & Special Freight (${heavyPricing.vehicleNameEn})`,
+        items: itemsToAnalyze.map((it) => ({
+          productId: it.productId,
+          name: it.name,
+          quantity: it.quantity,
+          weightKg: it.weightKg || undefined,
+          sellingUnit: it.sellingUnit || undefined,
+          isDigital: false,
+        })),
+        totalWeightKg: cargo.totalActualWeightKg,
+        deliveryFee: heavyPricing.finalDeliveryFee,
+        baseFee: heavyPricing.baseFee,
+        distanceCharge: heavyPricing.distanceCharge,
+        handlingFee: heavyPricing.loadingFee + heavyPricing.unloadingFee + heavyPricing.forkliftFee + heavyPricing.craneFee + heavyPricing.specialHandlingFee,
+        deliveryMode: heavyPricing.deliveryMode,
+        quoteType: heavyPricing.quoteType,
+        requiresManualQuote: heavyPricing.requiresManualQuote,
+        quoteReason: heavyPricing.quoteReason,
+        vehicleCode: heavyPricing.vehicleCode,
+        vehicleNameAr: heavyPricing.vehicleNameAr,
+        vehicleNameEn: heavyPricing.vehicleNameEn,
+        palletCount: heavyPricing.palletCount,
+        requiresForklift: cargo.requiresForklift,
+        requiresCrane: cargo.requiresCrane,
+        allowedDeliveryMethods: [
+          { code: 'heavy_transport', nameAr: heavyPricing.vehicleNameAr, nameEn: heavyPricing.vehicleNameEn, surcharge: 0, isAvailable: !heavyPricing.requiresManualQuote },
+        ],
+      };
+
       const heavyResult: DeliveryQuoteResult = {
         deliveryAvailable: true,
         reason: heavyPricing.requiresManualQuote ? (heavyPricing.quoteReason || 'MANUAL_QUOTE_REQUIRED') : undefined,
@@ -449,7 +626,8 @@ export class DeliveryFeeService {
           ? `${originAreaId || 'المصدر'} إلى ${destAreaId || 'الوجهة'} (${heavyPricing.vehicleNameAr})`
           : heavyPricing.vehicleNameAr,
         baseFee: heavyPricing.baseFee,
-        extraSellerFee: heavyPricing.distanceCharge,
+        distanceCharge: heavyPricing.distanceCharge,
+        extraSellerFee: 0,
         weightFee: heavyPricing.specialHandlingFee,
         slotFee,
         expressFee: 0,
@@ -468,13 +646,17 @@ export class DeliveryFeeService {
         vehicleClassNameAr: heavyPricing.vehicleNameAr,
         vehicleClassNameEn: heavyPricing.vehicleNameEn,
         palletCount: heavyPricing.palletCount,
+        tripsCount: heavyPricing.tripsCount,
         loadingFee: heavyPricing.loadingFee,
         unloadingFee: heavyPricing.unloadingFee,
         forkliftFee: heavyPricing.forkliftFee,
         craneFee: heavyPricing.craneFee,
         accessSurcharge: heavyPricing.accessSurcharge,
+        mandatorySpecialHandlingFee: heavyPricing.mandatorySpecialHandlingFee,
         cargoClassification: cargo.classification,
         cargoDescriptionAr: cargo.cargoDescriptionAr,
+        hasMixedShipments: false,
+        subShipments: [heavySubShipment],
       };
 
       setCached(cacheKey, heavyResult);
@@ -524,6 +706,34 @@ export class DeliveryFeeService {
           discountFundedBy,
         });
 
+        const stdSubShipment: DeliverySubShipment = {
+          id: `sub_std_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          shipmentType: 'STANDARD',
+          titleAr: 'شحنة الطرود بين المحافظات',
+          titleEn: 'Inter-Governorate Parcel Shipment',
+          items: itemsToAnalyze.map((it) => ({
+            productId: it.productId,
+            name: it.name,
+            quantity: it.quantity,
+            weightKg: it.weightKg || undefined,
+            sellingUnit: it.sellingUnit || undefined,
+            isDigital: false,
+          })),
+          totalWeightKg: interPricing.actualWeightKg,
+          deliveryFee: interPricing.finalDeliveryFee,
+          baseFee: interPricing.routeBaseFee,
+          distanceCharge: interPricing.distanceCharge,
+          handlingFee: interPricing.weightSurcharge + interPricing.oversizedSurcharge + interPricing.specialHandlingCharge,
+          deliveryMode: 'STANDARD_PARCEL',
+          allowedDeliveryMethods: (interPricing.allowedDeliveryMethods || []).map((m: any) => ({
+            code: m.code,
+            nameAr: m.nameAr,
+            nameEn: m.nameEn,
+            surcharge: m.surcharge,
+            isAvailable: true,
+          })),
+        };
+
         const result: DeliveryQuoteResult = {
           deliveryAvailable: true,
           distanceKm: interPricing.roadDistanceKm,
@@ -565,6 +775,8 @@ export class DeliveryFeeService {
           estimatedHoursMax: interPricing.estimatedHoursMax,
           expressSupported: interPricing.expressSupported,
           expressSurcharge: interPricing.expressSurcharge,
+          hasMixedShipments: false,
+          subShipments: [stdSubShipment],
         };
 
         setCached(cacheKey, result);
@@ -640,14 +852,15 @@ export class DeliveryFeeService {
       };
     }
 
-    // 4. Compute base fee (includes extra per-km for open-ended zones)
-    let baseFee = zone.baseFee;
+    // 4. Compute base fee & distance fee (authoritative separation)
+    const baseFee = zone.baseFee;
+    let distanceCharge = 0;
     if (zone.extraFeePerKm > 0) {
       const extraKm = Math.max(0, distanceKm - zone.minDistanceKm);
-      baseFee += extraKm * zone.extraFeePerKm;
+      distanceCharge = Math.round(extraKm * zone.extraFeePerKm);
     }
 
-    // 5. Weight/size fee (§20 — architecture ready, not complex yet)
+    // 5. Weight/size fee
     let effectiveWeightKg = weightKg;
     if (options.heavyItems && options.heavyItems.length > 0) {
       const physicalItems = options.heavyItems.filter((it) => !it.isDigital);
@@ -658,12 +871,61 @@ export class DeliveryFeeService {
     // 6. Express fee (§19)
     const expressFee = (isExpress && settings.expressEnabled) ? settings.expressFeeFixed : 0;
 
+    // 7. Special handling & remote area charges (if applicable)
+    const specialHandlingCharge = options.isSpecialHandling ? 500 : 0;
+    const remoteAreaCharge = options.isRemoteArea ? 500 : 0;
 
-    // 7. Delivery discount (§21)
-    const deliveryDiscount = Math.min(discountAmount, baseFee + extraSellerFee + weightFee + slotFee + expressFee);
+    // 8. Raw Subtotal before discounts
+    let rawCityFee =
+      baseFee +
+      distanceCharge +
+      extraSellerFee +
+      weightFee +
+      slotFee +
+      expressFee +
+      specialHandlingCharge +
+      remoteAreaCharge;
 
-    // 8. Final fee
-    const deliveryFee = Math.max(0, baseFee + extraSellerFee + weightFee + slotFee + expressFee - deliveryDiscount);
+    // 9. Enforce Minimum & Maximum delivery fee bounds
+    const minFee = settings.minDeliveryFee ?? 0;
+    const maxFee = settings.maxDeliveryFee ?? null;
+    if (minFee > 0 && rawCityFee < minFee) {
+      rawCityFee = minFee;
+    }
+    if (maxFee !== null && maxFee > 0 && rawCityFee > maxFee) {
+      rawCityFee = maxFee;
+    }
+
+    // 10. Delivery discount
+    const deliveryDiscount = Math.min(Math.max(0, discountAmount), rawCityFee);
+
+    // 11. Final authoritative fee
+    const deliveryFee = Math.max(0, Math.round(rawCityFee - deliveryDiscount));
+
+    const stdSubShipment: DeliverySubShipment = {
+      id: `sub_std_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      shipmentType: 'STANDARD',
+      titleAr: 'شحنة الطرود العادية (توصيل محلي)',
+      titleEn: 'Standard Local Parcel Shipment',
+      items: itemsToAnalyze.map((it) => ({
+        productId: it.productId,
+        name: it.name,
+        quantity: it.quantity,
+        weightKg: it.weightKg || undefined,
+        sellingUnit: it.sellingUnit || undefined,
+        isDigital: false,
+      })),
+      totalWeightKg: effectiveWeightKg,
+      deliveryFee,
+      baseFee,
+      distanceCharge,
+      handlingFee: weightFee + specialHandlingCharge,
+      deliveryMode: 'STANDARD_PARCEL',
+      allowedDeliveryMethods: [
+        { code: 'standard', nameAr: 'توصيل عادي', nameEn: 'Standard Delivery', surcharge: 0, isAvailable: true },
+        ...(isExpress ? [{ code: 'express', nameAr: 'توصيل سريع', nameEn: 'Express Delivery', surcharge: expressFee, isAvailable: true }] : []),
+      ],
+    };
 
     const result: DeliveryQuoteResult = {
       deliveryAvailable: true,
@@ -672,16 +934,21 @@ export class DeliveryFeeService {
       zoneId: zone.zoneId,
       zoneName: zone.zoneName,
       baseFee,
+      distanceCharge,
       extraSellerFee,
       weightFee,
       slotFee,
       expressFee,
+      specialHandlingCharge,
+      remoteAreaCharge,
       deliveryDiscount,
       ...(discountFundedBy ? { discountFundedBy } : {}),
       deliveryFee,
       currency: zone.currency || currency,
       pricingVersion,
       isExpress,
+      hasMixedShipments: false,
+      subShipments: [stdSubShipment],
     };
 
     setCached(cacheKey, result);
@@ -713,10 +980,21 @@ export class DeliveryFeeService {
         totalDeliveryFee = availableQuotes.reduce((max, q) => Math.max(max, q.deliveryFee), 0);
         break;
 
-      case 'COMBINED':
-        // Admin-defined combined rate (fallback: same as PER_SELLER)
-        totalDeliveryFee = availableQuotes.reduce((sum, q) => sum + q.deliveryFee, 0);
+      case 'COMBINED': {
+        // Combined multi-seller delivery policy: Highest single delivery fee + incremental consolidation fee (500 YER) per extra physical seller
+        const physicalQuotes = availableQuotes.filter((q) => !q.isDigital);
+        if (physicalQuotes.length === 0) {
+          totalDeliveryFee = 0;
+        } else if (physicalQuotes.length === 1) {
+          totalDeliveryFee = physicalQuotes[0].deliveryFee;
+        } else {
+          const maxFee = physicalQuotes.reduce((max, q) => Math.max(max, q.deliveryFee), 0);
+          const additionalSellers = physicalQuotes.length - 1;
+          const incrementalFee = additionalSellers * 500.0;
+          totalDeliveryFee = Math.round(maxFee + incrementalFee);
+        }
         break;
+      }
 
       case 'FREE_ABOVE_ORDER_VALUE':
         // Handled at checkout level — fee is zero if order value threshold is met

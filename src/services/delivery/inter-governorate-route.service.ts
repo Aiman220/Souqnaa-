@@ -145,6 +145,15 @@ export const STANDARD_DELIVERY_METHODS = [
     nameEn: 'Hub-to-Hub Transport',
     defaultSurcharge: 150,
   },
+  {
+    code: 'heavy_transport',
+    nameAr: 'النقل الثقيل والبضائع الضخمة (Heavy & Bulky Cargo Transport 🚛)',
+    descriptionAr: 'شحن مخصص للمعدات والرخام ومواد البناء والطرود الثقيلة عبر شاحنات مجهزة.',
+    badgeAr: 'نقل ثقيل وخاص 🏗️',
+    pricingNoteAr: 'تسعيرة تعتمد على تصنيف الشاحنة ومسافة النقل ومعدات المناولة.',
+    nameEn: 'Heavy & Bulky Cargo Transport',
+    defaultSurcharge: 0,
+  },
 ];
 
 export class InterGovernorateRouteService {
@@ -213,132 +222,8 @@ export class InterGovernorateRouteService {
 
     if (route) return route;
 
-    // 3. Fallback: If route exists but isActive was false, activate it immediately
-    const inactiveRoute = await prisma.interGovernorateRoute.findFirst({
-      where: {
-        OR: [
-          { originAreaId, destinationAreaId },
-          { originAreaId: destinationAreaId, destinationAreaId: originAreaId, direction: 'BIDIRECTIONAL' },
-        ],
-      },
-      include: {
-        routeMethods: true,
-      },
-    });
-
-    if (inactiveRoute) {
-      await prisma.interGovernorateRoute.update({
-        where: { id: inactiveRoute.id },
-        data: { isActive: true },
-      });
-      return await prisma.interGovernorateRoute.findUnique({
-        where: { id: inactiveRoute.id },
-        include: {
-          routeMethods: {
-            where: { isAvailable: true },
-          },
-        },
-      });
-    }
-
-    // 4. Fallback: Dynamically auto-create and activate route between supported Yemeni areas
-    const originDef = STRICTLY_SUPPORTED_AREAS.find((a: any) => a.canonicalId === originAreaId);
-    const destDef = STRICTLY_SUPPORTED_AREAS.find((a: any) => a.canonicalId === destinationAreaId);
-
-    if (originDef && destDef) {
-      const directKm = supportedAreasService.calculateGeodesicDistanceKm(
-        originDef.centerLat,
-        originDef.centerLng,
-        destDef.centerLat,
-        destDef.centerLng,
-      );
-      const roadDistanceEstimate = Math.round(directKm * 1.4);
-      const routeKey = this.buildRouteKey(originAreaId, destinationAreaId);
-
-      const created = await prisma.interGovernorateRoute.upsert({
-        where: { routeKey },
-        update: { isActive: true },
-        create: {
-          originAreaId,
-          destinationAreaId,
-          originGovernorate: originDef.governorateAr,
-          destinationGovernorate: destDef.governorateAr,
-          originCityName: originDef.nameAr,
-          destinationCityName: destDef.nameAr,
-          routeKey,
-          nameAr: `${originDef.nameAr} — ${destDef.nameAr}`,
-          nameEn: `${originDef.nameEn} — ${destDef.nameEn}`,
-          direction: 'BIDIRECTIONAL',
-          isActive: true,
-          pricingMode: 'FIXED',
-          baseFee: 2500.0,
-          ratePerKm: 10.0,
-          roadDistanceKm: roadDistanceEstimate,
-          minDeliveryFee: 1500.0,
-          maxDeliveryFee: 6000.0,
-          includedWeightKg: 5.0,
-          extraWeightRatePerKg: 150.0,
-          volumetricDivisor: 5000.0,
-          oversizedMaxDimensionCm: 100.0,
-          oversizedMaxWeightKg: 30.0,
-          oversizedSurcharge: 1000.0,
-          expressSupported: true,
-          expressSurcharge: 1000.0,
-          estimatedHoursMin: 24,
-          estimatedHoursMax: 48,
-          approvedProviderId: 'yemen_post',
-          approvedProviderName: 'البريد اليمني / خطوط النقل المعتمدة',
-          providerBaseCost: 1800.0,
-          allowedMethodCodes: JSON.stringify([
-            'intercity_transport',
-            'inter_governorate_standard',
-            'inter_governorate_express',
-            'pickup_point',
-            'third_party_courier',
-            'seller_managed',
-            'marketplace_managed',
-          ]),
-        },
-        include: {
-          routeMethods: {
-            where: { isAvailable: true },
-          },
-        },
-      });
-
-      // Ensure methods are seeded for this created route
-      for (const m of STANDARD_DELIVERY_METHODS) {
-        await prisma.interGovernorateRouteMethod.upsert({
-          where: {
-            routeId_methodCode: {
-              routeId: created.id,
-              methodCode: m.code,
-            },
-          },
-          update: { isAvailable: true },
-          create: {
-            routeId: created.id,
-            methodCode: m.code,
-            methodNameAr: m.nameAr,
-            methodNameEn: m.nameEn,
-            isAvailable: true,
-            methodSurcharge: m.defaultSurcharge >= 0 ? m.defaultSurcharge : 0,
-            estimatedHoursMin: m.code === 'inter_governorate_express' ? 12 : 24,
-            estimatedHoursMax: m.code === 'inter_governorate_express' ? 24 : 48,
-          },
-        }).catch(() => null);
-      }
-
-      return await prisma.interGovernorateRoute.findUnique({
-        where: { id: created.id },
-        include: {
-          routeMethods: {
-            where: { isAvailable: true },
-          },
-        },
-      });
-    }
-
+    // Strict compliance with Requirement 4: "Do not invent routes or assume unavailable routes are supported."
+    // If route is not configured or is inactive, it is not serviceable.
     return null;
   }
 
@@ -720,6 +605,9 @@ export class InterGovernorateRouteService {
         update: {
           isActive: true,
           allowedMethodCodes: JSON.stringify(defaultAllowedCodes),
+          oversizedMaxDimensionCm: 100.0,
+          oversizedMaxWeightKg: 30.0,
+          oversizedSurcharge: 1000.0,
         },
         create: {
           originAreaId: sanaa.canonicalId,

@@ -19,6 +19,7 @@ import { deliveryServiceabilityService } from '../../services/delivery/delivery-
 import { RemoteConfigService } from '../remote-config/remote-config.service';
 import { digitalFulfillmentService } from '../../services/digital/digital-fulfillment.service';
 import { UrlSecurityUtil } from '../../utils/url-security.util';
+import { parseNonNegativeMoney } from '../../utils/non-negative-money.util';
 import { FulfillmentType, DigitalDeliveryType } from '@prisma/client';
 
 const router = Router();
@@ -453,6 +454,17 @@ router.post('/', authenticate, requireSeller, async (req: Request, res: Response
       otherProductType,
     } = req.body;
 
+    parseNonNegativeMoney(price, 'Product price');
+    if (compareAtPrice !== undefined && compareAtPrice !== null && compareAtPrice !== '') {
+      parseNonNegativeMoney(compareAtPrice, 'Compare-at price');
+    }
+    for (const variant of Array.isArray(variants) ? variants : []) {
+      parseNonNegativeMoney(variant.price, 'Variant price');
+      if (variant.compareAtPrice !== undefined && variant.compareAtPrice !== null && variant.compareAtPrice !== '') {
+        parseNonNegativeMoney(variant.compareAtPrice, 'Variant compare-at price');
+      }
+    }
+
     const targetCategory = await prisma.category.findUnique({
       where: { id: categoryId },
       include: { parent: true },
@@ -514,8 +526,8 @@ router.post('/', authenticate, requireSeller, async (req: Request, res: Response
           slug,
           descriptionAr,
           descriptionEn,
-          price: parseFloat(price),
-          compareAtPrice: compareAtPrice ? parseFloat(compareAtPrice) : null,
+          price: parseNonNegativeMoney(price, 'Product price'),
+          compareAtPrice: compareAtPrice ? parseNonNegativeMoney(compareAtPrice, 'Compare-at price') : null,
           sku: sku || `SKU-${Date.now()}`,
           otherProductType: sanitizedOtherProductType,
           fulfillmentType,
@@ -565,8 +577,8 @@ router.post('/', authenticate, requireSeller, async (req: Request, res: Response
               nameAr: v.nameAr || `متغير ${idx + 1}`,
               nameEn: v.nameEn || v.nameAr || `Variant ${idx + 1}`,
               sku: v.sku || null,
-              price: parseFloat(v.price),
-              compareAtPrice: v.compareAtPrice ? parseFloat(v.compareAtPrice) : null,
+              price: parseNonNegativeMoney(v.price, 'Variant price'),
+              compareAtPrice: v.compareAtPrice ? parseNonNegativeMoney(v.compareAtPrice, 'Variant compare-at price') : null,
               stockQuantity: parseInt(v.stockQuantity || v.stock || '0', 10),
               image: v.image || null,
             })),
@@ -659,6 +671,17 @@ router.put('/:id', authenticate, requireSeller, async (req: Request, res: Respon
       otherProductType,
     } = req.body;
 
+    if (price !== undefined) parseNonNegativeMoney(price, 'Product price');
+    if (compareAtPrice !== undefined && compareAtPrice !== null && compareAtPrice !== '') {
+      parseNonNegativeMoney(compareAtPrice, 'Compare-at price');
+    }
+    for (const variant of Array.isArray(variants) ? variants : []) {
+      if (variant.price !== undefined && variant.price !== '') parseNonNegativeMoney(variant.price, 'Variant price');
+      if (variant.compareAtPrice !== undefined && variant.compareAtPrice !== null && variant.compareAtPrice !== '') {
+        parseNonNegativeMoney(variant.compareAtPrice, 'Variant compare-at price');
+      }
+    }
+
     const updateData: any = {};
     if (categoryId !== undefined || otherProductType !== undefined) {
       const catId = categoryId !== undefined ? String(categoryId) : existing.categoryId;
@@ -717,8 +740,8 @@ router.put('/:id', authenticate, requireSeller, async (req: Request, res: Respon
     if (brandId !== undefined) updateData.brandId = brandId ? String(brandId) : null;
     if (sku !== undefined) updateData.sku = sku ? String(sku) : null;
     if (barcode !== undefined) updateData.barcode = barcode ? String(barcode) : null;
-    if (price !== undefined) updateData.price = parseFloat(String(price));
-    if (compareAtPrice !== undefined) updateData.compareAtPrice = compareAtPrice ? parseFloat(String(compareAtPrice)) : null;
+    if (price !== undefined) updateData.price = parseNonNegativeMoney(price, 'Product price');
+    if (compareAtPrice !== undefined) updateData.compareAtPrice = compareAtPrice ? parseNonNegativeMoney(compareAtPrice, 'Compare-at price') : null;
     if (weight !== undefined) updateData.weight = weight ? parseFloat(String(weight)) : null;
     if (req.body.lengthCm !== undefined) updateData.lengthCm = req.body.lengthCm ? parseFloat(String(req.body.lengthCm)) : null;
     if (req.body.widthCm !== undefined) updateData.widthCm = req.body.widthCm ? parseFloat(String(req.body.widthCm)) : null;
@@ -789,8 +812,8 @@ router.put('/:id', authenticate, requireSeller, async (req: Request, res: Respon
               nameAr: v.nameAr || `متغير ${index + 1}`,
               nameEn: v.nameEn || v.nameAr || `Variant ${index + 1}`,
               sku: v.sku || `${updated.sku || 'SKU'}-V${index + 1}-${Date.now().toString().slice(-4)}`,
-              price: v.price !== undefined && v.price !== '' ? parseFloat(v.price) : updated.price,
-              compareAtPrice: v.compareAtPrice ? parseFloat(v.compareAtPrice) : null,
+              price: v.price !== undefined && v.price !== '' ? parseNonNegativeMoney(v.price, 'Variant price') : updated.price,
+              compareAtPrice: v.compareAtPrice ? parseNonNegativeMoney(v.compareAtPrice, 'Variant compare-at price') : null,
               stockQuantity: parseInt(v.stockQuantity || v.stock || '0', 10) || 0,
               image: v.image || null,
             })),

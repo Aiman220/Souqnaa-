@@ -121,6 +121,7 @@ export class ShippingPromotionCalculationEngine {
       originalShippingAmount: context.delivery.originalShippingAmount,
       promotion,
       sellerDeliveries: context.delivery.sellerDeliveries,
+      mandatorySpecialCharges: context.delivery.mandatorySpecialCharges,
     });
 
     return {

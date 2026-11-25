@@ -4,6 +4,7 @@ import { authenticate } from '../../middleware/auth.middleware';
 import { requireSeller } from '../../middleware/rbac.middleware';
 import { ResponseUtil } from '../../utils/response.util';
 import { AppError } from '../../middleware/error.middleware';
+import { parseNonNegativeMoney } from '../../utils/non-negative-money.util';
 import { flashSaleService } from './flash-sale.service';
 import { SocketService } from '../../services/websocket/socket.service';
 import { FlashSaleStatus, FlashSaleSubmissionStatus } from '@prisma/client';
@@ -171,11 +172,13 @@ router.post('/:id/submissions', async (req: Request, res: Response, next: NextFu
       throw new AppError('Product ID, proposed price, and proposed stock are required', 400);
     }
 
+    const parsedProposedPrice = parseNonNegativeMoney(actualPrice, 'Proposed price');
+
     const submission = await flashSaleService.submitProduct(sellerId, {
       campaignId,
       productId: String(productId),
       variantId: variantId ? String(variantId) : undefined,
-      proposedPrice: parseFloat(String(actualPrice)),
+      proposedPrice: parsedProposedPrice,
       proposedStock: parseInt(String(actualStock), 10),
       proposedPurchaseLimit: actualLimit ? parseInt(String(actualLimit), 10) : 1,
       notes: actualNotes ? String(actualNotes) : undefined,
@@ -206,10 +209,12 @@ router.patch('/submissions/:id', async (req: Request, res: Response, next: NextF
       throw new AppError('Only pending submissions can be modified', 400);
     }
 
+    if (proposedPrice !== undefined) parseNonNegativeMoney(proposedPrice, 'Proposed price');
+
     const updated = await prisma.flashSaleSellerSubmission.update({
       where: { id: submissionId },
       data: {
-        proposedPrice: proposedPrice !== undefined ? parseFloat(String(proposedPrice)) : undefined,
+        proposedPrice: proposedPrice !== undefined ? parseNonNegativeMoney(proposedPrice, 'Proposed price') : undefined,
         proposedStock: proposedStock !== undefined ? parseInt(String(proposedStock), 10) : undefined,
         proposedPurchaseLimit: proposedPurchaseLimit !== undefined ? parseInt(String(proposedPurchaseLimit), 10) : undefined,
         notes: notes !== undefined ? String(notes) : undefined,

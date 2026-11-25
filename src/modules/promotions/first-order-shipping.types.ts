@@ -50,6 +50,8 @@ export interface FirstOrderEligibilityInput {
   deliveryZoneId?: string | null;
   deliveryZoneName?: string | null;
   sellerIds?: string[];
+  isHeavyDelivery?: boolean;
+  mandatorySpecialCharges?: number;
   ipAddress?: string;
   userAgent?: string;
   deviceId?: string;

@@ -4,6 +4,7 @@ import { authenticate } from '../../middleware/auth.middleware';
 import { requireAdmin } from '../../middleware/rbac.middleware';
 import { ResponseUtil } from '../../utils/response.util';
 import { AppError } from '../../middleware/error.middleware';
+import { parseNonNegativeMoney } from '../../utils/non-negative-money.util';
 import { flashSaleService } from './flash-sale.service';
 import { FlashSaleStatus, FlashSaleDiscountType, FlashSaleItemStatus } from '@prisma/client';
 
@@ -255,8 +256,9 @@ router.post('/:id/items', async (req: Request, res: Response, next: NextFunction
     if (!seller) throw new AppError('Seller not found', 404);
 
     const price = flashPrice !== undefined
-      ? parseFloat(String(flashPrice))
-      : (discountPrice !== undefined ? parseFloat(String(discountPrice)) : product.price * 0.8);
+      ? parseNonNegativeMoney(flashPrice, 'Flash-sale price')
+      : (discountPrice !== undefined ? parseNonNegativeMoney(discountPrice, 'Discount price') : product.price * 0.8);
+    if (discountValue !== undefined) parseNonNegativeMoney(discountValue, 'Discount value');
     const stock = allocatedStock !== undefined ? parseInt(String(allocatedStock), 10) : 10;
     const limit = perCustomerLimit !== undefined ? parseInt(String(perCustomerLimit), 10) : 2;
 
