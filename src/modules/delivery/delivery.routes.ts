@@ -300,10 +300,10 @@ router.post('/quote', authenticate, async (req: Request, res: Response, next: Ne
     const productMap = new Map(fetchedProducts.map((p) => [p.id, p]));
 
     const enrichedSellerOrders = sellerOrders.map((so: any) => {
-      const customMethod = so.deliveryMethod || rawSellerMethodOverrides[so.sellerId];
+      const customMethod = so.deliveryMethod || rawSellerMethodOverrides[so.sellerId] || (so.storeId ? rawSellerMethodOverrides[so.storeId] : undefined);
       const isSellerExpress = typeof so.isExpress === 'boolean'
         ? so.isExpress
-        : (customMethod?.toLowerCase() === 'express' || isExpress);
+        : (customMethod?.toLowerCase() === 'express' || customMethod?.toLowerCase() === 'inter_governorate_express' || isExpress);
 
       let isSellerDigital = Boolean(so.isDigital);
       let heavyItems = so.heavyItems;
