@@ -133,7 +133,7 @@ test('SOUQNA Delivery Pricing & Calculation Engine Full Audit Suite', async (t) 
     assert.ok(vehicleMatch.matchedVehicle);
     assert.ok(vehicleMatch.tripsCount >= 2, `Expected at least 2 trips for 60 tons payload, got ${vehicleMatch.tripsCount}`);
 
-    const pricing = heavyDeliveryService.calculateHeavyPricing(massCargo, vehicleMatch, {
+    const pricing = await heavyDeliveryService.calculateHeavyPricing(massCargo, vehicleMatch, {
       distanceKm: 20.0,
       isInterGovernorate: false,
     });

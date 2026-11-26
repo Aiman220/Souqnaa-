@@ -584,7 +584,14 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
     const deliveryMethodCodeMap = new Map(
       activeDeliveryMethods.map((m) => [m.code.toLowerCase(), m])
     );
-    const checkoutDeliveryMethodCode = String(deliveryMethodCode || (isExpress ? 'express' : 'standard')).toLowerCase();
+    const normalizeMethodCode = (code: string): string => {
+      const c = code.trim().toLowerCase();
+      if (c === 'inter_governorate_standard') return 'intercity_transport';
+      if (c === 'inter_governorate_express') return 'express';
+      return c;
+    };
+
+    const checkoutDeliveryMethodCode = normalizeMethodCode(String(deliveryMethodCode || (isExpress ? 'express' : 'standard')));
     const defaultDeliveryMethod = deliveryMethodCodeMap.get(checkoutDeliveryMethodCode)
       || deliveryMethodCodeMap.get('standard')
       || activeDeliveryMethods[0]
@@ -596,9 +603,12 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
       : {};
     const resolvedSellerDeliveryMethods = new Map<string, typeof defaultDeliveryMethod>();
     for (const sellerId of sellerGroups.keys()) {
-      const customCode = rawSellerMethodOverrides[sellerId];
+      const items = sellerGroups.get(sellerId) || [];
+      const storeId = items[0]?.product?.storeId || '';
+      const customCode = rawSellerMethodOverrides[sellerId] || (storeId ? rawSellerMethodOverrides[storeId] : undefined);
       if (customCode && typeof customCode === 'string') {
-        const validatedMethod = deliveryMethodCodeMap.get(customCode.trim().toLowerCase());
+        const normCode = normalizeMethodCode(customCode);
+        const validatedMethod = deliveryMethodCodeMap.get(normCode) || deliveryMethodCodeMap.get(customCode.trim().toLowerCase());
         if (validatedMethod) {
           resolvedSellerDeliveryMethods.set(sellerId, validatedMethod);
           continue;
@@ -618,8 +628,12 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
     const sellerOrdersInput = Array.from(sellerGroups.keys()).map((sellerId) => {
       const items = sellerGroups.get(sellerId) || [];
       const storeId = items[0]?.product?.storeId || '';
+      const customCode = rawSellerMethodOverrides[sellerId] || (storeId ? rawSellerMethodOverrides[storeId] : undefined);
+      const effectiveMethodCode = customCode
+        ? normalizeMethodCode(customCode)
+        : (resolvedSellerDeliveryMethods.get(sellerId)?.code || checkoutDeliveryMethodCode);
       const resolvedMethod = resolvedSellerDeliveryMethods.get(sellerId) || defaultDeliveryMethod;
-      const isSellerExpress = resolvedMethod?.code?.toLowerCase() === 'express';
+      const isSellerExpress = effectiveMethodCode.toLowerCase() === 'express';
 
       const heavyItems = items.map((it: any) => ({
         productId: it.product?.id,
@@ -656,7 +670,7 @@ router.post('/', checkoutLimiter, async (req: Request, res: Response, next: Next
       return {
         sellerId,
         storeId,
-        deliveryMethod: resolvedMethod?.code || (isExpress ? 'express' : 'standard'),
+        deliveryMethod: effectiveMethodCode,
         isExpress: isSellerExpress,
         isDigital: !sellerHasPhysical,
         heavyItems,

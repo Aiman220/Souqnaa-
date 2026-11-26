@@ -370,7 +370,7 @@ export class DeliveryQuoteService {
     const isCityDiscoveryEnabled = await RemoteConfigService.getInstance().isFeatureActive('city_based_product_discovery');
 
     const customerAreaMatch = supportedAreasService.isAddressSupported(address);
-    let destinationAreaId = customerAreaMatch.area?.canonicalId || requestedDestAreaId;
+    let destinationAreaId = requestedDestAreaId || customerAreaMatch.area?.canonicalId;
 
     if (!destinationAreaId) {
       if (address.latitude && address.longitude) {
@@ -400,7 +400,8 @@ export class DeliveryQuoteService {
     if (destinationAreaId) {
       const explicitArea = STRICTLY_SUPPORTED_AREAS.find((a: any) => a.canonicalId === destinationAreaId);
       if (explicitArea) {
-        if (!address.latitude || !address.longitude) {
+        // If destination area is explicitly requested or differs from the address's native area, use destination coordinates
+        if (!address.latitude || !address.longitude || (requestedDestAreaId && requestedDestAreaId !== customerAreaMatch.area?.canonicalId) || (customerAreaMatch.area && customerAreaMatch.area.canonicalId !== destinationAreaId)) {
           customerLat = explicitArea.centerLat;
           customerLng = explicitArea.centerLng;
         }

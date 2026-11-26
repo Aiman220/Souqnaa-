@@ -174,7 +174,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 const _distanceCache = new Map<string, DistanceCacheEntry>();
 const DISTANCE_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour coordinate distance cache
 
-function buildCacheKey(
+export function buildCacheKey(
   sellerLat: number, sellerLng: number,
   customerLat: number, customerLng: number,
   isExpress: boolean, pricingVersion: string,
@@ -184,8 +184,10 @@ function buildCacheKey(
   extraSellerFee: number = 0,
   weightKg: number = 0,
   discountAmount: number = 0,
+  originAreaId: string = '',
+  itemsFingerprint: string = '',
 ): string {
-  return `${sellerLat.toFixed(4)},${sellerLng.toFixed(4)}|${customerLat.toFixed(4)},${customerLng.toFixed(4)}|express=${isExpress}|slotFee=${slotFee}|m=${methodCode}|dest=${destAreaId}|extraSellerFee=${extraSellerFee}|w=${weightKg}|disc=${discountAmount}|v=${pricingVersion}`;
+  return `${sellerLat.toFixed(4)},${sellerLng.toFixed(4)}|${customerLat.toFixed(4)},${customerLng.toFixed(4)}|orig=${originAreaId}|dest=${destAreaId}|m=${methodCode}|express=${isExpress}|slotFee=${slotFee}|extraSellerFee=${extraSellerFee}|w=${weightKg}|disc=${discountAmount}|items=${itemsFingerprint}|v=${pricingVersion}`;
 }
 
 function getCached(key: string): DeliveryQuoteResult | null {
@@ -207,6 +209,7 @@ function setCached(key: string, result: DeliveryQuoteResult): void {
 // ──────────────────────────────────────────────────────────────────────────────
 
 export class DeliveryFeeService {
+  public buildCacheKey = buildCacheKey;
   private _zonesCache: { data: any[]; expiresAt: number } | null = null;
 
   /**
@@ -350,6 +353,23 @@ export class DeliveryFeeService {
       discountFundedBy,
     } = options;
 
+    // 1.1 Inter-Governorate Route Check
+    let originAreaId = options.originAreaId;
+    let destAreaId = options.destinationAreaId;
+
+    if (!originAreaId) {
+      const match = supportedAreasService.findSupportedAreaByCoordinates(sellerLat, sellerLng, 60.0);
+      originAreaId = match.area?.canonicalId;
+    }
+    if (!destAreaId) {
+      const match = supportedAreasService.findSupportedAreaByCoordinates(customerLat, customerLng, 60.0);
+      destAreaId = match.area?.canonicalId;
+    }
+
+    const itemsFingerprint = options.heavyItems && options.heavyItems.length > 0
+      ? options.heavyItems.map((it) => `${it.productId || ''}:${it.quantity || 1}:${it.weightKg || ''}:${it.lengthCm || ''}x${it.widthCm || ''}x${it.heightCm || ''}:${it.sellingUnit || ''}`).join(';')
+      : '';
+
     const pricingVersion = getPricingVersion();
     const cacheKey = buildCacheKey(
       sellerLat,
@@ -360,10 +380,12 @@ export class DeliveryFeeService {
       pricingVersion,
       slotFee,
       options.deliveryMethodCode || '',
-      options.destinationAreaId || '',
+      destAreaId || '',
       extraSellerFee,
       weightKg,
       discountAmount,
+      originAreaId || '',
+      itemsFingerprint,
     );
 
     // Check cache (§30)
@@ -406,19 +428,6 @@ export class DeliveryFeeService {
       };
     }
 
-    // 1.1 Inter-Governorate Route Check
-    let originAreaId = options.originAreaId;
-    let destAreaId = options.destinationAreaId;
-
-    if (!originAreaId) {
-      const match = supportedAreasService.findSupportedAreaByCoordinates(sellerLat, sellerLng, 60.0);
-      originAreaId = match.area?.canonicalId;
-    }
-    if (!destAreaId) {
-      const match = supportedAreasService.findSupportedAreaByCoordinates(customerLat, customerLng, 60.0);
-      destAreaId = match.area?.canonicalId;
-    }
-
     const isDifferentAreas = Boolean(originAreaId && destAreaId && originAreaId !== destAreaId);
 
     // 1.2 Product-Driven Shipment Partitioning & Heavy Cargo Logistics Evaluation (§2 - §6)
@@ -433,14 +442,30 @@ export class DeliveryFeeService {
       if (partition.hasMixedShipments && partition.heavyItems.length > 0 && partition.standardItems.length > 0) {
         // Mixed Cart Detected: Calculate each shipment independently!
         // 1. Heavy sub-shipment
+        let mixedRouteObj: any = null;
+        let mixedDistanceKm = distanceKm;
+        if (isDifferentAreas && originAreaId && destAreaId) {
+          mixedRouteObj = await interGovernorateRouteService.resolveRoute(originAreaId, destAreaId);
+          if (mixedRouteObj) {
+            const roadInfo = await interGovernorateRouteService.getRoadDistance(
+              { lat: sellerLat, lng: sellerLng },
+              { lat: customerLat, lng: customerLng },
+              mixedRouteObj.roadDistanceKm,
+            );
+            mixedDistanceKm = roadInfo.roadDistanceKm;
+          }
+        }
+
         const heavyCargo = heavyDeliveryService.analyzeShipmentCargo(partition.heavyItems);
         const vehicleMatch = await heavyDeliveryService.matchVehicle(heavyCargo);
-        const heavyPricing = heavyDeliveryService.calculateHeavyPricing(heavyCargo, vehicleMatch, {
-          distanceKm,
+        const heavyPricing = await heavyDeliveryService.calculateHeavyPricing(heavyCargo, vehicleMatch, {
+          distanceKm: mixedDistanceKm,
           isInterGovernorate: isDifferentAreas,
           originGovernorate: originAreaId,
           destinationGovernorate: destAreaId,
+          route: mixedRouteObj,
           accessSurcharge: options.accessSurcharge,
+          extraSellerFee: 0,
           discountAmount: 0,
         });
 
@@ -575,13 +600,29 @@ export class DeliveryFeeService {
     const cargo = heavyDeliveryService.analyzeShipmentCargo(itemsToAnalyze);
 
     if (cargo.isHeavyOrBulky) {
+      let routeObj: any = null;
+      let effectiveDistanceKm = distanceKm;
+      if (isDifferentAreas && originAreaId && destAreaId) {
+        routeObj = await interGovernorateRouteService.resolveRoute(originAreaId, destAreaId);
+        if (routeObj) {
+          const roadInfo = await interGovernorateRouteService.getRoadDistance(
+            { lat: sellerLat, lng: sellerLng },
+            { lat: customerLat, lng: customerLng },
+            routeObj.roadDistanceKm,
+          );
+          effectiveDistanceKm = roadInfo.roadDistanceKm;
+        }
+      }
+
       const vehicleMatch = await heavyDeliveryService.matchVehicle(cargo);
-      const heavyPricing = heavyDeliveryService.calculateHeavyPricing(cargo, vehicleMatch, {
-        distanceKm,
+      const heavyPricing = await heavyDeliveryService.calculateHeavyPricing(cargo, vehicleMatch, {
+        distanceKm: effectiveDistanceKm,
         isInterGovernorate: isDifferentAreas,
         originGovernorate: originAreaId,
         destinationGovernorate: destAreaId,
+        route: routeObj,
         accessSurcharge: options.accessSurcharge,
+        extraSellerFee,
         discountAmount,
       });
 
@@ -619,17 +660,17 @@ export class DeliveryFeeService {
       };
 
       const heavyResult: DeliveryQuoteResult = {
-        deliveryAvailable: true,
+        deliveryAvailable: !heavyPricing.requiresManualQuote,
         reason: heavyPricing.requiresManualQuote ? (heavyPricing.quoteReason || 'MANUAL_QUOTE_REQUIRED') : undefined,
-        distanceKm,
-        durationMinutes: isDifferentAreas ? Math.round((distanceKm / 45) * 60) + 15 : durationMinutes,
+        distanceKm: effectiveDistanceKm,
+        durationMinutes: isDifferentAreas ? Math.round((effectiveDistanceKm / 45) * 60) + 15 : durationMinutes,
         zoneId: null,
         zoneName: isDifferentAreas
           ? `${originAreaId || 'المصدر'} إلى ${destAreaId || 'الوجهة'} (${heavyPricing.vehicleNameAr})`
           : heavyPricing.vehicleNameAr,
         baseFee: heavyPricing.baseFee,
         distanceCharge: heavyPricing.distanceCharge,
-        extraSellerFee: 0,
+        extraSellerFee: extraSellerFee || 0,
         weightFee: heavyPricing.specialHandlingFee,
         slotFee,
         expressFee: 0,
@@ -640,6 +681,8 @@ export class DeliveryFeeService {
         pricingVersion,
         isExpress: false,
         isInterGovernorate: isDifferentAreas,
+        routeId: isDifferentAreas ? (heavyPricing.routeId || routeObj?.id) : undefined,
+        routeKey: isDifferentAreas && originAreaId && destAreaId ? `${originAreaId}:${destAreaId}` : undefined,
         deliveryMode: heavyPricing.deliveryMode,
         quoteType: heavyPricing.quoteType,
         quoteReason: heavyPricing.quoteReason,
@@ -1039,6 +1082,13 @@ export class DeliveryFeeService {
     }
     this._settingsCache = { data: settings, expiresAt: Date.now() + 60_000 };
     return settings!;
+  }
+
+  clearCache(): void {
+    _quoteCache.clear();
+    _distanceCache.clear();
+    this._zonesCache = null;
+    this._settingsCache = null;
   }
 }
 

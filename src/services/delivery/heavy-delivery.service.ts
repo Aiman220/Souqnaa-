@@ -13,6 +13,7 @@
  */
 
 import { prisma } from '../../database/prisma';
+import { interGovernorateRouteService } from './inter-governorate-route.service';
 
 export type DeliveryCalculationMode =
   | 'STANDARD_PARCEL'
@@ -177,6 +178,11 @@ export interface HeavyPricingCalculationOptions {
   isInterGovernorate: boolean;
   originGovernorate?: string;
   destinationGovernorate?: string;
+  originAreaId?: string;
+  destinationAreaId?: string;
+  route?: any;
+  roadDistanceKm?: number;
+  extraSellerFee?: number;
   accessSurcharge?: number;
   discountAmount?: number;
   allowSpecialChargesDiscount?: boolean;
@@ -187,6 +193,8 @@ export interface HeavyPricingBreakdown {
   quoteType: QuoteType;
   quoteReason?: string;
   requiresManualQuote: boolean;
+  routeId?: string;
+  roadDistanceKm?: number;
   vehicleCode: string;
   vehicleNameAr: string;
   vehicleNameEn: string;
@@ -1020,17 +1028,24 @@ export class HeavyDeliveryService {
    *  + Route Surcharges
    *  - Delivery Discount
    */
-  calculateHeavyPricing(
+  async calculateHeavyPricing(
     cargo: CargoAnalysisResult,
     vehicleMatch: VehicleMatchResult,
     options: HeavyPricingCalculationOptions,
-  ): HeavyPricingBreakdown {
+  ): Promise<HeavyPricingBreakdown> {
     const {
       distanceKm,
       isInterGovernorate,
+      originGovernorate,
+      destinationGovernorate,
+      originAreaId,
+      destinationAreaId,
       accessSurcharge = 0.0,
+      extraSellerFee = 0.0,
       discountAmount = 0.0,
     } = options;
+    const originLookup = originAreaId || originGovernorate;
+    const destLookup = destinationAreaId || destinationGovernorate;
 
     const currency = 'YER';
 
@@ -1077,12 +1092,65 @@ export class HeavyDeliveryService {
 
     let baseFee = 0;
     let distanceCharge = 0;
+    let effectiveRoadDistanceKm = distanceKm;
+    let resolvedRouteId: string | undefined;
 
     if (isInterGovernorate) {
-      // Dedicated vehicle hire rate for inter-governorate transport (§5 of prompt)
-      // Multiplied by number of trips/vehicles required
-      baseFee = Math.round(vehicle.interGovernorateHireRate * tripsCount);
-      distanceCharge = 0; // Included in dedicated inter-city hire rate
+      // Look up configured route using stable canonical area IDs
+      let route = options.route;
+      if (!route && originLookup && destLookup) {
+        route = await interGovernorateRouteService.resolveRoute(originLookup, destLookup);
+      }
+
+      // Requirement C: Never silently use a global default heavy price when a required route configuration is missing.
+      // If no valid route or price exists, return a clear unavailable/unconfigured result.
+      if (originLookup && destLookup && !route) {
+        return {
+          deliveryMode: 'MANUAL_QUOTE',
+          quoteType: 'MANUAL_QUOTE_REQUIRED',
+          quoteReason: 'ROUTE_NOT_SERVICEABLE',
+          requiresManualQuote: true,
+          vehicleCode: vehicle.code,
+          vehicleNameAr: vehicle.nameAr,
+          vehicleNameEn: vehicle.nameEn,
+          palletCount: cargo.palletCount,
+          tripsCount,
+          baseFee: 0,
+          distanceCharge: 0,
+          loadingFee: 0,
+          unloadingFee: 0,
+          forkliftFee: 0,
+          craneFee: 0,
+          specialHandlingFee: 0,
+          accessSurcharge: 0,
+          mandatorySpecialHandlingFee: 0,
+          deliveryDiscount: 0,
+          finalDeliveryFee: 0,
+          currency,
+          explanationAr: `خط الشحن ونقل البضائع الثقيلة بين ${originGovernorate} و ${destinationGovernorate} غير متاح حالياً أو بانتظار اعتماد الإدارة.`,
+        };
+      }
+
+      resolvedRouteId = route?.id;
+      const routeBase = route?.baseFee ?? 0;
+      const routeRatePerKm = route?.ratePerKm ?? 0;
+      effectiveRoadDistanceKm = options.roadDistanceKm || distanceKm || route?.roadDistanceKm || 0;
+
+      // Base transport cost per trip: Route Base + Vehicle Base Mobilization
+      baseFee = Math.round((routeBase + vehicle.baseFee) * tripsCount);
+
+      // Distance transport cost: Road Distance * (Vehicle Per-Km Rate + Route Per-Km Rate) * tripsCount
+      distanceCharge = Math.round(effectiveRoadDistanceKm * (vehicle.ratePerKm + routeRatePerKm) * tripsCount);
+
+      // Enforce route minimum floor if configured
+      if (route?.minDeliveryFee != null && (baseFee + distanceCharge) < route.minDeliveryFee) {
+        distanceCharge = Math.max(0, route.minDeliveryFee - baseFee);
+      }
+      // Note: route.maxDeliveryFee applies to standard parcel courier, NOT dedicated heavy freight trucks.
+      // Heavy freight is capped only if a specific heavyMaxDeliveryFee is configured.
+      if (route?.heavyMaxDeliveryFee != null && (baseFee + distanceCharge) > route.heavyMaxDeliveryFee) {
+        distanceCharge = Math.max(0, route.heavyMaxDeliveryFee - baseFee);
+      }
     } else {
       // Local city transport: base charge covers up to 10 km
       baseFee = Math.round(vehicle.baseFee * tripsCount);
@@ -1119,8 +1187,8 @@ export class HeavyDeliveryService {
       specialHandlingFee +
       accessSurcharge;
 
-    // Compute subtotal before discounts
-    const subtotal = baseFee + distanceCharge + mandatorySpecialHandlingFee;
+    // Compute subtotal before discounts (including any seller additional charges)
+    const subtotal = baseFee + distanceCharge + mandatorySpecialHandlingFee + extraSellerFee;
 
     // Protect mandatory special transport & equipment fees from standard free shipping promotions
     const discountableTransportPortion = (options.allowSpecialChargesDiscount === true)
@@ -1132,13 +1200,15 @@ export class HeavyDeliveryService {
 
     const tripSuffix = tripsCount > 1 ? ` (${tripsCount} رحلات / مركبات)` : '';
     const explanationAr = isInterGovernorate
-      ? `نقل مخصص بين المحافظات بواسطة ${vehicle.nameAr}${tripSuffix} (أجرة المركبة: ${baseFee.toLocaleString()} ر.ي + خدمات التحميل والمناولة)`
+      ? `نقل مخصص بين المحافظات بواسطة ${vehicle.nameAr}${tripSuffix} (المسافة: ${Math.round(effectiveRoadDistanceKm)} كم، أجرة النقل: ${(baseFee + distanceCharge).toLocaleString()} ر.ي + خدمات التحميل والمناولة)`
       : `توصيل بضائع ثقيلة داخل المحافظة بواسطة ${vehicle.nameAr}${tripSuffix} (أجرة الأساس: ${baseFee.toLocaleString()} ر.ي + رسوم المسافة والمناولة)`;
 
     return {
       deliveryMode: mode,
       quoteType: 'AUTOMATIC_QUOTE',
       requiresManualQuote: false,
+      routeId: resolvedRouteId,
+      roadDistanceKm: effectiveRoadDistanceKm,
       vehicleCode: vehicle.code,
       vehicleNameAr: vehicle.nameAr,
       vehicleNameEn: vehicle.nameEn,
