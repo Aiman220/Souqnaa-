@@ -245,6 +245,36 @@ router.post('/quote', authenticate, async (req: Request, res: Response, next: Ne
         })
       : null;
 
+    // Authoritative Server-Side Digital Classification (§4)
+    if (userCart && userCart.items.length > 0) {
+      const hasPhysicalInCart = userCart.items.some(
+        (it) => it.product?.fulfillmentType !== 'DIGITAL'
+      );
+      if (!hasPhysicalInCart) {
+        isDigitalOnly = true;
+      }
+    }
+
+    if (req.body.productId) {
+      const prod = await prisma.product.findUnique({
+        where: { id: String(req.body.productId) },
+        select: { fulfillmentType: true },
+      });
+      if (prod?.fulfillmentType === 'DIGITAL') {
+        isDigitalOnly = true;
+      }
+    }
+
+    if (!isDigitalOnly) {
+      if (!customerAddressId) throw new AppError('customerAddressId is required', 400);
+
+      // Validate address belongs to the requesting user
+      const address = await prisma.address.findFirst({
+        where: { id: customerAddressId, userId: req.user!.userId },
+      });
+      if (!address) throw new AppError('Address not found or does not belong to you', 404);
+    }
+
     // Collect explicit product IDs from sellerOrders and buyNowItem
     const explicitProductIds: string[] = [];
     for (const so of sellerOrders) {
@@ -269,46 +299,11 @@ router.post('/quote', authenticate, async (req: Request, res: Response, next: Ne
       : [];
     const productMap = new Map(fetchedProducts.map((p) => [p.id, p]));
 
-    // Authoritative Server-Side Digital Classification (§4)
-    if (fetchedProducts.length > 0) {
-      const allFetchedDigital = fetchedProducts.every((p) => p.fulfillmentType === 'DIGITAL');
-      if (allFetchedDigital) {
-        isDigitalOnly = true;
-      }
-    } else if (userCart && userCart.items.length > 0) {
-      const hasPhysicalInCart = userCart.items.some(
-        (it) => it.product?.fulfillmentType !== 'DIGITAL'
-      );
-      if (!hasPhysicalInCart) {
-        isDigitalOnly = true;
-      }
-    }
-
-    if (req.body.productId) {
-      const prod = productMap.get(String(req.body.productId)) || await prisma.product.findUnique({
-        where: { id: String(req.body.productId) },
-        select: { fulfillmentType: true },
-      });
-      if (prod?.fulfillmentType === 'DIGITAL') {
-        isDigitalOnly = true;
-      }
-    }
-
-    if (!isDigitalOnly) {
-      if (!customerAddressId) throw new AppError('customerAddressId is required', 400);
-
-      // Validate address belongs to the requesting user
-      const address = await prisma.address.findFirst({
-        where: { id: customerAddressId, userId: req.user!.userId },
-      });
-      if (!address) throw new AppError('Address not found or does not belong to you', 404);
-    }
-
     const enrichedSellerOrders = sellerOrders.map((so: any) => {
-      const customMethod = so.deliveryMethod || rawSellerMethodOverrides[so.sellerId] || (so.storeId ? rawSellerMethodOverrides[so.storeId] : undefined);
+      const customMethod = so.deliveryMethod || rawSellerMethodOverrides[so.sellerId];
       const isSellerExpress = typeof so.isExpress === 'boolean'
         ? so.isExpress
-        : (customMethod?.toLowerCase() === 'express' || customMethod?.toLowerCase() === 'inter_governorate_express' || isExpress);
+        : (customMethod?.toLowerCase() === 'express' || isExpress);
 
       let isSellerDigital = Boolean(so.isDigital);
       let heavyItems = so.heavyItems;
