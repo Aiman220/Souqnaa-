@@ -142,6 +142,8 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
         variantNameEn: item.variant?.nameEn || null,
         variantSku: item.variant?.sku || null,
         image: primaryImage,
+        sellingUnit: item.product?.sellingUnit || 'PIECE',
+        unitDimensionsJson: item.product?.unitDimensionsJson || null,
         unitPrice,
         itemTotal,
         isFlashSale: isFlashSaleActive,

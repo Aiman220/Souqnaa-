@@ -21,6 +21,7 @@ import {
   type DeliverySubShipment,
   type ShipmentPartitionResult,
 } from './heavy-delivery.service';
+import type { FreightBillingUnitCode } from '../units/unit-conversion.service';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
@@ -45,6 +46,8 @@ export interface DeliveryFeeOptions {
   heavyItems?: HeavyProductShippingInput[];
   accessSurcharge?: number;
   isDigital?: boolean;
+  freightBillingUnit?: FreightBillingUnitCode;
+  freightRatePerUnit?: number;
 }
 
 export interface SellerDeliveryQuote {
@@ -101,6 +104,8 @@ export interface DeliveryQuoteResult {
   isHeavyDelivery?: boolean;
   hasMixedShipments?: boolean;
   subShipments?: DeliverySubShipment[];
+  freightBillingUnit?: FreightBillingUnitCode;
+  freightBillingCharge?: number;
 
   // Inter-Governorate route & pricing details
   isInterGovernorate?: boolean;
@@ -467,6 +472,8 @@ export class DeliveryFeeService {
           accessSurcharge: options.accessSurcharge,
           extraSellerFee: 0,
           discountAmount: 0,
+          freightBillingUnit: options.freightBillingUnit,
+          freightRatePerUnit: options.freightRatePerUnit,
         });
 
         // 2. Standard sub-shipment (call calculateFee for standard items)
@@ -577,6 +584,8 @@ export class DeliveryFeeService {
           cargoDescriptionAr: `${standardSubShipment.titleAr} + ${heavySubShipment.titleAr}`,
           hasMixedShipments: true,
           subShipments: [standardSubShipment, heavySubShipment],
+          freightBillingUnit: heavyPricing.freightBillingUnit,
+          freightBillingCharge: heavyPricing.freightBillingCharge,
         };
 
         setCached(cacheKey, mixedResult);
@@ -624,6 +633,8 @@ export class DeliveryFeeService {
         accessSurcharge: options.accessSurcharge,
         extraSellerFee,
         discountAmount,
+        freightBillingUnit: options.freightBillingUnit,
+        freightRatePerUnit: options.freightRatePerUnit,
       });
 
       const heavySubShipment: DeliverySubShipment = {
@@ -712,6 +723,8 @@ export class DeliveryFeeService {
         ],
         hasMixedShipments: false,
         subShipments: [heavySubShipment],
+        freightBillingUnit: heavyPricing.freightBillingUnit,
+        freightBillingCharge: heavyPricing.freightBillingCharge,
       };
 
       setCached(cacheKey, heavyResult);

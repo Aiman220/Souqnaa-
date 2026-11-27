@@ -14,6 +14,12 @@
 
 import { prisma } from '../../database/prisma';
 import { interGovernorateRouteService } from './inter-governorate-route.service';
+import {
+  UnitConversionService,
+  type ProductPackagingSpec,
+  type ProductSellingUnitCode,
+  type FreightBillingUnitCode,
+} from '../units/unit-conversion.service';
 
 export type DeliveryCalculationMode =
   | 'STANDARD_PARCEL'
@@ -83,6 +89,8 @@ export interface ItemDeliveryEligibility {
   calculatedWeightKg: number;
   calculatedVolumeCbm: number;
   palletCount: number;
+  slabCount?: number;
+  sellingUnit?: ProductSellingUnitCode;
   dimensions: { lengthCm: number; widthCm: number; heightCm: number };
   requiresForklift: boolean;
   requiresCrane: boolean;
@@ -150,6 +158,7 @@ export interface CargoAnalysisResult {
   chargeableWeightKg: number;
   totalVolumeCbm: number;
   palletCount: number;
+  slabCount: number;
   maxItemLengthCm: number;
   maxItemWidthCm: number;
   maxItemHeightCm: number;
@@ -186,6 +195,8 @@ export interface HeavyPricingCalculationOptions {
   accessSurcharge?: number;
   discountAmount?: number;
   allowSpecialChargesDiscount?: boolean;
+  freightBillingUnit?: FreightBillingUnitCode;
+  freightRatePerUnit?: number;
 }
 
 export interface HeavyPricingBreakdown {
@@ -213,6 +224,8 @@ export interface HeavyPricingBreakdown {
   finalDeliveryFee: number;
   currency: string;
   explanationAr: string;
+  freightBillingUnit?: FreightBillingUnitCode;
+  freightBillingCharge?: number;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -420,6 +433,8 @@ export class HeavyDeliveryService {
         calculatedWeightKg: 0,
         calculatedVolumeCbm: 0,
         palletCount: 0,
+        slabCount: 0,
+        sellingUnit: 'PIECE',
         dimensions: { lengthCm: 0, widthCm: 0, heightCm: 0 },
         requiresForklift: false,
         requiresCrane: false,
@@ -430,9 +445,9 @@ export class HeavyDeliveryService {
     }
 
     const qty = Math.max(1, item.quantity || 1);
-    const unit = (item.sellingUnit || 'PIECE').toUpperCase();
+    const normalizedUnit = UnitConversionService.normalizeSellingUnit(item.sellingUnit);
 
-    let meta: any = {};
+    let meta: ProductPackagingSpec = {};
     if (item.unitDimensionsJson) {
       try {
         meta = typeof item.unitDimensionsJson === 'string'
@@ -446,6 +461,7 @@ export class HeavyDeliveryService {
     let calculatedWeightKg = 0;
     let calculatedVolumeCbm = 0;
     let palletCount = item.palletCount || 0;
+    let slabCount = 0;
     let lengthCm = item.lengthCm || item.packageLengthCm || 0;
     let widthCm = item.widthCm || item.packageWidthCm || 0;
     let heightCm = item.heightCm || item.packageHeightCm || 0;
@@ -469,78 +485,134 @@ export class HeavyDeliveryService {
       prodName.includes('سيراميك') ||
       prodName.includes('بورسلان');
 
-    // 2. Selling Unit Calculations
-    if (unit === 'SQM' || (unit === 'BOX' && (meta.sqmPerBox || meta.boxWeightKg || meta.boxesPerPallet || isTileItem))) {
-      const sqmPerBox = meta.sqmPerBox ? parseFloat(meta.sqmPerBox) : 1.44;
-      const boxWeight = meta.boxWeightKg ? parseFloat(meta.boxWeightKg) : (item.packageWeightKg || item.weightKg || 25.0);
-      const boxesPerPallet = meta.boxesPerPallet ? parseInt(meta.boxesPerPallet, 10) : 48;
+    const isMarbleItem =
+      catSlug.includes('marble') ||
+      catSlug.includes('granite') ||
+      catAr.includes('رخام') ||
+      catAr.includes('جرانيت') ||
+      prodName.includes('رخام') ||
+      prodName.includes('جرانيت');
 
-      let totalBoxes = 0;
-      if (unit === 'SQM') {
-        totalBoxes = Math.ceil(qty / sqmPerBox);
-      } else {
-        totalBoxes = qty;
-      }
+    const isMachineryItem =
+      catSlug.includes('machin') ||
+      catSlug.includes('industrial') ||
+      catSlug.includes('generator') ||
+      catSlug.includes('solar') ||
+      catAr.includes('معدات') ||
+      catAr.includes('ماكينة') ||
+      catAr.includes('مولد') ||
+      catAr.includes('طاقة شمسية') ||
+      prodName.includes('ماكينة') ||
+      prodName.includes('مولد') ||
+      prodName.includes('معدة صناعية');
 
-      calculatedWeightKg = totalBoxes * boxWeight;
+    const isFabricItem =
+      catSlug.includes('fabric') ||
+      catSlug.includes('textile') ||
+      catAr.includes('أقمشة') ||
+      catAr.includes('قماش') ||
+      prodName.includes('قماش');
 
-      if (totalBoxes >= boxesPerPallet || palletCount > 0) {
-        palletCount = Math.max(palletCount, Math.ceil(totalBoxes / boxesPerPallet));
-        calculatedVolumeCbm = palletCount * 0.96; // 120 x 80 x 100 cm standard pallet
-        lengthCm = Math.max(lengthCm, 120);
-        widthCm = Math.max(widthCm, 80);
-        heightCm = Math.max(heightCm, 100);
-      } else {
-        lengthCm = Math.max(lengthCm, 60);
-        widthCm = Math.max(widthCm, 60);
-        heightCm = Math.max(heightCm, Math.min(100, totalBoxes * 8));
-        calculatedVolumeCbm = (lengthCm * widthCm * heightCm) / 1_000_000;
-      }
+    // 2. Selling Unit & Category Packaging Calculations
+    if (normalizedUnit === 'SLAB' || item.packagingType === 'SLAB_RACK_A_FRAME' || isMarbleItem) {
+      const marbleResult = UnitConversionService.calculateMarblePackaging({
+        requestedQuantity: qty,
+        sellingUnit: normalizedUnit,
+        spec: meta,
+        verifiedSlabWeightKg: item.weightKg && item.weightKg > 0 ? item.weightKg : undefined,
+      });
 
-      if (calculatedWeightKg >= 2000 || palletCount >= 2) {
-        requiresForklift = true;
-      }
-      isFragile = true;
-    } else if (unit === 'SLAB' || item.packagingType === 'SLAB_RACK_A_FRAME') {
-      const slabThicknessMm = meta.slabThicknessMm ? parseFloat(meta.slabThicknessMm) : 20.0;
-      const slabLengthCm = meta.slabLengthCm ? parseFloat(meta.slabLengthCm) : (lengthCm || 260.0);
-      const slabWidthCm = meta.slabWidthCm ? parseFloat(meta.slabWidthCm) : (widthCm || 160.0);
-      lengthCm = slabLengthCm;
-      widthCm = slabWidthCm;
+      slabCount = marbleResult.slabCount;
+      calculatedWeightKg = marbleResult.grossWeightKg;
+      calculatedVolumeCbm = marbleResult.volumeCbm;
+      palletCount = Math.max(palletCount, marbleResult.racksCount);
+      lengthCm = meta.slabLengthCm || lengthCm || 260.0;
+      widthCm = meta.slabWidthCm || widthCm || 160.0;
       heightCm = Math.max(heightCm, 100.0);
-
-      const slabVolumeM3 = (slabLengthCm / 100) * (slabWidthCm / 100) * (slabThicknessMm / 1000);
-      const densityKgPerM3 = 2700.0;
-      const singleSlabWeightKg = (item.weightKg && item.weightKg > 0)
-        ? item.weightKg
-        : (slabVolumeM3 * densityKgPerM3);
-
-      const rackWeight = 75.0; // A-frame rack weight
-      calculatedWeightKg = (singleSlabWeightKg * qty) + rackWeight;
-      calculatedVolumeCbm = Math.max(0.8, (slabLengthCm / 100) * (1.0) * (slabWidthCm / 100));
-
       requiresSpecialVehicle = true;
       specialVehicleType = 'FLATBED';
       requiresCrane = true;
       requiresForklift = true;
       isOversized = true;
       isFragile = true;
-    } else if (unit === 'TON') {
-      calculatedWeightKg = qty * 1000.0;
-      requiresForklift = true;
-      if (calculatedWeightKg >= 5000) {
-        requiresCrane = true;
+    } else if (normalizedUnit === 'SQM' || normalizedUnit === 'BOX' || isTileItem || normalizedUnit === 'PALLET') {
+      const tileResult = UnitConversionService.calculateTilePackaging({
+        requestedQuantity: qty,
+        sellingUnit: normalizedUnit,
+        spec: meta,
+        defaultSqmPerBox: meta.sqmPerBox ?? 1.44,
+        defaultBoxWeightKg: item.packageWeightKg || item.weightKg || 25.0,
+      });
+
+      calculatedWeightKg = tileResult.grossWeightKg;
+      calculatedVolumeCbm = tileResult.volumeCbm;
+      palletCount = Math.max(palletCount, tileResult.palletCount);
+      if (palletCount > 0 && tileResult.totalBoxes >= (meta.boxesPerPallet || 10)) {
+        lengthCm = Math.max(lengthCm, 120);
+        widthCm = Math.max(widthCm, 80);
+        heightCm = Math.max(heightCm, 100);
+      } else {
+        lengthCm = Math.max(lengthCm, 60);
+        widthCm = Math.max(widthCm, 60);
+        heightCm = Math.max(heightCm, Math.min(100, Math.ceil(tileResult.totalBoxes) * 8));
       }
+      if (tileResult.requiresForklift) {
+        requiresForklift = true;
+      }
+      isFragile = true;
+    } else if (isMachineryItem || normalizedUnit === 'METRIC_TON') {
+      const unitWeight = item.weightKg || (normalizedUnit === 'METRIC_TON' ? 1000.0 : 500.0);
+      const machineryResult = UnitConversionService.calculateMachineryPackaging({
+        requestedQuantity: qty,
+        unitWeightKg: unitWeight,
+        lengthCm: lengthCm > 0 ? lengthCm : 120.0,
+        widthCm: widthCm > 0 ? widthCm : 100.0,
+        heightCm: heightCm > 0 ? heightCm : 120.0,
+        transportFrameWeightKg: meta.packagingWeightKg || meta.rackWeightKg || 0.0,
+      });
+
+      calculatedWeightKg = machineryResult.totalWeightKg;
+      calculatedVolumeCbm = machineryResult.totalVolumeCbm;
+      if (machineryResult.requiresForklift) requiresForklift = true;
+      if (machineryResult.requiresCrane) requiresCrane = true;
+      if (machineryResult.requiresFlatbedOrLowbed) {
+        requiresSpecialVehicle = true;
+        specialVehicleType = machineryResult.totalWeightKg >= 30000 ? 'LOWBED' : 'FLATBED';
+      }
+    } else if (isFabricItem || normalizedUnit === 'LINEAR_METER' || normalizedUnit === 'ROLL') {
+      const fabricResult = UnitConversionService.calculateFabricPackaging({
+        requestedQuantity: qty,
+        sellingUnit: normalizedUnit,
+        spec: meta,
+      });
+
+      calculatedWeightKg = fabricResult.totalWeightKg;
+      calculatedVolumeCbm = fabricResult.totalVolumeCbm;
+      lengthCm = Math.max(lengthCm, meta.fabricWidthCm || 150.0);
+      widthCm = Math.max(widthCm, meta.rollDiameterCm || 25.0);
+      heightCm = Math.max(heightCm, (meta.rollDiameterCm || 25.0) * Math.min(fabricResult.totalRolls, 4));
+    } else if (normalizedUnit === 'KG') {
+      calculatedWeightKg = qty;
       if (lengthCm > 0 && widthCm > 0 && heightCm > 0) {
-        calculatedVolumeCbm = ((lengthCm * widthCm * heightCm) / 1_000_000) * qty;
+        calculatedVolumeCbm = UnitConversionService.calculateVolumeFromCm(lengthCm, widthCm, heightCm) * qty;
+      }
+    } else if (normalizedUnit === 'G') {
+      calculatedWeightKg = UnitConversionService.convertWeight(qty, 'G', 'KG');
+      if (lengthCm > 0 && widthCm > 0 && heightCm > 0) {
+        calculatedVolumeCbm = UnitConversionService.calculateVolumeFromCm(lengthCm, widthCm, heightCm) * qty;
       }
     } else {
       // General item
       const singleWeight = item.weightKg || item.packageWeightKg || 0;
       calculatedWeightKg = singleWeight * qty;
       if (lengthCm > 0 && widthCm > 0 && heightCm > 0) {
-        calculatedVolumeCbm = ((lengthCm * widthCm * heightCm) / 1_000_000) * qty;
+        calculatedVolumeCbm = UnitConversionService.calculateVolumeFromCm(lengthCm, widthCm, heightCm) * qty;
       }
+    }
+
+    // Hazardous cargo & battery checks
+    if (meta.isHazmatCargo || (meta.batteryWeightKg && meta.batteryWeightKg > 50)) {
+      requiresSpecialVehicle = true;
     }
 
     // 3. Safe validation / seller confirmation workflow for missing attributes
@@ -553,7 +625,7 @@ export class HeavyDeliveryService {
       ['PALLET', 'SLAB_RACK_A_FRAME', 'WOODEN_CRATE'].includes(item.packagingType || '') ||
       Boolean(item.loadingRequirements) ||
       Boolean(item.unloadingRequirements) ||
-      ['TON', 'SLAB'].includes(unit) ||
+      ['METRIC_TON', 'SLAB'].includes(normalizedUnit) ||
       catSlug.includes('machin') || catSlug.includes('industrial') ||
       catAr.includes('معدات') || catAr.includes('ماكينات') ||
       prodName.includes('ماكينة') || prodName.includes('معدة صناعية') ||
@@ -573,6 +645,8 @@ export class HeavyDeliveryService {
         calculatedWeightKg: 0,
         calculatedVolumeCbm: 0,
         palletCount: 0,
+        slabCount: 0,
+        sellingUnit: normalizedUnit,
         dimensions: { lengthCm: 0, widthCm: 0, heightCm: 0 },
         requiresForklift: Boolean(item.requiresForklift),
         requiresCrane: Boolean(item.requiresCrane),
@@ -614,6 +688,8 @@ export class HeavyDeliveryService {
         calculatedWeightKg: Math.round(calculatedWeightKg * 100) / 100,
         calculatedVolumeCbm: Math.round(calculatedVolumeCbm * 1000) / 1000,
         palletCount: 0,
+        slabCount: 0,
+        sellingUnit: normalizedUnit,
         dimensions: { lengthCm, widthCm, heightCm },
         requiresForklift: false,
         requiresCrane: false,
@@ -625,13 +701,13 @@ export class HeavyDeliveryService {
 
     // 5. Heavy Cargo Classification
     let cargoClassification: HeavyCargoClassification = 'GENERAL_BULKY';
-    if (unit === 'SLAB' || item.packagingType === 'SLAB_RACK_A_FRAME' || catSlug.includes('marble') || catAr.includes('رخام') || prodName.includes('رخام')) {
+    if (normalizedUnit === 'SLAB' || item.packagingType === 'SLAB_RACK_A_FRAME' || catSlug.includes('marble') || catAr.includes('رخام') || prodName.includes('رخام')) {
       cargoClassification = 'MARBLE_GRANITE';
-    } else if (unit === 'SQM' || (unit === 'BOX' && (palletCount > 0 || calculatedWeightKg >= 50)) || catSlug.includes('tile') || catAr.includes('بلاط') || catAr.includes('سيراميك') || prodName.includes('سيراميك') || prodName.includes('بورسلان')) {
+    } else if (normalizedUnit === 'SQM' || (normalizedUnit === 'BOX' && (palletCount > 0 || calculatedWeightKg >= 50)) || catSlug.includes('tile') || catAr.includes('بلاط') || catAr.includes('سيراميك') || prodName.includes('سيراميك') || prodName.includes('بورسلان')) {
       cargoClassification = 'TILES_PORCELAIN';
     } else if (catSlug.includes('furniture') || catAr.includes('أثاث') || catAr.includes('كنب') || catAr.includes('غرف نوم') || catAr.includes('خزائن') || prodName.includes('كنب') || prodName.includes('دولاب') || prodName.includes('طاولة') || prodName.includes('سرير')) {
       cargoClassification = 'OVERSIZED_FURNITURE';
-    } else if (unit === 'TON' || catSlug.includes('construction') || catSlug.includes('cement') || catSlug.includes('steel') || catAr.includes('أسمنت') || catAr.includes('حديد') || catAr.includes('بلك') || catAr.includes('طوب') || catAr.includes('مواد بناء') || prodName.includes('أسمنت') || prodName.includes('حديد تسليح') || prodName.includes('بلك')) {
+    } else if (normalizedUnit === 'METRIC_TON' || catSlug.includes('construction') || catSlug.includes('cement') || catSlug.includes('steel') || catAr.includes('أسمنت') || catAr.includes('حديد') || catAr.includes('بلك') || catAr.includes('طوب') || catAr.includes('مواد بناء') || prodName.includes('أسمنت') || prodName.includes('حديد تسليح') || prodName.includes('بلك')) {
       cargoClassification = 'CONSTRUCTION_MATERIALS';
     } else if (catSlug.includes('generator') || catSlug.includes('solar') || catAr.includes('طاقة شمسية') || catAr.includes('مولد') || prodName.includes('مولد')) {
       cargoClassification = 'GENERATORS_SOLAR';
@@ -670,6 +746,8 @@ export class HeavyDeliveryService {
       calculatedWeightKg: Math.round(calculatedWeightKg * 100) / 100,
       calculatedVolumeCbm: Math.round(calculatedVolumeCbm * 1000) / 1000,
       palletCount,
+      slabCount,
+      sellingUnit: normalizedUnit,
       dimensions: { lengthCm, widthCm, heightCm },
       requiresForklift,
       requiresCrane,
@@ -745,6 +823,7 @@ export class HeavyDeliveryService {
         chargeableWeightKg: 0,
         totalVolumeCbm: 0,
         palletCount: 0,
+        slabCount: 0,
         maxItemLengthCm: 0,
         maxItemWidthCm: 0,
         maxItemHeightCm: 0,
@@ -761,6 +840,7 @@ export class HeavyDeliveryService {
     let totalWeight = 0;
     let totalVolumeCbm = 0;
     let totalPalletCount = 0;
+    let totalSlabCount = 0;
     let maxLength = 0;
     let maxWidth = 0;
     let maxHeight = 0;
@@ -803,6 +883,7 @@ export class HeavyDeliveryService {
       totalWeight += eligibility.calculatedWeightKg;
       totalVolumeCbm += eligibility.calculatedVolumeCbm;
       totalPalletCount += eligibility.palletCount;
+      totalSlabCount += eligibility.slabCount || 0;
 
       maxLength = Math.max(maxLength, eligibility.dimensions.lengthCm);
       maxWidth = Math.max(maxWidth, eligibility.dimensions.widthCm);
@@ -893,6 +974,7 @@ export class HeavyDeliveryService {
       chargeableWeightKg,
       totalVolumeCbm: Math.round(totalVolumeCbm * 100) / 100,
       palletCount: totalPalletCount,
+      slabCount: totalSlabCount,
       maxItemLengthCm: maxLength,
       maxItemWidthCm: maxWidth,
       maxItemHeightCm: maxHeight,
@@ -1160,6 +1242,42 @@ export class HeavyDeliveryService {
       }
     }
 
+    // Configurable Freight Billing Unit Support (Section D):
+    // Dedicated vehicle hire (PER_VEHICLE_TRIP) and route-based pricing (PER_ROUTE)
+    // remain the primary method for dedicated heavy and oversized shipments.
+    // If an alternative unit pricing basis is configured, calculate freight using UnitConversionService
+    // and prevent duplicate vehicle-hire or route charges.
+    const billingUnit: FreightBillingUnitCode = options.freightBillingUnit || (isInterGovernorate ? 'PER_ROUTE' : 'PER_VEHICLE_TRIP');
+    let freightBillingCharge: number | undefined;
+
+    if (billingUnit !== 'PER_VEHICLE_TRIP' && billingUnit !== 'PER_ROUTE') {
+      const unitRate = options.freightRatePerUnit ?? (
+        billingUnit === 'PER_TONNE' ? 15000.0 :
+        billingUnit === 'PER_KG' ? 25.0 :
+        billingUnit === 'PER_CBM' ? 10000.0 :
+        billingUnit === 'PER_PALLET' ? 5000.0 :
+        billingUnit === 'PER_SLAB' ? 7000.0 :
+        billingUnit === 'PER_KILOMETER' ? (vehicle.ratePerKm || 500.0) :
+        35000.0 // PER_SHIPMENT
+      );
+
+      freightBillingCharge = UnitConversionService.calculateFreightByBillingUnit({
+        billingUnit,
+        unitRate,
+        tripsCount,
+        roadDistanceKm: effectiveRoadDistanceKm,
+        actualWeightKg: cargo.totalActualWeightKg,
+        chargeableWeightKg: cargo.chargeableWeightKg,
+        volumeCbm: cargo.totalVolumeCbm,
+        palletCount: cargo.palletCount,
+        slabCount: cargo.slabCount,
+      });
+
+      // Prevent duplicate charging: freight billing unit replaces dedicated vehicle base fee & distance fee
+      baseFee = Math.round(freightBillingCharge);
+      distanceCharge = 0;
+    }
+
     // Labor loading & unloading charges
     let loadingFee = Math.round(vehicle.loadingFee * tripsCount);
     let unloadingFee = Math.round(vehicle.unloadingFee * tripsCount);
@@ -1227,6 +1345,8 @@ export class HeavyDeliveryService {
       finalDeliveryFee,
       currency,
       explanationAr,
+      freightBillingUnit: billingUnit,
+      freightBillingCharge,
     };
   }
 }

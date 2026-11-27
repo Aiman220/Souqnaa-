@@ -160,6 +160,8 @@ export function formatProductForClient(product: any, campaignPresentation?: any)
     digitalInstructions: product.digitalInstructions || null,
     campaignPresentation: presentation,
     campaign: presentation, // Backward-compatible alias matching Section 10 & 57
+    sellingUnit: product.sellingUnit || 'PIECE',
+    unitDimensionsJson: product.unitDimensionsJson || null,
     attributes: Array.isArray(product.attributes)
       ? product.attributes.map((a: any) => ({
           id: a.id || undefined,

@@ -26,6 +26,9 @@ export interface InvoiceData {
     items: Array<{
       productName: string;
       quantity: number;
+      sellingUnit?: string;
+      sellingUnitLabel?: string;
+      unitDimensionsJson?: string | null;
       unitPrice: number;
       totalPrice: number;
     }>;
@@ -42,6 +45,28 @@ export interface InvoiceData {
     currency: string;
   };
 }
+
+const SELLING_UNIT_LABELS_AR: Record<string, string> = {
+  PIECE: 'قطعة',
+  BOX: 'صندوق',
+  SET: 'طقم',
+  PACK: 'عبوة',
+  PAIR: 'زوج',
+  KG: 'كيلوجرام',
+  G: 'جرام',
+  METRIC_TON: 'طن متري',
+  LITER: 'لتر',
+  ML: 'ملليلتر',
+  METER: 'متر',
+  LINEAR_METER: 'متر طولي',
+  SQM: 'متر مربع',
+  CBM: 'متر مكعب',
+  ROLL: 'لفة',
+  SLAB: 'لوح',
+  PALLET: 'منصة تحميل',
+  SHEET: 'شريحة',
+  OTHER: 'وحدة أخرى',
+};
 
 export class OrderInvoiceService {
   /**
@@ -64,12 +89,20 @@ export class OrderInvoiceService {
       sellerOrderNumber: so.sellerOrderNumber || `${order.orderNumber}-S${String(so.subOrderIndex || 1).padStart(2, '0')}`,
       storeName: so.seller?.stores?.[0]?.name || 'متجر سوقناا',
       subtotal: so.subtotal || 0,
-      items: (so.items || []).map((it: any) => ({
-        productName: it.productNameAr || it.productNameEn || it.product?.nameAr || 'منتج',
-        quantity: it.quantity || 1,
-        unitPrice: it.unitPrice || 0,
-        totalPrice: it.totalPrice || (it.unitPrice * it.quantity) || 0,
-      })),
+      items: (so.items || []).map((it: any) => {
+        const rawUnit = it.sellingUnit || it.product?.sellingUnit || 'PIECE';
+        const unitCode = String(rawUnit).trim().toUpperCase();
+        const unitLabel = SELLING_UNIT_LABELS_AR[unitCode] || unitCode;
+        return {
+          productName: it.productNameAr || it.productNameEn || it.product?.nameAr || 'منتج',
+          quantity: it.quantity || 1,
+          sellingUnit: unitCode,
+          sellingUnitLabel: unitLabel,
+          unitDimensionsJson: it.unitDimensionsJson || it.product?.unitDimensionsJson || null,
+          unitPrice: it.unitPrice || 0,
+          totalPrice: it.totalPrice || (it.unitPrice * it.quantity) || 0,
+        };
+      }),
     }));
 
     return {
@@ -208,8 +241,8 @@ export class OrderInvoiceService {
                 (item) => `
               <tr>
                 <td>${item.productName}</td>
-                <td>${item.quantity}</td>
-                <td>${item.unitPrice} ${data.summary.currency}</td>
+                <td>${item.quantity}${item.sellingUnitLabel && item.sellingUnitLabel !== 'قطعة' ? ` <span style="color:#64748b; font-size:11px;">(${item.sellingUnitLabel})</span>` : ''}</td>
+                <td>${item.unitPrice} ${data.summary.currency}${item.sellingUnitLabel && item.sellingUnitLabel !== 'قطعة' ? ` / ${item.sellingUnitLabel}` : ''}</td>
                 <td><strong>${item.totalPrice} ${data.summary.currency}</strong></td>
               </tr>
             `

@@ -16,6 +16,10 @@ export interface PrintItem {
   unitPrice: number;
   discount: number;
   totalPrice: number;
+  sellingUnit?: string;
+  sellingUnitLabel?: string;
+  unitDimensionsJson?: string;
+  packagingSubtitle?: string;
 }
 
 export interface PrintDocumentData {
@@ -42,6 +46,8 @@ export interface PrintDocumentData {
   deliveryMethodBadgeAr?: string;
   deliveryMethodDescriptionAr?: string;
   deliveryPricingNoteAr?: string;
+  freightBillingUnit?: string;
+  freightBillingUnitLabel?: string;
   interGovernorateRouteKey?: string;
   carrierName?: string;
   trackingNumber?: string;
@@ -106,7 +112,89 @@ export interface PrintDocumentData {
 
 let cachedSouqnaLogoBase64: string = '';
 
+const SELLING_UNIT_LABELS_AR: Record<string, string> = {
+  PIECE: 'قطعة',
+  BOX: 'صندوق',
+  SET: 'طقم',
+  PACK: 'عبوة',
+  PAIR: 'زوج',
+  KILOGRAM: 'كجم',
+  KG: 'كجم',
+  GRAM: 'جرام',
+  G: 'جرام',
+  METRIC_TON: 'طن متري',
+  LITER: 'لتر',
+  MILLILITER: 'مل',
+  ML: 'مل',
+  METER: 'متر',
+  LINEAR_METER: 'متر طولي',
+  SQUARE_METER: 'م²',
+  SQM: 'م²',
+  CUBIC_METER: 'م³',
+  CBM: 'م³',
+  ROLL: 'لفة',
+  SLAB: 'لوح',
+  PALLET: 'طبلية',
+  SHEET: 'شريحة',
+  OTHER: 'وحدة أخرى',
+};
+
+const FREIGHT_BILLING_LABELS_AR: Record<string, string> = {
+  PER_VEHICLE_TRIP: 'رحلة شاحنة مخصصة',
+  PER_ROUTE: 'مسار محدد بين المحافظات',
+  PER_TONNE: 'حسب الطن متري',
+  PER_KG: 'حسب الكيلوجرام',
+  PER_CBM: 'حسب الحجم (متر مكعب)',
+  PER_PALLET: 'حسب عدد الطبالي',
+  PER_SLAB: 'حسب عدد الألواح',
+  PER_SHIPMENT: 'لكل شحنة موحدة',
+  PER_KILOMETER: 'حسب الكيلومتر المقطوع',
+};
+
 export class SellerOrderPrintService {
+  /**
+   * Resolves subtle packaging metadata string for display on invoices and packing slips.
+   */
+  public static resolvePackagingSubtitle(it: any): string | undefined {
+    const raw = it.unitDimensionsJson || it.product?.unitDimensionsJson || it.packagingSpec;
+    if (!raw) return undefined;
+    let spec: any = null;
+    if (typeof raw === 'object') {
+      spec = raw;
+    } else if (typeof raw === 'string' && raw.trim().startsWith('{')) {
+      try {
+        spec = JSON.parse(raw);
+      } catch (_) {}
+    }
+    if (!spec) return undefined;
+    const parts: string[] = [];
+    if (spec.sqmPerBox != null && !isNaN(Number(spec.sqmPerBox))) {
+      const sqm = spec.sqmPerBox;
+      const pcs = spec.piecesPerBox;
+      if (pcs != null) {
+        parts.push(`${sqm} م² / كرتونة (${pcs} قطع)`);
+      } else {
+        parts.push(`${sqm} م² / كرتونة`);
+      }
+    } else if (spec.piecesPerBox != null) {
+      parts.push(`${spec.piecesPerBox} قطعة / كرتونة`);
+    }
+
+    if (spec.slabThicknessMm != null && !isNaN(Number(spec.slabThicknessMm))) {
+      parts.push(`السماكة: ${spec.slabThicknessMm} مم`);
+    }
+
+    if (spec.metersPerRoll != null && !isNaN(Number(spec.metersPerRoll))) {
+      parts.push(`${spec.metersPerRoll} م / لفة`);
+    }
+
+    if (spec.fabricWidthCm != null && !isNaN(Number(spec.fabricWidthCm))) {
+      parts.push(`العرض: ${spec.fabricWidthCm} سم`);
+    }
+
+    if (parts.length === 0) return undefined;
+    return `التعبئة: ${parts.join(' • ')}`;
+  }
   /**
    * Formats numbers to localized string with 2 decimals and standard thousands grouping
    */
@@ -376,6 +464,15 @@ export class SellerOrderPrintService {
       methodName.includes('Heavy')
     );
 
+    const rawFreightBillingUnit = String(
+      snapshot?.freightBillingUnit ||
+      snapshot?.pricingBasis ||
+      (sellerOrder as any).deliveryQuoteSnapshot?.freightBillingUnit ||
+      (parentOrder as any).deliveryQuoteSnapshot?.freightBillingUnit ||
+      ''
+    ).trim().toUpperCase();
+    const freightBillingUnitLabel = rawFreightBillingUnit ? (FREIGHT_BILLING_LABELS_AR[rawFreightBillingUnit] || rawFreightBillingUnit) : undefined;
+
     // 0. Heavy & Bulky Delivery
     if (isHeavyDelivery) {
       let vName = snapshot?.vehicleClassNameAr || '';
@@ -404,6 +501,7 @@ export class SellerOrderPrintService {
       if (pallets > 0) descParts.push(`الطبالي: ${pallets}`);
       if (reqForklift) descParts.push('رافعة شوكية');
       if (reqCrane) descParts.push('ونش بوم');
+      if (freightBillingUnitLabel) descParts.push(`أساس الشحن: ${freightBillingUnitLabel}`);
       deliveryMethodDescriptionAr = descParts.join(' • ');
       deliveryPricingNoteAr = snapshot?.requiresManualQuote ? 'تسعير مخصص بعد المعاينة' : 'تسعير تلقائي معتمد';
     }
@@ -578,6 +676,10 @@ export class SellerOrderPrintService {
       const unitPrice = Number(it.unitPrice ?? it.price ?? 0);
       const discount = Number(it.discountAmount ?? it.discount ?? 0);
       const totalPrice = Number(it.totalPrice ?? (qty * unitPrice - discount));
+      const rawUnit = it.sellingUnit || it.product?.sellingUnit || 'PIECE';
+      const unitCode = String(rawUnit).trim().toUpperCase();
+      const unitLabel = SELLING_UNIT_LABELS_AR[unitCode] || unitCode;
+      const packagingSubtitle = SellerOrderPrintService.resolvePackagingSubtitle(it);
 
       return {
         itemNumber: index + 1,
@@ -589,6 +691,10 @@ export class SellerOrderPrintService {
         unitPrice,
         discount,
         totalPrice,
+        sellingUnit: unitCode,
+        sellingUnitLabel: unitLabel,
+        unitDimensionsJson: typeof it.unitDimensionsJson === 'string' ? it.unitDimensionsJson : (it.product?.unitDimensionsJson ? JSON.stringify(it.product.unitDimensionsJson) : undefined),
+        packagingSubtitle,
       };
     });
 
@@ -725,6 +831,8 @@ export class SellerOrderPrintService {
       deliveryMethodBadgeAr: deliveryMethodBadgeAr || undefined,
       deliveryMethodDescriptionAr: deliveryMethodDescriptionAr || undefined,
       deliveryPricingNoteAr: deliveryPricingNoteAr || undefined,
+      freightBillingUnit: rawFreightBillingUnit || undefined,
+      freightBillingUnitLabel: freightBillingUnitLabel || undefined,
       interGovernorateRouteKey: interGovernorateRouteKey || undefined,
       carrierName: carrierName || undefined,
       trackingNumber: trackingNumber || undefined,
@@ -1446,6 +1554,7 @@ export class SellerOrderPrintService {
         <div class="meta-row"><span class="lbl">حالة معالجة الطلب:</span><span class="val" style="color:${d.orderStatusColor}; font-weight:800;">${d.orderStatusAr}</span></div>
         <div class="meta-row"><span class="lbl">طريقة التوصيل والشحن:</span><span class="val" style="font-weight:800;">${d.deliveryMethodAr}</span></div>
         ${d.deliveryMethodDescriptionAr ? `<div class="meta-row"><span class="lbl">مواصفات الشحن والتفريغ:</span><span class="val" style="font-weight:700; color:#0f766e;">${d.deliveryMethodDescriptionAr}</span></div>` : ''}
+        ${d.freightBillingUnitLabel ? `<div class="meta-row"><span class="lbl">أساس احتساب الشحن:</span><span class="val" style="font-weight:700; color:#0f766e;">${d.freightBillingUnitLabel}</span></div>` : ''}
         ${d.interGovernorateRouteKey ? `<div class="meta-row"><span class="lbl">المسار المعتمد:</span><span class="val" style="font-weight:700; color:#0f766e;">${d.interGovernorateRouteKey}</span></div>` : ''}
         ${d.carrierName ? `<div class="meta-row"><span class="lbl">الناقل اللوجستي:</span><span class="val">${d.carrierName}</span></div>` : ''}
         ${d.trackingNumber ? `<div class="meta-row"><span class="lbl">رقم التتبع:</span><span class="val" dir="ltr" style="font-family:monospace; font-weight:800; color:#ea580c;">${d.trackingNumber}</span></div>` : ''}
@@ -1485,10 +1594,17 @@ export class SellerOrderPrintService {
               <td>
                 <div class="item-title">${it.productName}</div>
                 <div class="item-variant-tag">${it.variant}</div>
+                ${it.packagingSubtitle ? `<div style="font-size: 10.5px; color: #475569; margin-top: 2px;">${it.packagingSubtitle}</div>` : ''}
               </td>
               <td style="text-align: center;"><span class="item-sku-code" dir="ltr" style="display: inline-block;">${it.sku}</span></td>
-              <td class="center"><strong>${it.quantity}</strong></td>
-              <td>${SellerOrderPrintService.formatNumber(it.unitPrice)} ${d.totals.currency}</td>
+              <td class="center">
+                <strong>${it.quantity}</strong>
+                ${it.sellingUnitLabel && it.sellingUnitLabel !== 'قطعة' ? `<div style="font-size: 10px; color: #64748b; font-weight: 600;">${it.sellingUnitLabel}</div>` : ''}
+              </td>
+              <td>
+                ${SellerOrderPrintService.formatNumber(it.unitPrice)} ${d.totals.currency}
+                ${it.sellingUnitLabel && it.sellingUnitLabel !== 'قطعة' ? `<div style="font-size: 9.5px; color: #64748b;">/ ${it.sellingUnitLabel}</div>` : ''}
+              </td>
               <td style="color: #059669; font-weight: 700;">${it.discount > 0 ? `-${SellerOrderPrintService.formatNumber(it.discount)} ${d.totals.currency}` : '0.00'}</td>
               <td class="left">${SellerOrderPrintService.formatNumber(it.totalPrice)} ${d.totals.currency}</td>
             </tr>
@@ -1713,8 +1829,14 @@ export class SellerOrderPrintService {
         .map(
           (it) => `
         <tr>
-          <td>${it.productName}</td>
-          <td class="center">${it.quantity}</td>
+          <td>
+            ${it.productName}
+            ${it.packagingSubtitle ? `<div style="font-size: 9.5px; color: #555;">${it.packagingSubtitle}</div>` : ''}
+          </td>
+          <td class="center">
+            ${it.quantity}
+            ${it.sellingUnitLabel && it.sellingUnitLabel !== 'قطعة' ? `<div style="font-size: 9px; color: #555;">${it.sellingUnitLabel}</div>` : ''}
+          </td>
           <td class="left">${SellerOrderPrintService.formatNumber(it.totalPrice)}</td>
         </tr>
       `
@@ -1735,6 +1857,7 @@ export class SellerOrderPrintService {
   <div class="row tight"><span>حالة الدفع:</span><span class="bold">${d.paymentStatusAr}</span></div>
   <div class="row tight"><span>طريقة التوصيل:</span><span class="bold">${d.deliveryMethodAr}</span></div>
   ${d.deliveryMethodDescriptionAr ? `<div class="row tight"><span>مواصفات الشحن:</span><span class="bold" style="color: #0f766e;">${d.deliveryMethodDescriptionAr}</span></div>` : ''}
+  ${d.freightBillingUnitLabel ? `<div class="row tight"><span>أساس الشحن:</span><span class="bold" style="color: #0f766e;">${d.freightBillingUnitLabel}</span></div>` : ''}
   <div class="row tight"><span>العميل:</span><span>${d.customer.name}</span></div>
   <div class="row tight"><span>الهاتف:</span><span dir="ltr">${d.customer.phone}</span></div>
   <div class="row tight"><span>العنوان:</span><span>${d.customer.deliveryAddress.cityName} - ${d.customer.deliveryAddress.neighborhood || d.customer.deliveryAddress.street || ''}</span></div>
@@ -1876,8 +1999,9 @@ export class SellerOrderPrintService {
           (it) => `
     <div class="item-block">
       <div class="item-name">• ${it.productName}</div>
+      ${it.packagingSubtitle ? `<div style="font-size: 8px; color: #555; padding-right: 6px;">${it.packagingSubtitle}</div>` : ''}
       <div class="item-calc">
-        <span>${it.quantity}x ${SellerOrderPrintService.formatNumber(it.unitPrice)}</span>
+        <span>${it.quantity}${it.sellingUnitLabel && it.sellingUnitLabel !== 'قطعة' ? ' ' + it.sellingUnitLabel : ''} × ${SellerOrderPrintService.formatNumber(it.unitPrice)}</span>
         <span class="bold">${SellerOrderPrintService.formatNumber(it.totalPrice)} ${d.totals.currency}</span>
       </div>
     </div>
@@ -1896,6 +2020,7 @@ export class SellerOrderPrintService {
   <div class="row"><span>الدفع:</span><span>${d.paymentMethodAr}</span></div>
   <div class="row"><span>الحالة:</span><span>${d.paymentStatusAr}</span></div>
   <div class="row"><span>التوصيل:</span><span class="bold">${d.deliveryMethodAr}</span></div>
+  ${d.freightBillingUnitLabel ? `<div class="row"><span>أساس الشحن:</span><span class="bold">${d.freightBillingUnitLabel}</span></div>` : ''}
   <div class="row"><span>العميل:</span><span>${d.customer.name}</span></div>
   <div class="row"><span>الهاتف:</span><span dir="ltr">${d.customer.phone}</span></div>
   ${d.customer.deliveryAddress.plusCode ? `<div class="row"><span>Plus Code:</span><span dir="ltr" class="bold" style="font-family: monospace;">${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
@@ -2118,6 +2243,7 @@ export class SellerOrderPrintService {
         <div>رقم هاتف التواصل: <strong dir="ltr">${d.customer.phone}</strong></div>
         <div style="grid-column: span 2;">طريقة الشحن والتوصيل: <strong style="color: #0284c7;">${d.deliveryMethodAr}</strong></div>
         ${d.deliveryMethodDescriptionAr ? `<div style="grid-column: span 2;">مواصفات الشحن والتفريغ: <strong style="color: #0f766e;">${d.deliveryMethodDescriptionAr}</strong></div>` : ''}
+        ${d.freightBillingUnitLabel ? `<div style="grid-column: span 2;">أساس احتساب الشحن: <strong style="color: #0f766e;">${d.freightBillingUnitLabel}</strong></div>` : ''}
         <div style="grid-column: span 2;">عنوان التوصيل: <strong>${d.customer.deliveryAddress.formatted}</strong></div>
         ${d.customer.deliveryAddress.plusCode ? `<div style="grid-column: span 2;">رمز الموقع الرقمي: <strong dir="ltr" style="font-family: monospace; color: #0284c7;">${d.customer.deliveryAddress.plusCode}</strong></div>` : ''}
         ${d.deliveryNotes ? `
@@ -2149,9 +2275,13 @@ export class SellerOrderPrintService {
               <td>
                 <strong>${it.productName}</strong>
                 <div style="font-size: 11px; color: #0284c7; font-weight: 600;">المواصفات: ${it.variant}</div>
+                ${it.packagingSubtitle ? `<div style="font-size: 10.5px; color: #475569; margin-top: 2px;">${it.packagingSubtitle}</div>` : ''}
               </td>
               <td style="text-align: center;"><code dir="ltr" style="font-family: 'Inter', monospace; font-weight: bold;">${it.sku}</code></td>
-              <td style="text-align: center; font-size: 15px; font-weight: 900; color: #0f172a;">${it.quantity}</td>
+              <td style="text-align: center; font-size: 15px; font-weight: 900; color: #0f172a;">
+                ${it.quantity}
+                ${it.sellingUnitLabel && it.sellingUnitLabel !== 'قطعة' ? `<div style="font-size: 11px; font-weight: 600; color: #64748b;">${it.sellingUnitLabel}</div>` : ''}
+              </td>
               <td style="text-align: center;">
                 <span class="check-box-cell"></span>
               </td>
@@ -2246,6 +2376,7 @@ export class SellerOrderPrintService {
   <div>الهاتف: <span dir="ltr">${d.customer.phone}</span></div>
   <div>العنوان: <span>${d.customer.deliveryAddress.formatted}</span></div>
   <div>طريقة الشحن: <span class="bold">${d.deliveryMethodAr}</span></div>
+  ${d.freightBillingUnitLabel ? `<div>أساس الشحن: <span class="bold">${d.freightBillingUnitLabel}</span></div>` : ''}
   ${d.customer.deliveryAddress.plusCode ? `<div>رمز الموقع: <span class="bold" dir="ltr" style="font-family: monospace; color: #0284c7;">${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
   ${d.deliveryNotes ? `<div>ملاحظات التوصيل: <span class="bold">${d.deliveryNotes}</span></div>` : ''}
   <div class="divider"></div>
@@ -2257,7 +2388,8 @@ export class SellerOrderPrintService {
     <div style="margin-bottom: 6px; padding-bottom: 4px; border-bottom: 0.5px dotted #ccc;">
       <div><span style="display:inline-block; width:10px; height:10px; border:1px solid #475569; border-radius:2px; vertical-align:middle; margin-left:5px;"></span><strong>${it.productName}</strong></div>
       ${it.variant ? `<div style="font-size: 10px; color: #444;">المواصفات: ${it.variant}</div>` : ''}
-      <div style="font-size: 10px; margin-right: 12px;">الكمية: <strong>${it.quantity}</strong> • SKU: <span dir="ltr">${it.sku}</span></div>
+      ${it.packagingSubtitle ? `<div style="font-size: 9.5px; color: #555;">${it.packagingSubtitle}</div>` : ''}
+      <div style="font-size: 10px; margin-right: 12px;">الكمية: <strong>${it.quantity}${it.sellingUnitLabel && it.sellingUnitLabel !== 'قطعة' ? ' ' + it.sellingUnitLabel : ''}</strong> • SKU: <span dir="ltr">${it.sku}</span></div>
     </div>
   `
     )
@@ -2332,6 +2464,7 @@ export class SellerOrderPrintService {
   <div>الهاتف: <span dir="ltr">${d.customer.phone}</span></div>
   <div>العنوان: <span>${d.customer.deliveryAddress.formatted}</span></div>
   <div>الشحن: <span class="bold">${d.deliveryMethodAr}</span></div>
+  ${d.freightBillingUnitLabel ? `<div>أساس الشحن: <span class="bold">${d.freightBillingUnitLabel}</span></div>` : ''}
   ${d.customer.deliveryAddress.plusCode ? `<div>رمز الموقع: <span class="bold" dir="ltr" style="font-family: monospace; color: #0284c7;">${d.customer.deliveryAddress.plusCode}</span></div>` : ''}
   ${d.deliveryNotes ? `<div>ملاحظات: <span class="bold">${d.deliveryNotes}</span></div>` : ''}
   <div class="divider"></div>
@@ -2343,7 +2476,8 @@ export class SellerOrderPrintService {
     <div style="margin-bottom: 5px; padding-bottom: 3px; border-bottom: 0.5px dotted #999;">
       <div><span style="display:inline-block; width:9px; height:9px; border:1px solid #475569; border-radius:2px; vertical-align:middle; margin-left:4px;"></span><strong>${it.productName}</strong></div>
       ${it.variant ? `<div style="font-size: 9px; color: #333;">المواصفات: ${it.variant}</div>` : ''}
-      <div style="font-size: 9px;">الكمية: <strong>${it.quantity}</strong> • SKU: <span dir="ltr">${it.sku}</span></div>
+      ${it.packagingSubtitle ? `<div style="font-size: 8.5px; color: #555;">${it.packagingSubtitle}</div>` : ''}
+      <div style="font-size: 9px;">الكمية: <strong>${it.quantity}${it.sellingUnitLabel && it.sellingUnitLabel !== 'قطعة' ? ' ' + it.sellingUnitLabel : ''}</strong> • SKU: <span dir="ltr">${it.sku}</span></div>
     </div>
   `
     )
@@ -2422,6 +2556,7 @@ export class SellerOrderPrintService {
   <div>التاريخ: <span>${d.orderDateFormattedAr}</span></div>
   <div>حالة الطلب: <span class="bold" style="color: ${d.orderStatusColor};">${d.orderStatusAr}</span></div>
   <div>طريقة التوصيل: <span class="bold">${d.deliveryMethodAr}</span></div>
+  ${d.freightBillingUnitLabel ? `<div>أساس الشحن: <span class="bold">${d.freightBillingUnitLabel}</span></div>` : ''}
   <div>طريقة دفع العميل: <span>${d.paymentMethodAr} — ${d.paymentStatusAr}</span></div>
   <div class="divider"></div>
 
@@ -2536,6 +2671,7 @@ export class SellerOrderPrintService {
   <div>التاريخ: <span>${d.orderDateFormattedAr}</span></div>
   <div>الحالة: <span class="bold">${d.orderStatusAr}</span></div>
   <div>التوصيل: <span class="bold">${d.deliveryMethodAr}</span></div>
+  ${d.freightBillingUnitLabel ? `<div>أساس الشحن: <span class="bold">${d.freightBillingUnitLabel}</span></div>` : ''}
   <div class="divider"></div>
 
   <div class="row">
@@ -2765,6 +2901,7 @@ export class SellerOrderPrintService {
       <div>تاريخ الطلب: <strong>${d.orderDateFormattedAr}</strong></div>
       <div>حالة الطلب: <strong style="color: ${d.orderStatusColor};">${d.orderStatusAr}</strong></div>
       <div>طريقة التوصيل: <strong>${d.deliveryMethodAr}</strong></div>
+      ${d.freightBillingUnitLabel ? `<div>أساس احتساب الشحن: <strong style="color: #0f766e;">${d.freightBillingUnitLabel}</strong></div>` : ''}
       <div>طريقة دفع العميل: <strong>${d.paymentMethodAr}</strong> — ${d.paymentStatusAr}</div>
       <div>حالة استحقاق المحفظة: <strong style="color: ${fin.walletReleaseStatus.includes('مكتمل') ? '#059669' : '#d97706'};">${fin.walletReleaseStatus}</strong></div>
       ${fin.walletReleaseDate ? `<div>موعد تحرير الرصيد المتوقع: <strong>${fin.walletReleaseDate}</strong></div>` : ''}
